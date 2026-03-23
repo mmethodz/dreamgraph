@@ -1,0 +1,92 @@
+[
+  {
+    "id": "book_catalog",
+    "name": "Book Catalog",
+    "description": "Browse and search the book inventory with filters for genre, author, price range, and availability.",
+    "source_repo": "bookstore-web",
+    "source_files": ["src/pages/catalog.tsx", "src/components/BookGrid.tsx", "src/hooks/useBooks.ts"],
+    "tags": ["catalog", "search", "browse"],
+    "status": "active"
+  },
+  {
+    "id": "shopping_cart",
+    "name": "Shopping Cart",
+    "description": "Add books to cart, adjust quantities, apply discount codes, and proceed to checkout.",
+    "source_repo": "bookstore-web",
+    "source_files": ["src/pages/cart.tsx", "src/context/CartContext.tsx"],
+    "tags": ["cart", "checkout", "e-commerce"],
+    "status": "active"
+  },
+  {
+    "id": "order_management",
+    "name": "Order Management",
+    "description": "Process orders through lifecycle: pending -> paid -> shipped -> delivered. Handles cancellations and refunds.",
+    "source_repo": "bookstore-api",
+    "source_files": ["src/routes/orders.ts", "src/services/OrderService.ts", "src/models/Order.ts"],
+    "tags": ["orders", "fulfillment", "lifecycle"],
+    "status": "active"
+  },
+  {
+    "id": "user_auth",
+    "name": "User Authentication",
+    "description": "Email/password signup and login with JWT tokens. Password reset via email. Session management.",
+    "source_repo": "bookstore-api",
+    "source_files": ["src/routes/auth.ts", "src/middleware/auth.ts", "src/services/AuthService.ts"],
+    "tags": ["auth", "security", "jwt"],
+    "status": "active"
+  },
+  {
+    "id": "inventory_tracking",
+    "name": "Inventory Tracking",
+    "description": "Track stock levels per book. Auto-reorder alerts when stock drops below threshold. Warehouse location mapping.",
+    "source_repo": "bookstore-api",
+    "source_files": ["src/services/InventoryService.ts", "src/models/Inventory.ts"],
+    "tags": ["inventory", "stock", "warehouse"],
+    "status": "active"
+  },
+  {
+    "id": "payment_processing",
+    "name": "Payment Processing",
+    "description": "Stripe integration for credit card payments. Handles payment intents, webhooks, refunds, and receipt generation.",
+    "source_repo": "bookstore-api",
+    "source_files": ["src/routes/payments.ts", "src/services/StripeService.ts"],
+    "tags": ["payments", "stripe", "billing"],
+    "status": "active"
+  },
+  {
+    "id": "review_system",
+    "name": "Book Reviews",
+    "description": "Customers can rate books (1-5 stars) and write text reviews. Reviews are moderated before publishing.",
+    "source_repo": "bookstore-api",
+    "source_files": ["src/routes/reviews.ts", "src/models/Review.ts"],
+    "tags": ["reviews", "ratings", "moderation"],
+    "status": "active"
+  },
+  {
+    "id": "recommendation_engine",
+    "name": "Recommendation Engine",
+    "description": "Suggests books based on purchase history, browsing behavior, and collaborative filtering with similar users.",
+    "source_repo": "bookstore-api",
+    "source_files": ["src/services/RecommendationService.ts"],
+    "tags": ["recommendations", "ai", "personalization"],
+    "status": "experimental"
+  },
+  {
+    "id": "admin_dashboard",
+    "name": "Admin Dashboard",
+    "description": "Internal tool for managing books, orders, users, and viewing sales analytics.",
+    "source_repo": "bookstore-web",
+    "source_files": ["src/pages/admin/index.tsx", "src/pages/admin/books.tsx", "src/pages/admin/orders.tsx"],
+    "tags": ["admin", "dashboard", "analytics"],
+    "status": "active"
+  },
+  {
+    "id": "email_notifications",
+    "name": "Email Notifications",
+    "description": "Transactional emails for order confirmation, shipping updates, password reset, and promotional campaigns.",
+    "source_repo": "bookstore-api",
+    "source_files": ["src/services/EmailService.ts", "src/templates/"],
+    "tags": ["email", "notifications", "transactional"],
+    "status": "active"
+  }
+]

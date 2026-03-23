@@ -1,0 +1,47 @@
+[
+  {
+    "id": "checkout_flow",
+    "name": "Checkout Flow",
+    "description": "End-to-end customer checkout from cart to order confirmation.",
+    "trigger": "Customer clicks 'Proceed to Checkout' from cart page",
+    "source_repo": "bookstore-web",
+    "source_files": ["src/pages/checkout.tsx", "src/services/CheckoutService.ts"],
+    "steps": [
+      { "step": 1, "action": "Validate cart contents", "description": "Check stock availability for all items. Remove unavailable items with user notification." },
+      { "step": 2, "action": "Collect shipping address", "description": "Form with address autocomplete. Save to user profile if checked." },
+      { "step": 3, "action": "Apply discount code", "description": "Optional. Validate code exists, not expired, under max_uses. Calculate discount." },
+      { "step": 4, "action": "Create Stripe Payment Intent", "description": "POST /api/payments/create-intent with order total. Returns client_secret." },
+      { "step": 5, "action": "Confirm payment", "description": "Stripe.js confirmCardPayment with client_secret. Handle 3D Secure if required." },
+      { "step": 6, "action": "Create order record", "description": "Insert order + order_items. Decrement book.stock_count atomically." },
+      { "step": 7, "action": "Send confirmation email", "description": "Transactional email with order summary, estimated delivery, and tracking link." },
+      { "step": 8, "action": "Redirect to confirmation page", "description": "Show order number, items purchased, and estimated delivery date." }
+    ]
+  },
+  {
+    "id": "review_moderation",
+    "name": "Review Moderation",
+    "description": "Admin workflow for reviewing and approving or rejecting customer book reviews.",
+    "trigger": "New review submitted by customer (approved=false)",
+    "source_repo": "bookstore-api",
+    "source_files": ["src/routes/admin/reviews.ts"],
+    "steps": [
+      { "step": 1, "action": "Queue review for moderation", "description": "New review appears in admin dashboard moderation queue." },
+      { "step": 2, "action": "Admin reviews content", "description": "Check for spam, profanity, and relevance to the book." },
+      { "step": 3, "action": "Approve or reject", "description": "Set approved=true (visible) or delete. Optionally flag user." },
+      { "step": 4, "action": "Update book rating average", "description": "Recalculate avg_rating on books table after approval." }
+    ]
+  },
+  {
+    "id": "inventory_reorder",
+    "name": "Inventory Reorder Alert",
+    "description": "Automated alert when book stock drops below reorder threshold.",
+    "trigger": "book.stock_count drops below 10 after order placement",
+    "source_repo": "bookstore-api",
+    "source_files": ["src/services/InventoryService.ts", "src/jobs/reorder-check.ts"],
+    "steps": [
+      { "step": 1, "action": "Check stock threshold", "description": "After order_item creation, check if book.stock_count < reorder_threshold." },
+      { "step": 2, "action": "Create reorder alert", "description": "Insert row in reorder_alerts table with book_id and current_stock." },
+      { "step": 3, "action": "Notify admin", "description": "Send email to admin with low-stock book details and suggested reorder quantity." }
+    ]
+  }
+]

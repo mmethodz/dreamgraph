@@ -1,0 +1,347 @@
+/**
+ * DreamGraph MCP Server - DB Senses tool.
+ *
+ * Gives the AI agent READ-ONLY access to the live PostgreSQL database
+ * schema via information_schema and pg_catalog queries.
+ *
+ * This resolves the agent's blind-spot: "I trust schema.sql and
+ * migration files, but I don't know which migrations are actually
+ * applied in production."
+ *
+ * Safety:
+ *   - NO raw SQL execution. Only curated, pre-written queries.
+ *   - Only reads from information_schema / pg_catalog (metadata).
+ *   - Connection uses pg.Pool with max 2 connections.
+ *   - Statement timeout: 5 seconds.
+ *   - Table name is parameterized ($1) to prevent injection.
+ *
+ * READ-ONLY: This tool only reads database metadata.
+ * It does NOT modify any data, tables, or schema.
+ */
+
+import pg from "pg";
+import { z } from "zod";
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { config } from "../config/config.js";
+import { success, error, safeExecute } from "../utils/errors.js";
+import { logger } from "../utils/logger.js";
+import type { ToolResponse } from "../types/index.js";
+
+const { Pool } = pg;
+
+// ---------------------------------------------------------------------------
+// Connection pool (lazy singleton)
+// ---------------------------------------------------------------------------
+
+let pool: pg.Pool | null = null;
+
+function getPool(): pg.Pool {
+  if (!pool) {
+    if (!config.database.connectionString) {
+      throw new Error(
+        "DATABASE_URL environment variable is not set. " +
+          "Set it to your PostgreSQL connection string " +
+          "(e.g. postgresql://user:password@host:5432/dbname)."
+      );
+    }
+
+    pool = new Pool({
+      connectionString: config.database.connectionString,
+      max: config.database.maxConnections,
+      statement_timeout: config.database.statementTimeoutMs,
+      // SSL — set to false or configure per your hosting provider
+      ssl: process.env.DATABASE_SSL === "false" ? false : { rejectUnauthorized: false },
+    });
+
+    // Log pool errors (don't crash)
+    pool.on("error", (err) => {
+      logger.error("DB pool error: " + err.message);
+    });
+
+    logger.info("DB connection pool initialized (max " + config.database.maxConnections + " connections)");
+  }
+
+  return pool;
+}
+
+// ---------------------------------------------------------------------------
+// Curated queries - the ONLY queries that can be executed
+// ---------------------------------------------------------------------------
+
+type QueryType =
+  | "columns"
+  | "constraints"
+  | "indexes"
+  | "check_constraints"
+  | "foreign_keys"
+  | "rls_policies";
+
+interface CuratedQuery {
+  sql: string;
+  description: string;
+}
+
+const CURATED_QUERIES: Record<QueryType, CuratedQuery> = {
+  columns: {
+    description: "List all columns with types, nullability, and defaults",
+    sql: `
+      SELECT
+        column_name,
+        data_type,
+        udt_name,
+        is_nullable,
+        column_default,
+        character_maximum_length,
+        ordinal_position
+      FROM information_schema.columns
+      WHERE table_schema = $1
+        AND table_name = $2
+      ORDER BY ordinal_position
+    `,
+  },
+
+  constraints: {
+    description: "List all constraints (PK, FK, UNIQUE, CHECK)",
+    sql: `
+      SELECT
+        constraint_name,
+        constraint_type
+      FROM information_schema.table_constraints
+      WHERE table_schema = $1
+        AND table_name = $2
+      ORDER BY constraint_type, constraint_name
+    `,
+  },
+
+  indexes: {
+    description: "List all indexes with their definitions",
+    sql: `
+      SELECT
+        indexname,
+        indexdef
+      FROM pg_catalog.pg_indexes
+      WHERE schemaname = $1
+        AND tablename = $2
+      ORDER BY indexname
+    `,
+  },
+
+  check_constraints: {
+    description: "List CHECK constraints with their clauses",
+    sql: `
+      SELECT
+        tc.constraint_name,
+        cc.check_clause
+      FROM information_schema.table_constraints tc
+      JOIN information_schema.check_constraints cc
+        ON cc.constraint_schema = tc.constraint_schema
+        AND cc.constraint_name = tc.constraint_name
+      WHERE tc.table_schema = $1
+        AND tc.table_name = $2
+        AND tc.constraint_type = 'CHECK'
+      ORDER BY tc.constraint_name
+    `,
+  },
+
+  foreign_keys: {
+    description: "List foreign key relationships with target table/column",
+    sql: `
+      SELECT
+        tc.constraint_name,
+        kcu.column_name,
+        ccu.table_schema AS foreign_schema,
+        ccu.table_name AS foreign_table,
+        ccu.column_name AS foreign_column
+      FROM information_schema.table_constraints tc
+      JOIN information_schema.key_column_usage kcu
+        ON kcu.constraint_name = tc.constraint_name
+        AND kcu.constraint_schema = tc.constraint_schema
+      JOIN information_schema.constraint_column_usage ccu
+        ON ccu.constraint_name = tc.constraint_name
+        AND ccu.constraint_schema = tc.constraint_schema
+      WHERE tc.table_schema = $1
+        AND tc.table_name = $2
+        AND tc.constraint_type = 'FOREIGN KEY'
+      ORDER BY tc.constraint_name
+    `,
+  },
+
+  rls_policies: {
+    description: "List Row Level Security policies",
+    sql: `
+      SELECT
+        pol.policyname,
+        pol.cmd,
+        pol.permissive,
+        pol.roles,
+        pg_get_expr(pol.qual, pol.polrelid) AS using_expression,
+        pg_get_expr(pol.with_check, pol.polrelid) AS with_check_expression
+      FROM pg_catalog.pg_policy pol
+      JOIN pg_catalog.pg_class cls ON cls.oid = pol.polrelid
+      JOIN pg_catalog.pg_namespace nsp ON nsp.oid = cls.relnamespace
+      WHERE nsp.nspname = $1
+        AND cls.relname = $2
+      ORDER BY pol.policyname
+    `,
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Response type
+// ---------------------------------------------------------------------------
+
+interface SchemaQueryResult {
+  table: string;
+  schema: string;
+  query_type: QueryType;
+  description: string;
+  row_count: number;
+  rows: Record<string, unknown>[];
+}
+
+// ---------------------------------------------------------------------------
+// Registration
+// ---------------------------------------------------------------------------
+
+export function registerDbSensesTools(server: McpServer): void {
+  server.tool(
+    "query_db_schema",
+    "Query the live PostgreSQL database schema (read-only). " +
+      "Returns table structure, constraints, indexes, CHECK clauses, " +
+      "foreign keys, or RLS policies for a given table. " +
+      "Use this to verify what is ACTUALLY in production vs. what " +
+      "migration files say SHOULD be there.",
+    {
+      query_type: z
+        .enum([
+          "columns",
+          "constraints",
+          "indexes",
+          "check_constraints",
+          "foreign_keys",
+          "rls_policies",
+        ])
+        .describe(
+          "Type of schema information to retrieve. " +
+            "'columns' = column names/types/defaults, " +
+            "'constraints' = PK/FK/UNIQUE/CHECK names, " +
+            "'indexes' = index definitions, " +
+            "'check_constraints' = CHECK constraint clauses, " +
+            "'foreign_keys' = FK relationships with target table/column, " +
+            "'rls_policies' = Row Level Security policies."
+        ),
+      table_name: z
+        .string()
+        .min(1)
+        .max(128)
+        .describe(
+          "Name of the table to inspect (e.g. 'accounting_exports', 'work_entries')."
+        ),
+      schema: z
+        .string()
+        .min(1)
+        .max(128)
+        .optional()
+        .describe(
+          "Database schema (default: 'public')."
+        ),
+    },
+    async ({ query_type, table_name, schema: schemaName }) => {
+      const dbSchema = schemaName ?? "public";
+
+      logger.info(
+        "query_db_schema called: type=" + query_type +
+        ", table=" + dbSchema + "." + table_name
+      );
+
+      const result = await safeExecute<SchemaQueryResult>(
+        async (): Promise<ToolResponse<SchemaQueryResult>> => {
+          // Validate table name (prevent any injection via identifier)
+          if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(table_name)) {
+            return error(
+              "INVALID_TABLE",
+              "Table name contains invalid characters. " +
+                "Only letters, digits, and underscores allowed."
+            );
+          }
+
+          if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(dbSchema)) {
+            return error(
+              "INVALID_SCHEMA",
+              "Schema name contains invalid characters. " +
+                "Only letters, digits, and underscores allowed."
+            );
+          }
+
+          const curated = CURATED_QUERIES[query_type];
+          if (!curated) {
+            return error(
+              "INVALID_QUERY_TYPE",
+              "Unknown query_type: " + query_type
+            );
+          }
+
+          let dbPool: pg.Pool;
+          try {
+            dbPool = getPool();
+          } catch (err) {
+            return error(
+              "NO_CONNECTION",
+              err instanceof Error ? err.message : String(err)
+            );
+          }
+
+          try {
+            const { rows } = await dbPool.query(curated.sql, [dbSchema, table_name]);
+
+            logger.debug(
+              "query_db_schema: " + query_type +
+              " on " + dbSchema + "." + table_name +
+              " returned " + rows.length + " rows"
+            );
+
+            return success<SchemaQueryResult>({
+              table: table_name,
+              schema: dbSchema,
+              query_type,
+              description: curated.description,
+              row_count: rows.length,
+              rows: rows as Record<string, unknown>[],
+            });
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+
+            if (msg.includes("timeout")) {
+              return error(
+                "QUERY_TIMEOUT",
+                "Query timed out after " +
+                  (config.database.statementTimeoutMs / 1000) +
+                  " seconds."
+              );
+            }
+
+            if (msg.includes("connect")) {
+              return error(
+                "CONNECTION_ERROR",
+                "Could not connect to database. Check DATABASE_URL. Error: " + msg
+              );
+            }
+
+            return error("QUERY_ERROR", "Query failed: " + msg);
+          }
+        }
+      );
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  logger.info("Registered 1 db-senses tool (query_db_schema)");
+}

@@ -1,0 +1,27 @@
+{
+  "server": {
+    "name": "dreamgraph",
+    "version": "1.0.0",
+    "description": "DreamGraph — Cognitive dreaming engine for MCP knowledge graphs"
+  },
+  "cognitive": {
+    "states": ["AWAKE", "REM", "NORMALIZING"],
+    "strategies": ["random_walk", "gap_fill", "cross_reference", "symmetry", "reinforcement", "tension_directed"],
+    "dream_cycle": "Generates speculative edges, normalizes (validate/latent/reject), promotes strong candidates to the knowledge graph",
+    "tension_system": "Detects contradictions, missing links, and weak connections. Tensions have TTL, urgency decay, domain grouping, and resolution authority."
+  },
+  "graph_stats": {
+    "entities": 19,
+    "edges": 0,
+    "note": "Run a dream cycle to start building edges. The cognitive engine will speculatively connect entities and validate them."
+  },
+  "link_schema": {
+    "from": "Source entity ID",
+    "to": "Target entity ID",
+    "type": "Entity type (feature, data_model, workflow, hypothetical)",
+    "relation": "Semantic label (e.g. reads, writes, implements, depends_on)",
+    "strength": "weak | moderate | strong",
+    "description": "Human-readable explanation",
+    "meta": "Optional metadata object"
+  }
+}

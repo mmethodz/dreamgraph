@@ -1,0 +1,20 @@
+{
+  "name": "Example Bookstore System",
+  "description": "A sample multi-repo bookstore application used to demonstrate DreamGraph's cognitive dreaming capabilities. Replace this with your own system overview.",
+  "repositories": [
+    {
+      "name": "bookstore-api",
+      "description": "REST API backend (Node.js + Express + PostgreSQL)",
+      "tech_stack": ["Node.js", "Express", "PostgreSQL", "TypeScript"],
+      "purpose": "Handles all business logic, auth, and data persistence"
+    },
+    {
+      "name": "bookstore-web",
+      "description": "Customer-facing web frontend (React + Next.js)",
+      "tech_stack": ["React", "Next.js", "TailwindCSS", "TypeScript"],
+      "purpose": "Storefront, search, cart, checkout, user account"
+    }
+  ],
+  "architecture": "Monorepo with shared types. API serves REST endpoints consumed by the web frontend. PostgreSQL for persistence. Stripe for payments.",
+  "deployment": "Vercel (web) + Railway (API) + PostgreSQL (database)"
+}

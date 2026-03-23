@@ -1,0 +1,23 @@
+{
+  "entities": {
+    "book_catalog": { "type": "feature", "uri": "feature://book_catalog" },
+    "shopping_cart": { "type": "feature", "uri": "feature://shopping_cart" },
+    "order_management": { "type": "feature", "uri": "feature://order_management" },
+    "user_auth": { "type": "feature", "uri": "feature://user_auth" },
+    "inventory_tracking": { "type": "feature", "uri": "feature://inventory_tracking" },
+    "payment_processing": { "type": "feature", "uri": "feature://payment_processing" },
+    "review_system": { "type": "feature", "uri": "feature://review_system" },
+    "recommendation_engine": { "type": "feature", "uri": "feature://recommendation_engine" },
+    "admin_dashboard": { "type": "feature", "uri": "feature://admin_dashboard" },
+    "email_notifications": { "type": "feature", "uri": "feature://email_notifications" },
+    "book": { "type": "data_model", "uri": "data_model://book" },
+    "user": { "type": "data_model", "uri": "data_model://user" },
+    "order": { "type": "data_model", "uri": "data_model://order" },
+    "order_item": { "type": "data_model", "uri": "data_model://order_item" },
+    "review": { "type": "data_model", "uri": "data_model://review" },
+    "discount_code": { "type": "data_model", "uri": "data_model://discount_code" },
+    "checkout_flow": { "type": "workflow", "uri": "workflow://checkout_flow" },
+    "review_moderation": { "type": "workflow", "uri": "workflow://review_moderation" },
+    "inventory_reorder": { "type": "workflow", "uri": "workflow://inventory_reorder" }
+  }
+}

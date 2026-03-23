@@ -1,0 +1,122 @@
+[
+  {
+    "id": "book",
+    "name": "Book",
+    "description": "Core product entity representing a book in the catalog.",
+    "source_repo": "bookstore-api",
+    "source_file": "src/models/Book.ts",
+    "table": "books",
+    "fields": [
+      { "name": "id", "type": "uuid", "description": "Primary key" },
+      { "name": "title", "type": "text", "description": "Book title" },
+      { "name": "author", "type": "text", "description": "Author name" },
+      { "name": "isbn", "type": "text", "description": "ISBN-13 identifier" },
+      { "name": "price", "type": "numeric(10,2)", "description": "Retail price" },
+      { "name": "genre", "type": "text", "description": "Primary genre category" },
+      { "name": "published_at", "type": "date", "description": "Publication date" },
+      { "name": "stock_count", "type": "integer", "description": "Current inventory level" },
+      { "name": "created_at", "type": "timestamptz", "description": "Record creation timestamp" }
+    ],
+    "relationships": [
+      { "target": "order_item", "type": "has_many", "description": "Books appear as line items in orders" },
+      { "target": "review", "type": "has_many", "description": "Books can have customer reviews" }
+    ]
+  },
+  {
+    "id": "user",
+    "name": "User",
+    "description": "Customer or admin user account.",
+    "source_repo": "bookstore-api",
+    "source_file": "src/models/User.ts",
+    "table": "users",
+    "fields": [
+      { "name": "id", "type": "uuid", "description": "Primary key" },
+      { "name": "email", "type": "text", "description": "Login email (unique)" },
+      { "name": "name", "type": "text", "description": "Display name" },
+      { "name": "role", "type": "enum(customer,admin)", "description": "User role" },
+      { "name": "created_at", "type": "timestamptz", "description": "Registration timestamp" }
+    ],
+    "relationships": [
+      { "target": "order", "type": "has_many", "description": "Users place orders" },
+      { "target": "review", "type": "has_many", "description": "Users write reviews" }
+    ]
+  },
+  {
+    "id": "order",
+    "name": "Order",
+    "description": "A customer purchase order with lifecycle status tracking.",
+    "source_repo": "bookstore-api",
+    "source_file": "src/models/Order.ts",
+    "table": "orders",
+    "fields": [
+      { "name": "id", "type": "uuid", "description": "Primary key" },
+      { "name": "user_id", "type": "uuid", "description": "FK to users" },
+      { "name": "status", "type": "enum(pending,paid,shipped,delivered,cancelled)", "description": "Order lifecycle status" },
+      { "name": "total", "type": "numeric(10,2)", "description": "Order total amount" },
+      { "name": "stripe_payment_intent_id", "type": "text", "description": "Stripe PI reference" },
+      { "name": "shipped_at", "type": "timestamptz", "description": "Shipping timestamp" },
+      { "name": "created_at", "type": "timestamptz", "description": "Order creation timestamp" }
+    ],
+    "relationships": [
+      { "target": "user", "type": "belongs_to", "description": "Order placed by a user" },
+      { "target": "order_item", "type": "has_many", "description": "Line items in this order" }
+    ]
+  },
+  {
+    "id": "order_item",
+    "name": "Order Item",
+    "description": "A line item in an order linking a book to a quantity and price.",
+    "source_repo": "bookstore-api",
+    "source_file": "src/models/OrderItem.ts",
+    "table": "order_items",
+    "fields": [
+      { "name": "id", "type": "uuid", "description": "Primary key" },
+      { "name": "order_id", "type": "uuid", "description": "FK to orders" },
+      { "name": "book_id", "type": "uuid", "description": "FK to books" },
+      { "name": "quantity", "type": "integer", "description": "Number of copies" },
+      { "name": "unit_price", "type": "numeric(10,2)", "description": "Price at time of purchase" }
+    ],
+    "relationships": [
+      { "target": "order", "type": "belongs_to", "description": "Part of an order" },
+      { "target": "book", "type": "belongs_to", "description": "References a book" }
+    ]
+  },
+  {
+    "id": "review",
+    "name": "Review",
+    "description": "Customer review with star rating and text comment.",
+    "source_repo": "bookstore-api",
+    "source_file": "src/models/Review.ts",
+    "table": "reviews",
+    "fields": [
+      { "name": "id", "type": "uuid", "description": "Primary key" },
+      { "name": "book_id", "type": "uuid", "description": "FK to books" },
+      { "name": "user_id", "type": "uuid", "description": "FK to users" },
+      { "name": "rating", "type": "integer", "description": "Star rating 1-5" },
+      { "name": "comment", "type": "text", "description": "Review text" },
+      { "name": "approved", "type": "boolean", "description": "Moderation status" },
+      { "name": "created_at", "type": "timestamptz", "description": "Review submission timestamp" }
+    ],
+    "relationships": [
+      { "target": "book", "type": "belongs_to", "description": "Review for a book" },
+      { "target": "user", "type": "belongs_to", "description": "Written by a user" }
+    ]
+  },
+  {
+    "id": "discount_code",
+    "name": "Discount Code",
+    "description": "Promotional discount codes with usage limits and expiry dates.",
+    "source_repo": "bookstore-api",
+    "source_file": "src/models/DiscountCode.ts",
+    "table": "discount_codes",
+    "fields": [
+      { "name": "id", "type": "uuid", "description": "Primary key" },
+      { "name": "code", "type": "text", "description": "Human-readable discount code" },
+      { "name": "discount_percent", "type": "integer", "description": "Percentage off (1-100)" },
+      { "name": "max_uses", "type": "integer", "description": "Maximum redemptions allowed" },
+      { "name": "current_uses", "type": "integer", "description": "Times already redeemed" },
+      { "name": "expires_at", "type": "timestamptz", "description": "Expiration date" }
+    ],
+    "relationships": []
+  }
+]
