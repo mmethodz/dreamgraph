@@ -10,6 +10,8 @@
  *   dream://status     — Cognitive state introspection
  *   dream://tensions   — Unresolved tension signals
  *   dream://history    — Audit trail of dream cycles
+ *   dream://adrs       — Architecture Decision Records
+ *   dream://ui-registry— Semantic UI element registry
  *
  * Tools (cognitive operations):
  *   dream_cycle        — Full dream → normalize → wake cycle (with decay + dedup + history)
@@ -21,6 +23,10 @@
  */
 
 import { z } from "zod";
+import { readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { engine } from "./engine.js";
 import { dream } from "./dreamer.js";
@@ -187,7 +193,73 @@ export function registerCognitiveResources(server: McpServer): void {
     }
   );
 
-  logger.info("Registered 6 cognitive resources");
+  // dream://adrs — Architecture Decision Records
+  server.resource(
+    "dream-adrs",
+    "dream://adrs",
+    {
+      description:
+        "Architecture Decision Records — append-only log of architectural decisions with context, alternatives, consequences, and guard rails.",
+      mimeType: "application/json",
+    },
+    async (uri) => {
+      logger.debug(`Resource requested: ${uri.href}`);
+      const data = await loadADRLogForResource();
+      return {
+        contents: [
+          {
+            uri: uri.href,
+            mimeType: "application/json",
+            text: JSON.stringify(data, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  // dream://ui-registry — Semantic UI elements
+  server.resource(
+    "dream-ui-registry",
+    "dream://ui-registry",
+    {
+      description:
+        "Semantic UI Registry — platform-independent element definitions with purpose, data contracts, interaction models, and cross-platform implementation tracking.",
+      mimeType: "application/json",
+    },
+    async (uri) => {
+      logger.debug(`Resource requested: ${uri.href}`);
+      const data = await loadUIRegistryForResource();
+      return {
+        contents: [
+          {
+            uri: uri.href,
+            mimeType: "application/json",
+            text: JSON.stringify(data, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  logger.info("Registered 8 cognitive resources");
+}
+
+// ---------------------------------------------------------------------------
+// Helpers — load ADR / UI registry files for resources
+// ---------------------------------------------------------------------------
+
+const cogProjectRoot = resolve(fileURLToPath(import.meta.url), "..", "..", "..");
+
+async function loadADRLogForResource(): Promise<unknown> {
+  const p = resolve(cogProjectRoot, "data", "adr_log.json");
+  if (!existsSync(p)) return { metadata: { total_decisions: 0 }, decisions: [] };
+  return JSON.parse(await readFile(p, "utf-8"));
+}
+
+async function loadUIRegistryForResource(): Promise<unknown> {
+  const p = resolve(cogProjectRoot, "data", "ui_registry.json");
+  if (!existsSync(p)) return { metadata: { total_elements: 0 }, elements: [] };
+  return JSON.parse(await readFile(p, "utf-8"));
 }
 
 // ---------------------------------------------------------------------------

@@ -319,11 +319,15 @@ src/
 │   ├── register.ts     # MCP tool + resource registration for cognitive layer
 │   └── types.ts        # All cognitive type definitions
 ├── tools/              # MCP tools (senses)
-│   ├── code-senses.ts  # list_directory, read_source_code
+│   ├── code-senses.ts  # list_directory, read_source_code, create_file
 │   ├── git-senses.ts   # git_log, git_blame
 │   ├── web-senses.ts   # fetch_web_page
 │   ├── db-senses.ts    # query_db_schema (any PostgreSQL database)
 │   ├── solidify-insight.ts  # solidify_cognitive_insight
+│   ├── visual-architect.ts  # generate_visual_flow (Mermaid diagrams)
+│   ├── adr-historian.ts     # record/query/deprecate architecture decisions
+│   ├── ui-registry.ts       # register/query UI elements, migration plans
+│   ├── living-docs-exporter.ts # export_living_docs (Markdown generation)
 │   ├── get-workflow.ts      # get_workflow
 │   ├── search-data-model.ts # search_data_model
 │   └── query-resource.ts   # query_resource
@@ -348,12 +352,14 @@ data/
 ├── tension_log.json      # [runtime] Detected contradictions and gaps
 ├── dream_history.json    # [runtime] Audit trail of dream cycles
 ├── candidate_edges.json  # [runtime] Normalization results
-└── validated_edges.json  # [runtime] Promoted edges that passed the Truth Filter
+├── validated_edges.json  # [runtime] Promoted edges that passed the Truth Filter
+├── adr_log.json          # [runtime] Architecture Decision Records
+└── ui_registry.json      # [runtime] Semantic UI element registry
 ```
 
 ---
 
-## MCP Tools (18 total)
+## MCP Tools (26 total)
 
 ### Cognitive Tools (7)
 
@@ -383,7 +389,20 @@ data/
 | `search_data_model` | Search for a data entity by name |
 | `query_resource` | Query features, workflows, or data model with filters |
 
-### MCP Resources (6)
+### Documentation Intelligence Tools (8)
+
+| Tool | Description |
+|---|---|
+| `generate_visual_flow` | Generate Mermaid.js diagrams from the knowledge graph. Six modes: workflow, feature_deps, data_flow, tension_map, domain_overview, ui_composition. Auto-simplification, dream edge overlay, tension markers |
+| `record_architecture_decision` | Record an ADR with context, alternatives, consequences, and guard rails. Append-only, sequential IDs |
+| `query_architecture_decisions` | Search ADRs by entity, tag, status, or free text. Returns matching decisions with optional guard rail warnings |
+| `deprecate_architecture_decision` | Mark an ADR as deprecated with reason. Status-change only — the original record is preserved |
+| `register_ui_element` | Register a semantic UI element with purpose, data contract, interaction model. Platform-independent. Merge-on-update |
+| `query_ui_elements` | Search UI elements by category, purpose, platform, feature, or missing platform (instant migration checklist) |
+| `generate_ui_migration_plan` | Gap analysis between source and target platforms with data contract summaries and complexity estimates |
+| `export_living_docs` | Export the knowledge graph as structured Markdown for Docusaurus, Nextra, MkDocs, or plain GitHub. Stateless and idempotent |
+
+### MCP Resources (8)
 
 Read-only views the agent can inspect at any time:
 
@@ -395,6 +414,8 @@ Read-only views the agent can inspect at any time:
 | Status | `dream://status` | Full cognitive state introspection |
 | Tensions | `dream://tensions` | Unresolved tension signals with urgency and domain |
 | History | `dream://history` | Audit trail of every dream cycle |
+| ADRs | `dream://adrs` | Architecture Decision Records with context, alternatives, and guard rails |
+| UI Registry | `dream://ui-registry` | Semantic UI element definitions with data contracts and platform implementations |
 
 ---
 

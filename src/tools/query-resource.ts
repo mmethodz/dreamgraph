@@ -29,6 +29,8 @@ const URI_TO_FILE: Record<string, string> = {
   "dream://validated": "validated_edges.json",
   "dream://tensions": "tension_log.json",
   "dream://history": "dream_history.json",
+  "dream://adrs": "adr_log.json",
+  "dream://ui-registry": "ui_registry.json",
 };
 
 /** Zod schema for query_resource input */

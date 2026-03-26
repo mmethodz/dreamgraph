@@ -721,3 +721,343 @@ export interface ClearDreamsOutput {
   timestamp: string;
 }
 
+// ---------------------------------------------------------------------------
+// Architecture Decision Records (ADR)
+// ---------------------------------------------------------------------------
+
+/** A single Architecture Decision Record */
+export interface ArchitectureDecisionRecord {
+  /** Sequential ID: "ADR-001", "ADR-002", etc. */
+  id: string;
+  title: string;
+  date: string;
+  decided_by: "human" | "system" | "collaborative";
+  status: "accepted" | "deprecated" | "superseded";
+  superseded_by?: string;
+
+  context: {
+    problem: string;
+    constraints: string[];
+    affected_entities: string[];
+    related_tensions?: string[];
+  };
+
+  decision: {
+    chosen: string;
+    alternatives: Array<{
+      option: string;
+      rejected_because: string;
+    }>;
+  };
+
+  consequences: {
+    expected: string[];
+    risks: string[];
+    actual?: string[];
+  };
+
+  guard_rails: string[];
+  tags: string[];
+}
+
+/** ADR log file structure */
+export interface ADRLogFile {
+  metadata: {
+    description: string;
+    schema_version: string;
+    total_decisions: number;
+    last_updated: string | null;
+  };
+  decisions: ArchitectureDecisionRecord[];
+}
+
+// ---------------------------------------------------------------------------
+// Semantic UI Registry
+// ---------------------------------------------------------------------------
+
+/** Categories for semantic UI elements */
+export type SemanticElementCategory =
+  | "data_display"
+  | "data_input"
+  | "navigation"
+  | "feedback"
+  | "layout"
+  | "action"
+  | "composite";
+
+/** The atomic unit of semantic UI understanding */
+export interface SemanticElement {
+  id: string;
+  name: string;
+  purpose: string;
+  category: SemanticElementCategory;
+
+  data_contract: {
+    inputs: Array<{
+      name: string;
+      type: string;
+      description: string;
+      required: boolean;
+    }>;
+    outputs: Array<{
+      name: string;
+      type: string;
+      description: string;
+      trigger: string;
+    }>;
+  };
+
+  interactions: Array<{
+    action: string;
+    description: string;
+  }>;
+
+  children?: string[];
+
+  implementations: Array<{
+    platform: string;
+    component: string;
+    source_file?: string;
+    notes?: string;
+  }>;
+
+  used_by: string[];
+  tags: string[];
+}
+
+/** UI registry file structure */
+export interface UIRegistryFile {
+  metadata: {
+    description: string;
+    schema_version: string;
+    total_elements: number;
+    total_categories: number;
+    last_updated: string | null;
+  };
+  elements: SemanticElement[];
+}
+
+// ---------------------------------------------------------------------------
+// Visual Architect Tool I/O
+// ---------------------------------------------------------------------------
+
+export interface GenerateVisualFlowInput {
+  target_type: "workflow" | "feature_deps" | "data_flow" | "tension_map" | "domain_overview" | "ui_composition";
+  target_ids: string[];
+  depth?: number;
+  direction?: "TB" | "LR" | "BT" | "RL";
+  include_dreams?: boolean;
+  include_tensions?: boolean;
+  max_nodes?: number;
+}
+
+export interface GenerateVisualFlowOutput {
+  mermaid: string;
+  diagram_type: string;
+  node_count: number;
+  edge_count: number;
+  simplified: boolean;
+  title: string;
+}
+
+// ---------------------------------------------------------------------------
+// ADR Tool I/O
+// ---------------------------------------------------------------------------
+
+export interface RecordADRInput {
+  title: string;
+  decided_by: "human" | "system" | "collaborative";
+  problem: string;
+  constraints: string[];
+  affected_entities: string[];
+  related_tensions?: string[];
+  chosen: string;
+  alternatives?: Array<{
+    option: string;
+    rejected_because: string;
+  }>;
+  expected_consequences: string[];
+  risks: string[];
+  guard_rails: string[];
+  tags?: string[];
+}
+
+export interface RecordADROutput {
+  adr_id: string;
+  title: string;
+  status: "accepted";
+  affected_entities: string[];
+  guard_rails: string[];
+  message: string;
+}
+
+export interface QueryADRInput {
+  entity_id?: string;
+  tag?: string;
+  status?: "accepted" | "deprecated" | "superseded";
+  search?: string;
+  guard_check?: {
+    entity_id: string;
+    proposed_change: string;
+  };
+}
+
+export interface GuardRailWarning {
+  adr_id: string;
+  title: string;
+  guard_rail: string;
+  message: string;
+}
+
+export interface QueryADROutput {
+  decisions: ArchitectureDecisionRecord[];
+  guard_rail_warnings: GuardRailWarning[];
+  total: number;
+}
+
+export interface DeprecateADRInput {
+  adr_id: string;
+  new_status: "deprecated" | "superseded";
+  superseded_by?: string;
+  reason: string;
+}
+
+export interface DeprecateADROutput {
+  adr_id: string;
+  new_status: "deprecated" | "superseded";
+  message: string;
+}
+
+// ---------------------------------------------------------------------------
+// UI Registry Tool I/O
+// ---------------------------------------------------------------------------
+
+export interface RegisterUIElementInput {
+  id: string;
+  name: string;
+  purpose: string;
+  category: SemanticElementCategory;
+  inputs: Array<{
+    name: string;
+    type: string;
+    description: string;
+    required: boolean;
+  }>;
+  outputs: Array<{
+    name: string;
+    type: string;
+    description: string;
+    trigger: string;
+  }>;
+  interactions: Array<{
+    action: string;
+    description: string;
+  }>;
+  children?: string[];
+  implementations?: Array<{
+    platform: string;
+    component: string;
+    source_file?: string;
+    notes?: string;
+  }>;
+  used_by?: string[];
+  tags?: string[];
+}
+
+export interface RegisterUIElementOutput {
+  element_id: string;
+  name: string;
+  category: string;
+  inputs_count: number;
+  outputs_count: number;
+  merged: boolean;
+  message: string;
+}
+
+export interface QueryUIElementsInput {
+  category?: SemanticElementCategory;
+  purpose_search?: string;
+  platform?: string;
+  feature_id?: string;
+  missing_platform?: string;
+}
+
+export interface QueryUIElementsOutput {
+  elements: SemanticElement[];
+  total: number;
+  categories: Record<string, number>;
+  platforms: Record<string, number>;
+}
+
+export interface GenerateUIMigrationInput {
+  source_platform: string;
+  target_platform: string;
+  scope?: string[];
+}
+
+export interface MigrationPortedElement {
+  element_id: string;
+  name: string;
+  source_component: string;
+  target_component: string;
+}
+
+export interface MigrationGapElement {
+  element_id: string;
+  name: string;
+  purpose: string;
+  category: string;
+  source_component: string;
+  data_contract_summary: string;
+  complexity_estimate: "trivial" | "moderate" | "complex";
+}
+
+export interface GenerateUIMigrationOutput {
+  source_platform: string;
+  target_platform: string;
+  already_ported: MigrationPortedElement[];
+  migration_needed: MigrationGapElement[];
+  total_elements: number;
+  ported_count: number;
+  gap_count: number;
+  coverage_percent: number;
+}
+
+// ---------------------------------------------------------------------------
+// Living Docs Exporter I/O
+// ---------------------------------------------------------------------------
+
+export type LivingDocsSection =
+  | "features"
+  | "data_model"
+  | "workflows"
+  | "architecture"
+  | "ui_registry"
+  | "cognitive_status"
+  | "api_reference"
+  | "all";
+
+export type LivingDocsFormat = "docusaurus" | "nextra" | "mkdocs" | "plain";
+
+export interface ExportLivingDocsInput {
+  output_dir: string;
+  repo?: string;
+  sections: LivingDocsSection[];
+  format?: LivingDocsFormat;
+  include_diagrams?: boolean;
+  include_cognitive?: boolean;
+}
+
+export interface ExportedFile {
+  path: string;
+  section: string;
+  size_bytes: number;
+}
+
+export interface ExportLivingDocsOutput {
+  files_created: ExportedFile[];
+  total_files: number;
+  total_bytes: number;
+  sections_exported: string[];
+  timestamp: string;
+}

@@ -13,6 +13,10 @@ import { registerSolidifyInsightTool } from "./solidify-insight.js";
 import { registerWebSensesTools } from "./web-senses.js";
 import { registerGitSensesTools } from "./git-senses.js";
 import { registerDbSensesTools } from "./db-senses.js";
+import { registerVisualArchitectTools } from "./visual-architect.js";
+import { registerADRTools } from "./adr-historian.js";
+import { registerUIRegistryTools } from "./ui-registry.js";
+import { registerLivingDocsTools } from "./living-docs-exporter.js";
 import { logger } from "../utils/logger.js";
 
 export function registerTools(server: McpServer): void {
@@ -24,6 +28,10 @@ export function registerTools(server: McpServer): void {
   registerWebSensesTools(server);
   registerGitSensesTools(server);
   registerDbSensesTools(server);
+  registerVisualArchitectTools(server);
+  registerADRTools(server);
+  registerUIRegistryTools(server);
+  registerLivingDocsTools(server);
 
-  logger.info("Registered 11 tools");
+  logger.info("Registered 19 tools");
 }
