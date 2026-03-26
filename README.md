@@ -149,7 +149,7 @@ System is healthy. Entering idle state.
 
 ## Safety Model
 
-- **Read-only by default** — no automatic code modification
+- **Read-only by default** — no automatic code modification unless you enable write tools
 - **External data is non-authoritative** — cannot override internal evidence
 - **All outputs require human validation**
 - **No write access without explicit permission**
@@ -353,7 +353,7 @@ data/
 
 ---
 
-## MCP Tools (17 total)
+## MCP Tools (18 total)
 
 ### Cognitive Tools (7)
 
@@ -367,12 +367,13 @@ data/
 | `resolve_tension` | Close a tension with authority (human/system), resolution type, and evidence |
 | `clear_dreams` | Reset cognitive state with confirmation gate (preserves the knowledge graph) |
 
-### Sense Tools (10)
+### Sense Tools (11)
 
 | Tool | Description |
 |---|---|
 | `list_directory` | Browse source code directories in configured repos |
 | `read_source_code` | Read source files with optional line range |
+| `create_file` | Create or overwrite files inside configured repos (auto-creates parent directories) |
 | `git_log` | Commit history for a file or directory |
 | `git_blame` | Per-line authorship for a file |
 | `query_db_schema` | Live PostgreSQL schema queries: columns, constraints, indexes, foreign keys, RLS policies |

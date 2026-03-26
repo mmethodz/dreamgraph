@@ -25,5 +25,5 @@ export function registerTools(server: McpServer): void {
   registerGitSensesTools(server);
   registerDbSensesTools(server);
 
-  logger.info("Registered 10 tools");
+  logger.info("Registered 11 tools");
 }

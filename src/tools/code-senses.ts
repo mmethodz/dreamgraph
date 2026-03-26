@@ -6,9 +6,6 @@
  *
  * Security: All paths are resolved against known workspace roots
  * (config.repos). Traversal outside these boundaries is rejected.
- *
- * READ-ONLY: These tools only read from the filesystem.
- * They do NOT modify any files or repositories.
  */
 
 import fs from "node:fs/promises";
@@ -317,5 +314,98 @@ export function registerCodeSensesTools(server: McpServer): void {
     }
   );
 
-  logger.info("Registered 2 code-senses tools (list_directory, read_source_code)");
+  // =========================================================================
+  // create_file — Create or overwrite a file inside a workspace
+  // =========================================================================
+  server.tool(
+    "create_file",
+    "Luo uuden tiedoston tai ylikirjoittaa olemassaolevan tiedoston konfiguroituun repoon. " +
+      "Luo puuttuvat ylähakemistot automaattisesti. Polku on pakollinen ja sen tulee olla " +
+      "konfiguroitujen repojen sisällä (turvarajaus).",
+    {
+      filePath: z
+        .string()
+        .describe(
+          "Tiedoston polku suhteessa projektin juureen " +
+            "(esim. 'src/utils/helpers.ts') tai absoluuttinen polku."
+        ),
+      content: z
+        .string()
+        .describe("Tiedoston sisältö kirjoitettavaksi."),
+      repo: z
+        .string()
+        .optional()
+        .describe(
+          "Repository name as configured in DREAMGRAPH_REPOS. " +
+            "Jos annettu, filePath ratkaistaan tämän repon juuresta."
+        ),
+    },
+    async ({ filePath: reqPath, content, repo }) => {
+      logger.debug(
+        `create_file called: filePath="${reqPath}", repo="${repo ?? "(auto)"}", bytes=${content.length}`
+      );
+
+      const result = await safeExecute<string>(
+        async (): Promise<ToolResponse<string>> => {
+          let safePath: string;
+
+          if (repo) {
+            const repoRoot = config.repos[repo];
+            if (!repoRoot) {
+              const available = Object.keys(config.repos).join(", ");
+              return error(
+                "INVALID_REPO",
+                `Repo "${repo}" not found. Available repos: ${available}`
+              );
+            }
+            const abs = path.resolve(repoRoot, reqPath);
+            if (
+              !abs
+                .toLowerCase()
+                .startsWith(repoRoot.toLowerCase())
+            ) {
+              return error(
+                "ACCESS_DENIED",
+                `Path '${reqPath}' escapes repo "${repo}" root.`
+              );
+            }
+            safePath = abs;
+          } else {
+            try {
+              safePath = resolveSafePath(reqPath);
+            } catch (err) {
+              return error(
+                "ACCESS_DENIED",
+                err instanceof Error ? err.message : String(err)
+              );
+            }
+          }
+
+          try {
+            // Ensure parent directory exists
+            const dir = path.dirname(safePath);
+            await fs.mkdir(dir, { recursive: true });
+
+            await fs.writeFile(safePath, content, "utf-8");
+            return success(`File created: ${safePath} (${content.length} bytes)`);
+          } catch (err: unknown) {
+            const msg =
+              err instanceof Error ? err.message : String(err);
+            return error("WRITE_ERROR", `Error creating file: ${msg}`);
+          }
+        }
+      );
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  logger.info("Registered 3 code-senses tools (list_directory, read_source_code, create_file)");
 }
