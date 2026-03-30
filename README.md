@@ -1,3 +1,6 @@
+<p align="center">
+  <img src="dreamgraph.jpeg" alt="DreamGraph - Autonomous Cognitive Layer" width="400" />
+</p>
 # DreamGraph — Autonomous Cognitive Layer for Software Systems
 
 Traditional AI systems answer questions. DreamGraph reduces uncertainty over time — it finds, verifies, and resolves problems in your system autonomously.
