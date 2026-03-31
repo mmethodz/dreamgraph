@@ -11,8 +11,12 @@
  * Safety:
  *   - NO raw SQL execution. Only curated, pre-written queries.
  *   - Only reads from information_schema / pg_catalog (metadata).
- *   - Connection uses pg.Pool with max 2 connections.
+ *   - Connection uses pg.Pool with max 3 connections.
+ *   - Connection acquisition timeout: 5 seconds.
  *   - Statement timeout: 5 seconds.
+ *   - Overall operation timeout: 10 seconds.
+ *   - Idle connections recycled after 30 seconds.
+ *   - Automatic pool recovery on persistent failures.
  *   - Table name is parameterized ($1) to prevent injection.
  *
  * READ-ONLY: This tool only reads database metadata.
@@ -35,33 +39,107 @@ const { Pool } = pg;
 
 let pool: pg.Pool | null = null;
 
-function getPool(): pg.Pool {
-  if (!pool) {
-    if (!config.database.connectionString) {
-      throw new Error(
-        "DATABASE_URL environment variable is not set. " +
-          "Set it to your PostgreSQL connection string " +
-          "(e.g. postgresql://user:password@host:5432/dbname)."
-      );
-    }
+/** Track consecutive failures for automatic pool recovery. */
+let consecutiveFailures = 0;
+const MAX_CONSECUTIVE_FAILURES = 3;
 
-    pool = new Pool({
-      connectionString: config.database.connectionString,
-      max: config.database.maxConnections,
-      statement_timeout: config.database.statementTimeoutMs,
-      // SSL — set to false or configure per your hosting provider
-      ssl: process.env.DATABASE_SSL === "false" ? false : { rejectUnauthorized: false },
-    });
-
-    // Log pool errors (don't crash)
-    pool.on("error", (err) => {
-      logger.error("DB pool error: " + err.message);
-    });
-
-    logger.info("DB connection pool initialized (max " + config.database.maxConnections + " connections)");
+function createPool(): pg.Pool {
+  if (!config.database.connectionString) {
+    throw new Error(
+      "DATABASE_URL environment variable is not set. " +
+        "Set it to your PostgreSQL connection string " +
+        "(e.g. postgresql://user:password@host:5432/dbname)."
+    );
   }
 
+  const newPool = new Pool({
+    connectionString: config.database.connectionString,
+    max: config.database.maxConnections,
+    statement_timeout: config.database.statementTimeoutMs,
+    // Prevent blocking forever when all connections are in use
+    connectionTimeoutMillis: config.database.connectionTimeoutMs,
+    // Recycle idle connections to avoid stale TCP sockets
+    idleTimeoutMillis: config.database.idleTimeoutMs,
+    // SSL — set to false or configure per your hosting provider
+    ssl: process.env.DATABASE_SSL === "false" ? false : { rejectUnauthorized: false },
+  });
+
+  // Log pool errors (don't crash)
+  newPool.on("error", (err) => {
+    logger.error("DB pool background error: " + err.message);
+  });
+
+  logger.info(
+    "DB connection pool initialized (max " +
+      config.database.maxConnections +
+      ", conn timeout " +
+      config.database.connectionTimeoutMs +
+      "ms, idle timeout " +
+      config.database.idleTimeoutMs +
+      "ms)"
+  );
+
+  return newPool;
+}
+
+function getPool(): pg.Pool {
+  if (!pool) {
+    pool = createPool();
+  }
   return pool;
+}
+
+/**
+ * Drain and destroy the current pool, then create a fresh one.
+ * Used to recover from persistent failures (dead connections, etc.).
+ */
+async function resetPool(): Promise<void> {
+  if (pool) {
+    logger.warn("Resetting DB pool after " + consecutiveFailures + " consecutive failures");
+    try {
+      await pool.end();
+    } catch (err) {
+      logger.error("Error ending old pool: " + (err instanceof Error ? err.message : String(err)));
+    }
+    pool = null;
+  }
+  consecutiveFailures = 0;
+}
+
+/**
+ * Execute a curated query with an overall operation timeout.
+ * This prevents the tool from blocking indefinitely even if both
+ * connection acquisition AND query execution together exceed the budget.
+ */
+async function queryWithTimeout(
+  dbPool: pg.Pool,
+  sql: string,
+  params: string[]
+): Promise<pg.QueryResult> {
+  const timeoutMs = config.database.operationTimeoutMs;
+
+  return new Promise<pg.QueryResult>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(
+        new Error(
+          "Operation timed out after " + timeoutMs + "ms " +
+          "(includes connection acquisition + query execution). " +
+          "The database may be unreachable or overloaded."
+        )
+      );
+    }, timeoutMs);
+
+    dbPool
+      .query(sql, params)
+      .then((result) => {
+        clearTimeout(timer);
+        resolve(result);
+      })
+      .catch((err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -292,7 +370,14 @@ export function registerDbSensesTools(server: McpServer): void {
           }
 
           try {
-            const { rows } = await dbPool.query(curated.sql, [dbSchema, table_name]);
+            const { rows } = await queryWithTimeout(
+              dbPool,
+              curated.sql,
+              [dbSchema, table_name]
+            );
+
+            // Success — reset failure counter
+            consecutiveFailures = 0;
 
             logger.debug(
               "query_db_schema: " + query_type +
@@ -309,7 +394,38 @@ export function registerDbSensesTools(server: McpServer): void {
               rows: rows as Record<string, unknown>[],
             });
           } catch (err) {
+            consecutiveFailures++;
             const msg = err instanceof Error ? err.message : String(err);
+
+            logger.warn(
+              "query_db_schema failed (" + consecutiveFailures + "/" +
+              MAX_CONSECUTIVE_FAILURES + "): " + msg
+            );
+
+            // Auto-recover: if we've hit too many failures in a row,
+            // the pool is likely in a bad state — reset it.
+            if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+              await resetPool();
+            }
+
+            if (msg.includes("Operation timed out")) {
+              return error(
+                "OPERATION_TIMEOUT",
+                "The entire operation (connect + query) timed out after " +
+                  (config.database.operationTimeoutMs / 1000) +
+                  " seconds. The database may be unreachable or overloaded."
+              );
+            }
+
+            if (msg.includes("timeout") && msg.includes("connection")) {
+              return error(
+                "POOL_EXHAUSTED",
+                "Could not acquire a database connection within " +
+                  (config.database.connectionTimeoutMs / 1000) +
+                  " seconds. All pool connections may be in use or the " +
+                  "database is unreachable."
+              );
+            }
 
             if (msg.includes("timeout")) {
               return error(

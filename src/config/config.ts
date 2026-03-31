@@ -38,8 +38,14 @@ export const config = {
    */
   database: {
     connectionString: process.env.DATABASE_URL ?? "",
-    maxConnections: 2,
+    maxConnections: 3,
     statementTimeoutMs: 5_000,
+    /** Max ms to wait for a free connection from the pool (0 = forever). */
+    connectionTimeoutMs: 5_000,
+    /** Close idle connections after this many ms to avoid stale sockets. */
+    idleTimeoutMs: 30_000,
+    /** Hard cap on the entire query_db_schema operation (acquire + query). */
+    operationTimeoutMs: 10_000,
   },
 
   /** Data directory (relative to project root) */
