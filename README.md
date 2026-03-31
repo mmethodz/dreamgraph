@@ -6,7 +6,7 @@
 
 Traditional AI systems answer questions. DreamGraph reduces uncertainty over time — it finds, verifies, and resolves problems in your system autonomously.
 
-A self-regulating AI cognitive layer that discovers, verifies, and resolves system-level insights through structured "dream cycles".
+A self-regulating AI cognitive layer that discovers, verifies, and resolves system-level insights through structured "dream cycles" — and now dreams adversarially, reasons causally, thinks temporally, narrates its own understanding, and proposes concrete fixes.
 
 ---
 
@@ -19,6 +19,13 @@ DreamGraph is a cognitive layer for software systems that continuously discovers
 - Evidence-based validation
 - Controlled speculative exploration ("dreaming")
 - Self-cleaning memory via decay and resolution
+- **Adversarial security scanning** (NIGHTMARE state)
+- **Causal inference chains** across dream history
+- **Temporal pattern analysis** with precognition and retrocognition
+- **Multi-system dream federation** for cross-project learning
+- **System autobiography** — narrative understanding, not just data
+- **Intervention planning** — from insight to concrete remediation
+- **Runtime/APM awareness** — embodied senses from live metrics
 
 It is not a chatbot.
 
@@ -50,7 +57,7 @@ Tensions drive all cognition.
 
 The system runs periodic "dream cycles" where it:
 
-- Explores relationships (analogy, gaps, symmetry, cross-domain)
+- Explores relationships (analogy, gaps, symmetry, cross-domain, causal chains)
 - Generates candidate connections (edges)
 - Evaluates them through a normalization pipeline
 
@@ -81,6 +88,7 @@ It can verify using:
 - Source code inspection
 - Database schema queries
 - Workflow definitions
+- Runtime metrics (OpenTelemetry / Prometheus)
 
 This enables conclusions like:
 
@@ -94,6 +102,7 @@ Tensions are not permanent. They:
 - Expire via TTL (default 30 cycles)
 - Can be resolved with evidence
 - Are capped to maintain focus (max 50 active)
+- Can be turned into **remediation plans** with concrete fix steps
 
 This prevents cognitive overload:
 
@@ -108,6 +117,113 @@ Not all ideas are immediately provable. The system retains latent hypotheses tha
 - May become valid later
 - Guide future exploration
 - Never pollute factual output
+
+---
+
+## The Seven Cognitive Capabilities
+
+DreamGraph v2 introduces seven advanced cognitive features that take the system from "observant" to "truly intelligent."
+
+### 1. Causal Reasoning Engine
+
+Mines dream history for cause→effect inference chains. When Entity A changes, what happens downstream?
+
+- Discovers temporal correlations between tensions
+- Builds multi-hop causal chains with confidence scores
+- Identifies propagation hotspots — entities where changes cascade
+- Adds `causal_replay` as a new dream strategy
+
+**Tool:** `get_causal_insights`
+
+### 2. Adversarial Dreaming (NIGHTMARE State)
+
+A fourth cognitive state — **NIGHTMARE** — where the system actively tries to break itself.
+
+```
+AWAKE → NIGHTMARE → AWAKE    (adversarial scan)
+AWAKE → REM → NORMALIZING → AWAKE    (normal dream cycle)
+```
+
+Five adversarial scan strategies:
+
+| Strategy | What it scans for |
+|---|---|
+| `privilege_escalation` | Missing role checks, broad admin scopes, open endpoints |
+| `data_leak_path` | Unprotected PII, cross-tenant data exposure, missing encryption |
+| `injection_surface` | Unsafe dynamic queries, unparameterized SQL, template injection |
+| `missing_validation` | Missing input validation, type coercion gaps, range violations |
+| `broken_access_control` | Missing RLS, org-scoping gaps, horizontal privilege escalation |
+
+Produces threat edges with severity, CWE IDs, and blast radius. Results persist to a threat log.
+
+**Tool:** `nightmare_cycle`
+**Resource:** `dream://threats`
+
+### 3. Temporal Dreaming
+
+Adds a time dimension to reasoning:
+
+- **Tension trajectories** — is urgency rising, falling, spiking, or stable?
+- **Precognition** — predicts future tensions based on trajectory extrapolation
+- **Seasonal patterns** — detects recurring cycles across domains
+- **Retrocognition** — finds past resolution patterns that match current tensions
+
+**Tool:** `get_temporal_insights`
+
+### 4. Multi-System Dream Federation
+
+Enables cross-project learning by extracting anonymized architectural patterns:
+
+- Abstracts validated edges into transferable **archetypes** (e.g., "Service A calls Service B without retry logic")
+- Exports as portable exchange files
+- Imports archetypes from other DreamGraph instances
+- Deduplicates on import to prevent pollution
+
+**Tools:** `export_dream_archetypes`, `import_dream_archetypes`
+**Resource:** `dream://archetypes`
+
+### 5. Dream Narratives (System Autobiography)
+
+Generates a coherent narrative of the system's evolving understanding — not a log, a *story*:
+
+> "I started by thinking catalog and cart were unrelated. After 8 cycles, I discovered they share an implicit session model. This led me to find that order management has no awareness of session expiry, which became my highest-urgency tension..."
+
+Three depth levels:
+
+| Depth | For whom | Detail level |
+|---|---|---|
+| `executive` | Stakeholders | 1-page summary with health assessment |
+| `technical` | Engineers | Detailed findings with entity references |
+| `full` | Deep analysis | Complete cycle-by-cycle narrative |
+
+**Tool:** `get_system_narrative`
+
+### 6. Intervention Engine
+
+Bridges the gap from "awareness" to "remedy" by generating concrete remediation plans:
+
+- Ordered steps with file-level change descriptions
+- Test suggestions for each step
+- Effort estimates (trivial / small / medium / large)
+- ADR conflict checks — warns if a fix may violate an existing architectural decision
+- Predicted new tensions the fix might introduce
+
+Plans are generated from the highest-urgency unresolved tensions.
+
+**Tool:** `get_remediation_plan`
+
+### 7. Embodied Senses (Runtime Awareness)
+
+Connects DreamGraph to live runtime metrics — OpenTelemetry, Prometheus, or custom JSON endpoints:
+
+- Fetches and parses real-time performance data
+- Correlates runtime behavior with knowledge graph entities
+- Detects behavioral patterns: error cascades, co-occurrence, sequential usage
+- Generates runtime-informed tension signals
+
+Gracefully degrades when no endpoint is configured.
+
+**Tool:** `query_runtime_metrics`
 
 ---
 
@@ -158,6 +274,7 @@ System is healthy. Entering idle state.
 - **All outputs require human validation**
 - **No write access without explicit permission**
 - Strict separation of: facts, hypotheses, and beliefs
+- **NIGHTMARE state** is read-only — adversarial scans identify threats but never modify code
 
 ---
 
@@ -263,7 +380,7 @@ node scripts/enrich-graph.mjs
 Rebuild (`npm run build`) and reconnect your MCP client. The cognitive engine will:
 
 - Build a FactSnapshot from your enriched data
-- Dream speculative connections using 6 strategies
+- Dream speculative connections using 7 strategies
 - Detect tensions (missing links, contradictions, weak spots)
 - Continuously improve the graph over multiple cycles
 
@@ -280,8 +397,12 @@ You can also skip the manual data step entirely and just point the agent at your
 | `DATABASE_SSL` | No | Set to `"false"` to disable SSL for local PostgreSQL. Default: SSL enabled |
 | `DREAMGRAPH_DEBUG` | No | Set to `"true"` for verbose stderr logging |
 | `DREAMGRAPH_DATA_DIR` | No | Custom data directory path (default: `data`) |
+| `DREAMGRAPH_FEDERATION` | No | JSON config for multi-system federation: `{"instance_id": "my-project", "allow_export": true, "allow_import": true, "anonymize": true}` |
+| `DREAMGRAPH_RUNTIME_ENDPOINT` | No | URL of a runtime metrics endpoint (OpenTelemetry, Prometheus, or custom JSON). Example: `http://localhost:9090/api/v1/query` |
+| `DREAMGRAPH_RUNTIME_TYPE` | No | Metrics endpoint format: `"opentelemetry"`, `"prometheus"`, or `"custom_json"` (default: `"prometheus"`) |
+| `DREAMGRAPH_RUNTIME_TIMEOUT` | No | Timeout in milliseconds for runtime metrics fetch (default: `5000`) |
 
-None are required. Without `DREAMGRAPH_REPOS`, code/git tools will be unavailable. Without `DATABASE_URL`, the `query_db_schema` tool will be unavailable. The cognitive engine works regardless — it just has fewer senses.
+None are required. Without `DREAMGRAPH_REPOS`, code/git tools will be unavailable. Without `DATABASE_URL`, the `query_db_schema` tool will be unavailable. Without `DREAMGRAPH_RUNTIME_ENDPOINT`, the `query_runtime_metrics` tool will return a configuration hint. The cognitive engine works regardless — it just has fewer senses.
 
 ---
 
@@ -290,16 +411,22 @@ None are required. Without `DREAMGRAPH_REPOS`, code/git tools will be unavailabl
 ```
                 +--------------+
                 |   MCP Layer  |
-                | (tools/API)  |
+                | (34 tools)   |
                 +------+-------+
                        |
         +--------------v--------------+
         |     Cognitive Engine        |
         |                             |
-        |  - Dream cycles             |
-        |  - Normalization            |
-        |  - Tension management       |
-        |  - Strategy selection       |
+        |  AWAKE ──→ REM ──→ NORM ──→ AWAKE
+        |    │                             |
+        |    └──→ NIGHTMARE ──→ AWAKE      |
+        |                             |
+        |  - 7 dream strategies       |
+        |  - 5 adversarial scans      |
+        |  - Causal reasoning         |
+        |  - Temporal analysis        |
+        |  - Narrative synthesis       |
+        |  - Intervention planning    |
         +--------------+--------------+
                        |
         +--------------v--------------+
@@ -309,6 +436,17 @@ None are required. Without `DREAMGRAPH_REPOS`, code/git tools will be unavailabl
         |  - Dream graph              |
         |  - Tension store            |
         |  - Resolution archive       |
+        |  - Threat log               |
+        |  - Dream archetypes         |
+        +-----------------------------+
+                       |
+        +--------------v--------------+
+        |        Senses Layer         |
+        |                             |
+        |  - Code / Git / DB / Web    |
+        |  - Runtime metrics (APM)    |
+        |  - Federation (import/      |
+        |    export archetypes)       |
         +-----------------------------+
 ```
 
@@ -316,68 +454,84 @@ None are required. Without `DREAMGRAPH_REPOS`, code/git tools will be unavailabl
 
 ```
 src/
-├── cognitive/          # The dreaming engine (the core)
-│   ├── engine.ts       # State machine: AWAKE / REM / NORMALIZING
-│   ├── dreamer.ts      # 6 dream strategies for edge generation
-│   ├── normalizer.ts   # Three-outcome classifier (validate/latent/reject)
-│   ├── register.ts     # MCP tool + resource registration for cognitive layer
-│   └── types.ts        # All cognitive type definitions
-├── tools/              # MCP tools (senses)
-│   ├── code-senses.ts  # list_directory, read_source_code, create_file
-│   ├── git-senses.ts   # git_log, git_blame
-│   ├── web-senses.ts   # fetch_web_page
-│   ├── db-senses.ts    # query_db_schema (any PostgreSQL database)
-│   ├── solidify-insight.ts  # solidify_cognitive_insight
-│   ├── visual-architect.ts  # generate_visual_flow (Mermaid diagrams)
-│   ├── adr-historian.ts     # record/query/deprecate architecture decisions
-│   ├── ui-registry.ts       # register/query UI elements, migration plans
+├── cognitive/              # The dreaming engine (the core)
+│   ├── engine.ts           # State machine: AWAKE / REM / NORMALIZING / NIGHTMARE
+│   ├── dreamer.ts          # 7 dream strategies for edge generation
+│   ├── normalizer.ts       # Three-outcome classifier (validate/latent/reject)
+│   ├── register.ts         # MCP tool + resource registration for cognitive layer
+│   ├── types.ts            # All cognitive type definitions
+│   ├── causal.ts           # Causal Reasoning Engine
+│   ├── temporal.ts         # Temporal Dreaming (retro/precognition)
+│   ├── adversarial.ts      # Adversarial Dreaming (NIGHTMARE state)
+│   ├── federation.ts       # Multi-System Dream Federation
+│   ├── narrator.ts         # Dream Narratives (system autobiography)
+│   └── intervention.ts     # Intervention Engine (remediation plans)
+├── tools/                  # MCP tools (senses)
+│   ├── code-senses.ts      # list_directory, read_source_code, create_file
+│   ├── git-senses.ts       # git_log, git_blame
+│   ├── web-senses.ts       # fetch_web_page
+│   ├── db-senses.ts        # query_db_schema (any PostgreSQL database)
+│   ├── runtime-senses.ts   # query_runtime_metrics (OpenTelemetry / Prometheus)
+│   ├── solidify-insight.ts # solidify_cognitive_insight
+│   ├── visual-architect.ts # generate_visual_flow (Mermaid diagrams)
+│   ├── adr-historian.ts    # record/query/deprecate architecture decisions
+│   ├── ui-registry.ts      # register/query UI elements, migration plans
 │   ├── living-docs-exporter.ts # export_living_docs (Markdown generation)
-│   ├── get-workflow.ts      # get_workflow
+│   ├── get-workflow.ts     # get_workflow
 │   ├── search-data-model.ts # search_data_model
 │   └── query-resource.ts   # query_resource
-├── resources/          # MCP resources (read-only context)
-├── config/             # Environment-driven configuration
-├── server/             # MCP server bootstrap (stdio transport)
-├── types/              # Shared TypeScript type definitions
-└── utils/              # Logger, cache, error helpers
+├── resources/              # MCP resources (read-only context)
+├── config/                 # Environment-driven configuration
+├── server/                 # MCP server bootstrap (stdio transport)
+├── types/                  # Shared TypeScript type definitions
+└── utils/                  # Logger, cache, error helpers
 ```
 
 ### Data Directory
 
 ```
 data/
-├── features.json         # Your system's features       (you populate)
-├── data_model.json       # Your data entities            (you populate)
-├── workflows.json        # Your workflows                (you populate)
-├── system_overview.json  # High-level system description (you populate)
-├── index.json            # Entity index                  (you populate)
-├── capabilities.json     # Server self-description
-├── dream_graph.json      # [runtime] Speculative edges from dreaming
-├── tension_log.json      # [runtime] Detected contradictions and gaps
-├── dream_history.json    # [runtime] Audit trail of dream cycles
-├── candidate_edges.json  # [runtime] Normalization results
-├── validated_edges.json  # [runtime] Promoted edges that passed the Truth Filter
-├── adr_log.json          # [runtime] Architecture Decision Records
-└── ui_registry.json      # [runtime] Semantic UI element registry
+├── features.json           # Your system's features       (you populate)
+├── data_model.json         # Your data entities            (you populate)
+├── workflows.json          # Your workflows                (you populate)
+├── system_overview.json    # High-level system description (you populate)
+├── index.json              # Entity index                  (you populate)
+├── capabilities.json       # Server self-description
+├── dream_graph.json        # [runtime] Speculative edges from dreaming
+├── tension_log.json        # [runtime] Detected contradictions and gaps
+├── dream_history.json      # [runtime] Audit trail of dream cycles
+├── candidate_edges.json    # [runtime] Normalization results
+├── validated_edges.json    # [runtime] Promoted edges that passed the Truth Filter
+├── adr_log.json            # [runtime] Architecture Decision Records
+├── ui_registry.json        # [runtime] Semantic UI element registry
+├── threat_log.json         # [runtime] Adversarial scan results (NIGHTMARE)
+└── dream_archetypes.json   # [runtime] Federated dream archetypes
 ```
 
 ---
 
-## MCP Tools (26 total)
+## MCP Tools (34 total)
 
-### Cognitive Tools (7)
+### Cognitive Tools (14)
 
 | Tool | Description |
 |---|---|
-| `dream_cycle` | Run a full AWAKE -> REM -> NORMALIZING cycle with configurable strategy and dream count |
+| `dream_cycle` | Run a full AWAKE → REM → NORMALIZING cycle with configurable strategy and dream count |
 | `cognitive_status` | Current engine state, cycle count, graph stats, tension summary |
 | `get_dream_insights` | Strongest hypotheses, clusters, active tensions, health assessment |
 | `query_dreams` | Search/filter dream data by type, domain, confidence, status |
 | `normalize_dreams` | Manually trigger normalization of dream artifacts |
 | `resolve_tension` | Close a tension with authority (human/system), resolution type, and evidence |
 | `clear_dreams` | Reset cognitive state with confirmation gate (preserves the knowledge graph) |
+| `nightmare_cycle` | Run an adversarial scan: AWAKE → NIGHTMARE → AWAKE. Five vulnerability strategies |
+| `get_causal_insights` | Discover cause→effect chains across dream history |
+| `get_temporal_insights` | Analyze tension trajectories, predictions, seasonal patterns, retrocognition |
+| `export_dream_archetypes` | Extract anonymized patterns for cross-project sharing |
+| `import_dream_archetypes` | Import archetypes from another DreamGraph instance |
+| `get_system_narrative` | Generate a coherent story of the system's evolving understanding |
+| `get_remediation_plan` | Generate concrete fix plans for high-urgency tensions |
 
-### Sense Tools (11)
+### Sense Tools (12)
 
 | Tool | Description |
 |---|---|
@@ -392,6 +546,7 @@ data/
 | `get_workflow` | Retrieve a specific workflow by ID |
 | `search_data_model` | Search for a data entity by name |
 | `query_resource` | Query features, workflows, or data model with filters |
+| `query_runtime_metrics` | Fetch and correlate live runtime metrics (OpenTelemetry / Prometheus) |
 
 ### Documentation Intelligence Tools (8)
 
@@ -406,7 +561,7 @@ data/
 | `generate_ui_migration_plan` | Gap analysis between source and target platforms with data contract summaries and complexity estimates |
 | `export_living_docs` | Export the knowledge graph as structured Markdown for Docusaurus, Nextra, MkDocs, or plain GitHub. Stateless and idempotent |
 
-### MCP Resources (8)
+### MCP Resources (10)
 
 Read-only views the agent can inspect at any time:
 
@@ -420,12 +575,14 @@ Read-only views the agent can inspect at any time:
 | History | `dream://history` | Audit trail of every dream cycle |
 | ADRs | `dream://adrs` | Architecture Decision Records with context, alternatives, and guard rails |
 | UI Registry | `dream://ui-registry` | Semantic UI element definitions with data contracts and platform implementations |
+| Threats | `dream://threats` | Adversarial scan results — threat edges with severity and CWE IDs |
+| Archetypes | `dream://archetypes` | Federated dream archetypes — anonymized transferable patterns |
 
 ---
 
 ## Dream Strategies
 
-The dreamer uses 6 strategies to generate speculative edges:
+The dreamer uses 7 strategies to generate speculative edges:
 
 | Strategy | What it does |
 |---|---|
@@ -433,10 +590,53 @@ The dreamer uses 6 strategies to generate speculative edges:
 | **Weak Reinforcement** | Finds weak edges and looks for indirect support via shared third-party connections |
 | **Cross-Domain Bridging** | Connects entities from different domains that share keywords |
 | **Missing Abstraction** | Detects entity clusters that would benefit from a unifying hub node |
-| **Symmetry Completion** | Finds A->B edges where B->A is missing and proposes the reverse |
+| **Symmetry Completion** | Finds A→B edges where B→A is missing and proposes the reverse |
 | **Tension-Directed** | Uses unresolved tensions (sorted by urgency) to focus dreaming on problem areas |
+| **Causal Replay** | Mines dream history for cause→effect patterns and generates edges along discovered causal chains |
 
 Strategies adapt over time. After 3 consecutive zero-yield cycles, a strategy is benched and its budget is redistributed to active strategies. Every 6th cycle it gets a probe run to check if conditions have changed.
+
+---
+
+## The Cognitive State Machine
+
+DreamGraph operates through four cognitive states with strict transition rules:
+
+```
+                    ┌──────────────────────────────────┐
+                    │                                  │
+                    ▼                                  │
+              ┌──────────┐                             │
+              │  AWAKE   │─────────────┐               │
+              └──────────┘             │               │
+                    │                  │               │
+              enterRem()         enterNightmare()      │
+                    │                  │               │
+                    ▼                  ▼               │
+              ┌──────────┐      ┌───────────┐         │
+              │   REM    │      │ NIGHTMARE │         │
+              └──────────┘      └───────────┘         │
+                    │                  │               │
+          enterNormalizing()   wakeFromNightmare()     │
+                    │                  │               │
+                    ▼                  │               │
+              ┌──────────────┐        │               │
+              │ NORMALIZING  │────────┘               │
+              └──────────────┘                        │
+                    │                                  │
+                  wake()                               │
+                    │                                  │
+                    └──────────────────────────────────┘
+```
+
+| State | Purpose | Safety |
+|---|---|---|
+| **AWAKE** | Idle, ready for commands | Only state that accepts external input |
+| **REM** | Speculative dreaming — generates candidate edges | Cannot modify fact graph |
+| **NORMALIZING** | Truth Filter — validates, promotes, or rejects dreams | Strict scoring gates |
+| **NIGHTMARE** | Adversarial scanning — actively tries to find vulnerabilities | Read-only threat analysis |
+
+An **interrupt** from any state returns safely to AWAKE with in-progress data quarantined.
 
 ---
 
@@ -500,10 +700,13 @@ Every dream artifact passes through a scoring pipeline before classification.
 After ~100 cycles, the system may:
 
 - Detect multiple security issues across API routes
-- Identify a shared root cause (e.g. missing RLS policies)
-- Propose a structural fix
+- Identify a shared root cause via **causal reasoning**
+- Run a **nightmare scan** to find additional attack surfaces
+- Propose **remediation plans** with file-level fixes
+- Generate a **narrative** explaining how understanding evolved
 - Validate fixes against code and database schema
 - Resolve all related tensions with evidence
+- **Export archetypes** so other projects learn from the pattern
 - Shift focus to higher-level architectural improvements
 - Power down when the system reaches a "healthy" state
 
@@ -523,6 +726,9 @@ After longer runs:
 - critical issues converge to zero
 - only low-confidence tensions remain
 - the system reaches a stable "healthy" state
+- **causal chains** reveal systemic patterns
+- **temporal analysis** predicts where tensions will emerge next
+- **system narratives** document the journey
 
 ---
 
@@ -546,6 +752,8 @@ Core principles:
 - **Speculation with discipline** — dreams freely but validates with evidence
 - **Memory with forgetting** — retains what matters, decays what doesn't
 - **Autonomy with control** — runs independently but defers all decisions to humans
+- **Adversarial honesty** — actively tries to break its own conclusions
+- **Narrative coherence** — understanding should tell a story, not just accumulate data
 
 ---
 
@@ -556,7 +764,8 @@ This project introduces a cognitive model with the following primitives:
 | Term | Meaning |
 |---|---|
 | **Tension** | An unresolved question, inconsistency, or hypothesis |
-| **Dream Cycle** | A controlled speculative reasoning phase (AWAKE -> REM -> NORMALIZING) |
+| **Dream Cycle** | A controlled speculative reasoning phase (AWAKE → REM → NORMALIZING) |
+| **Nightmare Cycle** | An adversarial scan phase (AWAKE → NIGHTMARE → AWAKE) |
 | **Truth Filter** | A validation pipeline grounded in real data — code, schema, graph structure |
 | **Speculative Memory** | Unproven but retained hypotheses (latent edges in the dream graph) |
 | **Resolution** | Evidence-based closure of a tension |
@@ -564,32 +773,21 @@ This project introduces a cognitive model with the following primitives:
 | **Active Set** | The top prioritized tensions currently driving reasoning |
 | **Validated Edge** | A speculative connection that passed the Truth Filter and was promoted |
 | **Dream Edge** | A speculative connection that has not yet been evaluated |
+| **Threat Edge** | A vulnerability identified during adversarial scanning |
+| **Causal Chain** | A discovered cause→effect sequence across entities |
+| **Archetype** | An anonymized, transferable pattern extracted from validated knowledge |
 | **Reinforcement** | When the dreamer re-discovers an existing connection, strengthening confidence |
+| **Remediation Plan** | A concrete, step-by-step fix proposal generated from a tension |
+| **System Narrative** | A coherent story of how understanding evolved over dream cycles |
 
 You can think of DreamGraph as:
 
 - Tensions = questions
 - Dream cycles = thinking
+- Nightmare cycles = stress testing
 - Truth filter = reality check
 - Resolution = decision
-
-These terms make the model easy to understand and communicate. If this sticks, people will start saying things like:
-
-- "What's your tension model?"
-- "Do you run background dream cycles?"
-- "How strict is your truth filter?"
-- "Do you retain speculative memory?"
-
----
-
-## Future Directions
-
-- Multi-agent belief systems
-- Dream coalition experiments
-- Adaptive signal weighting
-- AST-level code understanding
-- Safe write operations (with human approval gates)
-- IDE integration
+- Narrative = memory
 
 ---
 
@@ -609,6 +807,9 @@ This is an experimental system. Contributions welcome in:
 - Performance improvements
 - Safety mechanisms
 - New dream strategies
+- Adversarial scan patterns
+- Temporal analysis algorithms
+- Federation protocols
 
 ---
 

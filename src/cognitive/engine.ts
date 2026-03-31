@@ -1,9 +1,13 @@
 /**
  * DreamGraph Cognitive Engine — State machine and persistence.
  *
- * The engine manages the three cognitive states (AWAKE, REM, NORMALIZING)
+ * The engine manages the four cognitive states (AWAKE, REM, NORMALIZING, NIGHTMARE)
  * and enforces strict boundaries between them. It handles state transitions,
  * interruption protocol, dream graph I/O, and state introspection.
+ *
+ * State machine transitions:
+ *   AWAKE → REM → NORMALIZING → AWAKE  (normal dream cycle)
+ *   AWAKE → NIGHTMARE → AWAKE           (adversarial scan)
  *
  * Enhanced with:
  * - Dream decay: edges/nodes lose confidence and TTL each cycle
@@ -141,6 +145,22 @@ class CognitiveEngine {
     logger.info("Cognitive state: NORMALIZING → AWAKE (natural wake cycle complete)");
   }
 
+  /** Transition: AWAKE → NIGHTMARE (adversarial dreaming) */
+  enterNightmare(): void {
+    this.assertState("awake", "enterNightmare");
+    this.state = "nightmare";
+    this.lastStateChange = new Date().toISOString();
+    logger.info("Cognitive state: AWAKE → NIGHTMARE (adversarial scan begins)");
+  }
+
+  /** Transition: NIGHTMARE → AWAKE (adversarial scan complete) */
+  wakeFromNightmare(): void {
+    this.assertState("nightmare", "wakeFromNightmare");
+    this.state = "awake";
+    this.lastStateChange = new Date().toISOString();
+    logger.info("Cognitive state: NIGHTMARE → AWAKE (adversarial scan complete)");
+  }
+
   /**
    * INTERRUPTION HANDLER
    *
@@ -157,7 +177,7 @@ class CognitiveEngine {
     logger.warn(`INTERRUPTION: Forcing wake from "${previousState}" state`);
 
     // Quarantine any in-progress dream data
-    if (previousState === "rem") {
+    if (previousState === "rem" || previousState === "nightmare") {
       await this.quarantineDreams();
     }
 

@@ -27,8 +27,8 @@
 // Cognitive States
 // ---------------------------------------------------------------------------
 
-/** The three cognitive states the system can occupy */
-export type CognitiveStateName = "awake" | "rem" | "normalizing";
+/** The four cognitive states the system can occupy */
+export type CognitiveStateName = "awake" | "rem" | "normalizing" | "nightmare";
 
 /** Dream generation strategies */
 export type DreamStrategy =
@@ -39,7 +39,17 @@ export type DreamStrategy =
   | "symmetry_completion"
   | "tension_directed"
   | "reflective"
+  | "causal_replay"
   | "all";
+
+/** Adversarial dream strategies (used in NIGHTMARE state) */
+export type AdversarialStrategy =
+  | "privilege_escalation"
+  | "data_leak_path"
+  | "injection_surface"
+  | "missing_validation"
+  | "broken_access_control"
+  | "all_threats";
 
 /** Three-outcome normalization classifier */
 export type NormalizationOutcome = "validated" | "latent" | "rejected";
@@ -1059,5 +1069,347 @@ export interface ExportLivingDocsOutput {
   total_files: number;
   total_bytes: number;
   sections_exported: string[];
+  timestamp: string;
+}
+
+// ===========================================================================
+// CAUSAL REASONING ENGINE
+// ===========================================================================
+
+/** A single causal link: entity A changing tends to cause tension in entity B */
+export interface CausalLink {
+  cause_entity: string;
+  effect_entity: string;
+  /** How many dream cycles typically elapse between cause and effect */
+  lag_cycles: number;
+  /** Correlation strength (0–1) */
+  correlation_strength: number;
+  /** How many times this pattern has been observed */
+  observed_count: number;
+  first_observed: string;
+  last_observed: string;
+  description: string;
+}
+
+/** A multi-hop causal chain: A → B → C */
+export interface CausalChain {
+  id: string;
+  links: CausalLink[];
+  /** Product of all link strengths */
+  total_strength: number;
+  root_cause: string;
+  terminal_effect: string;
+  discovered_at: string;
+}
+
+/** Output of causal analysis */
+export interface CausalInsights {
+  chains: CausalChain[];
+  propagation_hotspots: Array<{
+    entity: string;
+    downstream_count: number;
+    avg_lag: number;
+  }>;
+  predicted_impacts: Array<{
+    if_changed: string;
+    likely_affected: string[];
+    confidence: number;
+  }>;
+}
+
+// ===========================================================================
+// MULTI-SYSTEM DREAMING (FEDERATION)
+// ===========================================================================
+
+/** An anonymized, transferable pattern extracted from validated edges */
+export interface DreamArchetype {
+  id: string;
+  /** Pattern type (e.g., "missing_rls", "orphan_route", "unscoped_api") */
+  pattern_type: string;
+  description: string;
+  /** Abstracted entity roles (e.g., ["api_endpoint", "data_entity"]) */
+  entity_roles: string[];
+  /** The relationship pattern that was validated */
+  relation_pattern: string;
+  confidence: number;
+  /** Source instance ID (anonymized) */
+  source_instance?: string;
+  /** How many times this archetype has been validated across instances */
+  times_validated: number;
+  created_at: string;
+}
+
+/** Configuration for federated dream exchange */
+export interface FederationConfig {
+  /** Unique identifier for this DreamGraph instance */
+  instance_id: string;
+  /** Whether to allow exporting archetypes */
+  allow_export: boolean;
+  /** Whether to allow importing archetypes */
+  allow_import: boolean;
+  /** Anonymize entity names in exports */
+  anonymize: boolean;
+}
+
+export const DEFAULT_FEDERATION_CONFIG: FederationConfig = {
+  instance_id: `dreamgraph_${Date.now()}`,
+  allow_export: true,
+  allow_import: true,
+  anonymize: true,
+};
+
+/** File structure for federated archetype exchange */
+export interface FederatedExchangeFile {
+  metadata: {
+    description: string;
+    schema_version: string;
+    source_instance: string;
+    exported_at: string;
+    total_archetypes: number;
+  };
+  archetypes: DreamArchetype[];
+}
+
+/** Output of archetype export */
+export interface ExportArchetypesOutput {
+  archetypes_exported: number;
+  file_path: string;
+  instance_id: string;
+  timestamp: string;
+}
+
+/** Output of archetype import */
+export interface ImportArchetypesOutput {
+  archetypes_imported: number;
+  archetypes_skipped: number;
+  tensions_created: number;
+  source_instance: string;
+  timestamp: string;
+}
+
+// ===========================================================================
+// TEMPORAL DREAMING
+// ===========================================================================
+
+/** Trajectory of a tension's urgency over time */
+export interface TensionTrajectory {
+  tension_id: string;
+  domain: TensionDomain;
+  urgency_over_time: Array<{ cycle: number; urgency: number }>;
+  peak_urgency: number;
+  resolution_cycle?: number;
+  pattern: "rising" | "falling" | "stable" | "spike" | "resolved";
+}
+
+/** A predicted future tension based on historical patterns */
+export interface TemporalPrediction {
+  entity_id: string;
+  predicted_tension_type: string;
+  confidence: number;
+  estimated_cycles_to_critical: number;
+  basis: string;
+}
+
+/** Seasonal pattern detection */
+export interface SeasonalPattern {
+  domain: string;
+  period_cycles: number;
+  description: string;
+  next_expected_peak: number;
+}
+
+/** Output of temporal analysis */
+export interface TemporalInsights {
+  trajectories: TensionTrajectory[];
+  predictions: TemporalPrediction[];
+  seasonal_patterns: SeasonalPattern[];
+  retrocognition: Array<{
+    pattern: string;
+    past_resolution: string;
+    latent_matches: string[];
+  }>;
+  time_horizon: {
+    total_cycles_analyzed: number;
+    oldest_data: string;
+    newest_data: string;
+  };
+}
+
+// ===========================================================================
+// ADVERSARIAL DREAMING (NIGHTMARE STATE)
+// ===========================================================================
+
+/** Threat severity levels */
+export type ThreatSeverity = "critical" | "high" | "medium" | "low" | "info";
+
+/** A threat edge — extends DreamEdge with security metadata */
+export interface ThreatEdge {
+  id: string;
+  from: string;
+  to: string;
+  threat_category: AdversarialStrategy;
+  severity: ThreatSeverity;
+  /** CWE identifier if applicable */
+  cwe_id?: string;
+  /** How the threat could be exploited */
+  attack_vector: string;
+  /** Entities that would be affected */
+  blast_radius: string[];
+  confidence: number;
+  description: string;
+  /** Suggested mitigation */
+  mitigation: string;
+  discovered_at: string;
+  dream_cycle: number;
+}
+
+/** Output of a nightmare cycle */
+export interface NightmareResult {
+  cycle_number: number;
+  threats_found: ThreatEdge[];
+  attack_surfaces: Array<{
+    entity: string;
+    exposure_type: string;
+    severity: ThreatSeverity;
+  }>;
+  summary: {
+    critical: number;
+    high: number;
+    medium: number;
+    low: number;
+    info: number;
+  };
+  duration_ms: number;
+}
+
+/** File for persisting threat findings */
+export interface ThreatLogFile {
+  metadata: {
+    description: string;
+    schema_version: string;
+    total_threats: number;
+    last_nightmare_cycle: string | null;
+    total_nightmare_cycles: number;
+  };
+  threats: ThreatEdge[];
+}
+
+// ===========================================================================
+// EMBODIED SENSES (RUNTIME AWARENESS)
+// ===========================================================================
+
+/** Runtime metric source configuration */
+export interface RuntimeMetricConfig {
+  /** URL endpoint for metrics (Prometheus /metrics, OTEL collector, or custom JSON) */
+  endpoint?: string;
+  /** Metric source type */
+  type: "opentelemetry" | "prometheus" | "custom_json";
+  /** Fetch timeout in milliseconds */
+  timeout_ms: number;
+}
+
+export const DEFAULT_RUNTIME_CONFIG: RuntimeMetricConfig = {
+  type: "custom_json",
+  timeout_ms: 5000,
+};
+
+/** A single runtime observation for an entity */
+export interface RuntimeObservation {
+  entity_id: string;
+  metric_type: "request_count" | "error_rate" | "latency_p99" | "throughput" | "memory_usage";
+  value: number;
+  unit: string;
+  observed_at: string;
+}
+
+/** Behavioral correlation between two entities observed at runtime */
+export interface BehavioralCorrelation {
+  entities: [string, string];
+  correlation_type: "sequential_usage" | "co_occurrence" | "error_cascade";
+  strength: number;
+  sample_size: number;
+  description: string;
+}
+
+/** Output of runtime senses query */
+export interface RuntimeInsightsOutput {
+  observations: RuntimeObservation[];
+  correlations: BehavioralCorrelation[];
+  feature_usage_ranking: Array<{ entity: string; usage_score: number }>;
+  dead_features: string[];
+  error_hotspots: Array<{ entity: string; error_rate: number }>;
+  source: string;
+  timestamp: string;
+}
+
+// ===========================================================================
+// DREAM NARRATIVES
+// ===========================================================================
+
+/** Narrative depth level */
+export type NarrativeDepth = "executive" | "technical" | "full";
+
+/** A chapter in the system's autobiography */
+export interface NarrativeChapter {
+  title: string;
+  cycle_range: [number, number];
+  key_discoveries: string[];
+  tensions_addressed: string[];
+  narrative_text: string;
+}
+
+/** The system's generated narrative of its own understanding */
+export interface SystemNarrative {
+  title: string;
+  depth: NarrativeDepth;
+  generated_at: string;
+  total_cycles_covered: number;
+  chapters: NarrativeChapter[];
+  epilogue: string;
+  overall_health: string;
+}
+
+// ===========================================================================
+// INTERVENTION ENGINE
+// ===========================================================================
+
+/** A file-level change in a remediation plan */
+export interface FileChange {
+  file_path: string;
+  description: string;
+  change_type: "modify" | "create" | "delete";
+  rationale: string;
+}
+
+/** A single step in a remediation plan */
+export interface RemediationStep {
+  order: number;
+  description: string;
+  files: FileChange[];
+  tests_to_add: string[];
+  estimated_effort: "trivial" | "small" | "medium" | "large";
+}
+
+/** A complete remediation plan for a validated tension */
+export interface RemediationPlan {
+  id: string;
+  tension_id: string;
+  title: string;
+  severity: "critical" | "high" | "medium" | "low";
+  steps: RemediationStep[];
+  /** ADR IDs that may conflict with this remediation */
+  adr_conflicts: string[];
+  /** New tensions this fix might introduce */
+  new_tensions_predicted: string[];
+  confidence: number;
+  generated_at: string;
+}
+
+/** Output of remediation plan generation */
+export interface RemediationPlanOutput {
+  plans: RemediationPlan[];
+  total_tensions_analyzed: number;
+  plans_generated: number;
+  skipped_low_urgency: number;
   timestamp: string;
 }

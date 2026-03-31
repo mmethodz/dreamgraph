@@ -12,14 +12,24 @@
  *   dream://history    — Audit trail of dream cycles
  *   dream://adrs       — Architecture Decision Records
  *   dream://ui-registry— Semantic UI element registry
+ *   dream://threats    — Adversarial scan results (threat log)
+ *   dream://archetypes — Federated dream archetypes
  *
  * Tools (cognitive operations):
- *   dream_cycle        — Full dream → normalize → wake cycle (with decay + dedup + history)
- *   normalize_dreams   — Manual normalization pass
- *   cognitive_status   — Read current state
- *   query_dreams       — Search dream/validated data
- *   clear_dreams       — Reset dream data (safety valve)
- *   get_dream_insights — Introspection: strongest hypotheses, clusters, tensions
+ *   dream_cycle               — Full dream → normalize → wake cycle
+ *   normalize_dreams           — Manual normalization pass
+ *   cognitive_status            — Read current state
+ *   query_dreams                — Search dream/validated data
+ *   clear_dreams                — Reset dream data (safety valve)
+ *   get_dream_insights          — Introspection: strongest hypotheses, clusters, tensions
+ *   resolve_tension             — Close a tension with authority
+ *   nightmare_cycle             — Adversarial security scan (NIGHTMARE state)
+ *   get_causal_insights         — Causal reasoning analysis
+ *   get_temporal_insights       — Temporal pattern analysis
+ *   export_dream_archetypes     — Federation: export anonymized patterns
+ *   import_dream_archetypes     — Federation: import patterns
+ *   get_system_narrative        — Dream narrative / system autobiography
+ *   get_remediation_plan        — Intervention: concrete fix plans
  */
 
 import { z } from "zod";
@@ -31,6 +41,12 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { engine } from "./engine.js";
 import { dream } from "./dreamer.js";
 import { normalize } from "./normalizer.js";
+import { analyzeCausality } from "./causal.js";
+import { analyzeTemporalPatterns } from "./temporal.js";
+import { exportArchetypes, importArchetypes, getArchetypes } from "./federation.js";
+import { nightmare, getThreatLog, clearThreatLog } from "./adversarial.js";
+import { generateNarrative } from "./narrator.js";
+import { generateRemediationPlans } from "./intervention.js";
 import { logger } from "../utils/logger.js";
 import { success, error, safeExecute } from "../utils/errors.js";
 import type {
@@ -42,6 +58,13 @@ import type {
   DreamInsights,
   DreamHistoryEntry,
   ToolResponse,
+  CausalInsights,
+  TemporalInsights,
+  ExportArchetypesOutput,
+  ImportArchetypesOutput,
+  NightmareResult,
+  SystemNarrative,
+  RemediationPlanOutput,
 } from "../types/index.js";
 
 // ---------------------------------------------------------------------------
@@ -241,7 +264,55 @@ export function registerCognitiveResources(server: McpServer): void {
     }
   );
 
-  logger.info("Registered 8 cognitive resources");
+  // dream://threats — Adversarial scan results (threat log)
+  server.resource(
+    "dream-threats",
+    "dream://threats",
+    {
+      description:
+        "Threat Log — adversarial scan results from NIGHTMARE state. Contains identified security threats, attack surfaces, and severity assessments.",
+      mimeType: "application/json",
+    },
+    async (uri) => {
+      logger.debug(`Resource requested: ${uri.href}`);
+      const data = await loadThreatLogForResource();
+      return {
+        contents: [
+          {
+            uri: uri.href,
+            mimeType: "application/json",
+            text: JSON.stringify(data, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  // dream://archetypes — Federated dream archetypes
+  server.resource(
+    "dream-archetypes",
+    "dream://archetypes",
+    {
+      description:
+        "Dream Archetypes — anonymized, transferable patterns extracted from validated edges. Used for multi-system dream federation.",
+      mimeType: "application/json",
+    },
+    async (uri) => {
+      logger.debug(`Resource requested: ${uri.href}`);
+      const data = await getArchetypes();
+      return {
+        contents: [
+          {
+            uri: uri.href,
+            mimeType: "application/json",
+            text: JSON.stringify(data, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  logger.info("Registered 10 cognitive resources");
 }
 
 // ---------------------------------------------------------------------------
@@ -259,6 +330,12 @@ async function loadADRLogForResource(): Promise<unknown> {
 async function loadUIRegistryForResource(): Promise<unknown> {
   const p = resolve(cogProjectRoot, "data", "ui_registry.json");
   if (!existsSync(p)) return { metadata: { total_elements: 0 }, elements: [] };
+  return JSON.parse(await readFile(p, "utf-8"));
+}
+
+async function loadThreatLogForResource(): Promise<unknown> {
+  const p = resolve(cogProjectRoot, "data", "threat_log.json");
+  if (!existsSync(p)) return { metadata: { total_threats: 0 }, threats: [] };
   return JSON.parse(await readFile(p, "utf-8"));
 }
 
@@ -282,12 +359,13 @@ export function registerCognitiveTools(server: McpServer): void {
           "missing_abstraction",
           "symmetry_completion",
           "tension_directed",
+          "causal_replay",
           "reflective",
           "all",
         ])
         .optional()
         .describe(
-          'Dream strategy. "gap_detection": find unconnected related entities. "weak_reinforcement": strengthen weak edges. "cross_domain": bridge different domains. "missing_abstraction": propose unifying features. "symmetry_completion": add reverse edges. "tension_directed": focus on unresolved tensions. "reflective": agent-directed insights from code reading. "all": run all strategies. Default: "all".'
+          'Dream strategy. "gap_detection": find unconnected related entities. "weak_reinforcement": strengthen weak edges. "cross_domain": bridge different domains. "missing_abstraction": propose unifying features. "symmetry_completion": add reverse edges. "tension_directed": focus on unresolved tensions. "causal_replay": mine history for cause→effect chains. "reflective": agent-directed insights from code reading. "all": run all strategies. Default: "all".'
         ),
       max_dreams: z
         .number()
@@ -1004,5 +1082,277 @@ export function registerCognitiveTools(server: McpServer): void {
       };
     }
   );
-  logger.info("Registered 7 cognitive tools");
+
+  // =========================================================================
+  // nightmare_cycle — Adversarial dream scan (AWAKE → NIGHTMARE → AWAKE)
+  // =========================================================================
+  server.tool(
+    "nightmare_cycle",
+    "Run an adversarial dream scan: AWAKE → NIGHTMARE → AWAKE. " +
+      "Scans the fact graph for security vulnerabilities and anti-patterns. " +
+      "Produces threat edges with severity, CWE IDs, and blast radius. " +
+      "Results are persisted to the threat log.",
+    {
+      strategy: z
+        .enum([
+          "privilege_escalation",
+          "data_leak_path",
+          "injection_surface",
+          "missing_validation",
+          "broken_access_control",
+          "all",
+        ])
+        .optional()
+        .describe(
+          'Adversarial strategy. "all" runs all five. Default: "all".'
+        ),
+    },
+    async ({ strategy }) => {
+      const strat = strategy ?? "all";
+      logger.info(`nightmare_cycle tool called: strategy=${strat}`);
+
+      const result = await safeExecute<NightmareResult>(
+        async (): Promise<ToolResponse<NightmareResult>> => {
+          // Ensure awake
+          if (engine.getState() !== "awake") {
+            await engine.interrupt();
+          }
+
+          // AWAKE → NIGHTMARE
+          engine.enterNightmare();
+
+          const nightmareResult = await nightmare(strat as any);
+
+          // NIGHTMARE → AWAKE
+          engine.wakeFromNightmare();
+
+          return success(nightmareResult);
+        }
+      );
+
+      // Safety: ensure awake
+      if (engine.getState() !== "awake") {
+        await engine.interrupt();
+      }
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  // =========================================================================
+  // get_causal_insights — Causal reasoning analysis
+  // =========================================================================
+  server.tool(
+    "get_causal_insights",
+    "Analyze dream history for causal inference chains. Discovers cause→effect relationships " +
+      "between entities, builds propagation chains, and identifies hotspots where changes cascade.",
+    {},
+    async () => {
+      logger.debug("get_causal_insights tool called");
+
+      const result = await safeExecute<CausalInsights>(
+        async (): Promise<ToolResponse<CausalInsights>> => {
+          const insights = await analyzeCausality();
+          return success(insights);
+        }
+      );
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  // =========================================================================
+  // get_temporal_insights — Temporal dreaming analysis
+  // =========================================================================
+  server.tool(
+    "get_temporal_insights",
+    "Analyze temporal patterns in dream history: tension trajectories (rising/falling/spike), " +
+      "future predictions (precognition), seasonal patterns, and retrocognitive matches " +
+      "(past patterns recurring in new contexts).",
+    {},
+    async () => {
+      logger.debug("get_temporal_insights tool called");
+
+      const result = await safeExecute<TemporalInsights>(
+        async (): Promise<ToolResponse<TemporalInsights>> => {
+          const insights = await analyzeTemporalPatterns();
+          return success(insights);
+        }
+      );
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  // =========================================================================
+  // export_dream_archetypes — Federation: export anonymized patterns
+  // =========================================================================
+  server.tool(
+    "export_dream_archetypes",
+    "Extract anonymized architectural patterns (archetypes) from validated edges " +
+      "for sharing across DreamGraph instances. Patterns are abstracted beyond " +
+      "system-specific names to enable cross-project learning.",
+    {},
+    async () => {
+      logger.debug("export_dream_archetypes tool called");
+
+      const result = await safeExecute<ExportArchetypesOutput>(
+        async (): Promise<ToolResponse<ExportArchetypesOutput>> => {
+          const output = await exportArchetypes();
+          return success(output);
+        }
+      );
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  // =========================================================================
+  // import_dream_archetypes — Federation: import patterns from another instance
+  // =========================================================================
+  server.tool(
+    "import_dream_archetypes",
+    "Import dream archetypes from another DreamGraph instance. " +
+      "Archetypes are deduped and merged into the local archetype store. " +
+      "Imported patterns can inform future dream cycles.",
+    {
+      file_path: z
+        .string()
+        .describe("Path to the archetype exchange file (JSON) exported by another instance."),
+    },
+    async ({ file_path }) => {
+      logger.info(`import_dream_archetypes tool called: path=${file_path}`);
+
+      const result = await safeExecute<ImportArchetypesOutput>(
+        async (): Promise<ToolResponse<ImportArchetypesOutput>> => {
+          const output = await importArchetypes(file_path);
+          return success(output);
+        }
+      );
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  // =========================================================================
+  // get_system_narrative — Dream narratives / system autobiography
+  // =========================================================================
+  server.tool(
+    "get_system_narrative",
+    "Generate a coherent narrative of the system's evolving understanding. " +
+      "Not a log — a STORY of how discoveries developed, tensions formed, " +
+      "and understanding deepened across dream cycles. Three depth levels available.",
+    {
+      depth: z
+        .enum(["executive", "technical", "full"])
+        .optional()
+        .describe(
+          '"executive": 1-page summary for stakeholders. ' +
+          '"technical": detailed findings with entity references. ' +
+          '"full": complete cycle-by-cycle narrative. Default: "technical".'
+        ),
+    },
+    async ({ depth }) => {
+      const d = depth ?? "technical";
+      logger.info(`get_system_narrative tool called: depth=${d}`);
+
+      const result = await safeExecute<SystemNarrative>(
+        async (): Promise<ToolResponse<SystemNarrative>> => {
+          const narrative = await generateNarrative(d);
+          return success(narrative);
+        }
+      );
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  // =========================================================================
+  // get_remediation_plan — Intervention engine: insight → action
+  // =========================================================================
+  server.tool(
+    "get_remediation_plan",
+    "Generate concrete remediation plans from high-urgency unresolved tensions. " +
+      "Each plan contains ordered steps, file-level change descriptions, " +
+      "test suggestions, effort estimates, ADR conflict checks, and predicted new tensions.",
+    {
+      max_plans: z
+        .number()
+        .min(1)
+        .max(20)
+        .optional()
+        .describe("Maximum number of plans to generate (default: 5)."),
+      min_urgency: z
+        .number()
+        .min(0)
+        .max(1)
+        .optional()
+        .describe("Minimum tension urgency threshold (default: 0.3)."),
+    },
+    async ({ max_plans, min_urgency }) => {
+      const maxP = max_plans ?? 5;
+      const minU = min_urgency ?? 0.3;
+      logger.info(`get_remediation_plan tool called: max=${maxP}, minUrgency=${minU}`);
+
+      const result = await safeExecute<RemediationPlanOutput>(
+        async (): Promise<ToolResponse<RemediationPlanOutput>> => {
+          const output = await generateRemediationPlans(maxP, minU);
+          return success(output);
+        }
+      );
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  logger.info("Registered 14 cognitive tools");
 }

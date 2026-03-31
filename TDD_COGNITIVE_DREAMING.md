@@ -1,10 +1,24 @@
 # Technical Design Document: DreamGraph Cognitive Dreaming System
 
-**Version:** 3.0  
-**Date:** 2026-03-21  
-**Author:** Mika Jussila, Siteledger Solutions Oy
+**Version:** 5.0  
+**Date:** 2026-03-31  
+**Author:** Mika Jussila, Siteledger Solutions Oy  
 **Status:** Implemented  
 
+> **Changelog v5.0** — Seven advanced cognitive capabilities: (1) Causal
+> Reasoning Engine — mines history for cause→effect inference chains,
+> `causal_replay` dream strategy. (2) Adversarial Dreaming — NIGHTMARE
+> cognitive state with 5 vulnerability scan strategies. (3) Temporal
+> Dreaming — retrocognition, precognition, seasonal patterns. (4) Multi-
+> System Dream Federation — anonymized archetype export/import. (5) Dream
+> Narratives — system autobiography. (6) Intervention Engine — concrete
+> remediation plans from tensions. (7) Embodied Senses — runtime/APM
+> awareness via OpenTelemetry/Prometheus.
+>
+> **Changelog v4.0** — Tension system overhaul (Appendix C): TTL + urgency
+> decay, domain grouping (11 categories), resolution with authority tracking,
+> active tension cap (50), `resolve_tension` tool.
+>
 > **Changelog v3.0** — Speculative memory: normalization becomes a three-outcome
 > classifier (validated / latent / rejected) instead of binary pass/fail.
 > 5-state lifecycle (candidate → latent → validated → rejected → expired),
@@ -70,13 +84,21 @@ This gives AI agents using the MCP not just memory, but **imagination** — boun
 | **FACT GRAPH** | features.json, workflows.json, data_model.json, index.json | Immutable (additive only via normalization) | TRUSTED |
 | **DREAM GRAPH** | dream_graph.json, candidate_edges.json, validated_edges.json, tension_log.json, dream_history.json | Freely writable during REM | UNTRUSTED until validated |
 
-### 2.2 Three Cognitive States
+### 2.2 Four Cognitive States
 
 | State | Purpose | May Read | May Write | May Hallucinate |
 |-------|---------|----------|-----------|-----------------|
 | **AWAKE** | Serve truth | FACT GRAPH + validated_edges | Nothing | NO |
 | **REM** | Explore possibilities | Internal copies only | dream_graph.json | YES |
 | **NORMALIZING** | Validate dreams | FACT GRAPH + dream_graph | candidate_edges.json, validated_edges.json | NO |
+| **NIGHTMARE** | Adversarial scanning | FACT GRAPH + knowledge graph | threat_log.json | NO (adversarial inference) |
+
+**State Transitions:**
+
+```
+AWAKE → REM → NORMALIZING → AWAKE    (normal dream cycle)
+AWAKE → NIGHTMARE → AWAKE              (adversarial scan)
+```
 
 ---
 
@@ -330,7 +352,7 @@ interface DreamHistoryFile {
 ### 3.7 Cognitive State (enhanced)
 
 ```typescript
-type CognitiveStateName = "awake" | "rem" | "normalizing";
+type CognitiveStateName = "awake" | "rem" | "normalizing" | "nightmare";
 
 interface DreamGraphStats {
   total_nodes: number;
@@ -477,10 +499,10 @@ interface DreamInsights {
 
 ### 5.1 Module: `src/cognitive/engine.ts`
 
-The cognitive engine is the central state machine managing transitions between AWAKE → REM → NORMALIZING → AWAKE.
+The cognitive engine is the central state machine managing transitions between AWAKE → REM → NORMALIZING → AWAKE (normal dream cycle) and AWAKE → NIGHTMARE → AWAKE (adversarial scan).
 
 **Responsibilities:**
-- Track current cognitive state
+- Track current cognitive state (four states: AWAKE, REM, NORMALIZING, NIGHTMARE)
 - Enforce state transition rules
 - Prevent illegal operations (e.g., writing fact graph during REM)
 - Provide state introspection
@@ -488,30 +510,38 @@ The cognitive engine is the central state machine managing transitions between A
 - **Deduplicate** new dreams against existing graph (reinforcement counting)
 - **Track unresolved tensions** (record, resolve, query)
 - **Record dream history** (audit trail of every cycle)
+- **Manage NIGHTMARE transitions** (adversarial scanning)
 
 **State Transitions:**
 
 ```
          ┌──────────┐
-    ┌────│  AWAKE   │◄────────────────┐
-    │    └──────────┘                 │
-    │         │                       │
-    │    enter_rem()                  │
-    │         │                  wake()
-    │         ▼                       │
-    │    ┌──────────┐          ┌──────┴─────┐
-    │    │   REM    │─────────▶│NORMALIZING │
-    │    └──────────┘          └────────────┘
-    │    exit_rem()          complete_normalization()
-    │         │                       │
-    │         ▼                       │
-    │    (interrupt)                   │
-    └─────────────────────────────────┘
+    ┌────│  AWAKE   │◄──────────────────────┐
+    │    └──────────┘                       │
+    │      │         │                      │
+    │ enter_rem()  enterNightmare()         │
+    │      │         │                      │
+    │      ▼         ▼                      │
+    │ ┌────────┐  ┌───────────┐             │
+    │ │  REM   │  │ NIGHTMARE │             │
+    │ └────┬───┘  └─────┬─────┘             │
+    │      │            │                   │
+    │ exit_rem()  wakeFromNightmare()       │
+    │      │            │                   │
+    │      ▼            │             wake()
+    │ ┌────────────┐    │                   │
+    │ │NORMALIZING │    │                   │
+    │ └──────┬─────┘    │                   │
+    │        │          │                   │
+    │        └──────────┴───────────────────┘
+    │                                       │
+    │     (interrupt from any state)        │
+    └───────────────────────────────────────┘
 ```
 
 **Interruption Protocol:**
-1. If external input arrives during REM → IMMEDIATE STOP
-2. Quarantine in-progress dream data (mark as `interrupted: true`)
+1. If external input arrives during REM or NIGHTMARE → IMMEDIATE STOP
+2. Quarantine in-progress dream/threat data (mark as `interrupted: true`)
 3. Fast-normalize: discard unfinished items
 4. Reset to AWAKE
 
@@ -551,8 +581,9 @@ The dreamer generates speculative nodes and edges by analyzing the fact graph fo
 4. **Missing Abstraction** — Propose hypothetical features that would unify existing workflows
 5. **Symmetry Completion** — If A→B exists but B→A doesn't, propose the reverse
 6. **Tension-Directed** — Use unresolved tension signals to focus dreaming on known gaps and weaknesses
+7. **Causal Replay** — Mine dream history for cause→effect patterns and generate edges along discovered causal chains (see Appendix D §D.2)
 
-**`DreamStrategy` type:** `"gap_detection" | "weak_reinforcement" | "cross_domain" | "missing_abstraction" | "symmetry_completion" | "tension_directed" | "all"`
+**`DreamStrategy` type:** `"gap_detection" | "weak_reinforcement" | "cross_domain" | "missing_abstraction" | "symmetry_completion" | "tension_directed" | "causal_replay" | "all"`
 
 **Decay Fields:** Every generated node and edge carries `ttl`, `decay_rate`, `reinforcement_count`, and `last_reinforced_cycle` from creation.
 
@@ -619,7 +650,7 @@ confidence = plausibility × 0.45 + evidence × 0.45 + reinforcementBonus × 0.1
 
 ## 6. MCP Interface
 
-### 6.1 New Resources
+### 6.1 Resources (10)
 
 | URI | Name | Description |
 |-----|------|-------------|
@@ -629,8 +660,12 @@ confidence = plausibility × 0.45 + evidence × 0.45 + reinforcementBonus × 0.1
 | `dream://status` | Cognitive Status | Current cognitive state and statistics |
 | `dream://tensions` | Tension Signals | Unresolved tension signals driving goal-directed dreaming |
 | `dream://history` | Dream History | Audit trail of every dream cycle |
+| `dream://adrs` | Architecture Decisions | Architecture Decision Records with context and guard rails |
+| `dream://ui-registry` | UI Registry | Semantic UI element definitions with data contracts |
+| `dream://threats` | Threat Log | Adversarial scan results — threat edges with severity and CWE IDs |
+| `dream://archetypes` | Dream Archetypes | Federated dream archetypes — anonymized transferable patterns |
 
-### 6.2 New Tools
+### 6.2 Cognitive Tools (14)
 
 #### `dream_cycle`
 
@@ -640,7 +675,7 @@ Triggers a full dream→normalize→wake cycle (with decay, dedup, tension track
 Input: {
   strategy?: "gap_detection" | "weak_reinforcement" | "cross_domain" |
              "missing_abstraction" | "symmetry_completion" |
-             "tension_directed" | "all"
+             "tension_directed" | "causal_replay" | "all"
   max_dreams?: number      // Cap on generated items (default: 20)
   auto_normalize?: boolean // Run normalization immediately (default: true)
 }
@@ -743,22 +778,32 @@ Output: DreamInsights   // See §3.8 for full shape
 
 ---
 
-## 7. File Tree (New Files)
+## 7. File Tree
 
 ```
 src/
   cognitive/
-    engine.ts          — State machine, decay, dedup, tensions, history
-    dreamer.ts         — REM dream generation (6 strategies)
+    engine.ts          — State machine: AWAKE / REM / NORMALIZING / NIGHTMARE
+    dreamer.ts         — REM dream generation (7 strategies)
     normalizer.ts      — Validation pipeline, scoring, strict promotion gate
-    types.ts           — All cognitive type definitions
-    register.ts        — Register 6 resources + 6 tools on McpServer
+    types.ts           — All cognitive type definitions (~1400 lines)
+    register.ts        — Register 10 resources + 14 cognitive tools on McpServer
+    causal.ts          — Causal Reasoning Engine (analyzeCausality, causalReplayDream)
+    temporal.ts        — Temporal Dreaming (retro/precognition, seasonal patterns)
+    adversarial.ts     — Adversarial Dreaming: NIGHTMARE state (5 scan strategies)
+    federation.ts      — Multi-System Dream Federation (archetype export/import)
+    narrator.ts        — Dream Narratives (system autobiography)
+    intervention.ts    — Intervention Engine (remediation plan generation)
+  tools/
+    runtime-senses.ts  — Embodied Senses: runtime/APM metrics from OTEL/Prometheus
 data/
   dream_graph.json     — REM output (untrusted)
   candidate_edges.json — Normalization judgments
   validated_edges.json — Promoted edges (trusted, additive)
   tension_log.json     — Unresolved tension signals
   dream_history.json   — Audit trail of every dream cycle
+  threat_log.json      — Adversarial scan results (NIGHTMARE)
+  dream_archetypes.json — Federated dream archetypes
 ```
 
 ---
@@ -780,6 +825,14 @@ data/
 | Duplicate suppression prevents noise | Repeated dreams reinforce existing items instead of creating duplicates |
 | Tensions drive goal-directed dreaming | Unresolved questions are recorded and prioritized for future REM cycles |
 | Full audit trail | Every dream cycle is recorded in `dream_history.json` with complete statistics |
+| NIGHTMARE is read-only | Adversarial scanning generates threat reports but cannot modify any code or data files |
+| Threats are not tensions | Threat edges live in `threat_log.json`, separate from the tension system, to prevent cross-contamination |
+| Federation is anonymized | Archetype export abstracts entity names to generic roles; no proprietary data leaves the instance |
+| Federation is opt-in | Both export and import require explicit `DREAMGRAPH_FEDERATION` configuration |
+| Runtime senses are read-only | `query_runtime_metrics` only fetches from the configured endpoint; never writes back |
+| Runtime senses degrade gracefully | Missing endpoint configuration returns an empty result, not an error |
+| Intervention plans are advisory | Remediation plans are suggestions only; no automatic code modification |
+| Narrative is synthesized, not stored | `get_system_narrative` reads existing data and returns; writes nothing |
 
 ---
 
@@ -797,6 +850,11 @@ data/
 10. **Goal-Directed Dreaming** — Unresolved tensions focus REM on what the system actually needs
 11. **Speculative Memory** — Failed-for-lack-of-evidence dreams survive as latent hypotheses, not deleted
 12. **Three-Outcome Classification** — Normalization is a classifier (validated/latent/rejected), not a kill switch
+13. **Adversarial Honesty** — Actively try to break conclusions via NIGHTMARE scanning
+14. **Narrative Coherence** — Understanding should tell a story, not just accumulate data
+15. **Federated Learning** — Anonymized patterns are transferable; no instance is an island
+16. **Temporal Awareness** — History contains predictive signals; don't just remember, project forward
+17. **From Insight to Action** — Awareness without remedy is incomplete; generate concrete fix proposals
 
 ---
 
@@ -1095,4 +1153,670 @@ The engine handles this gracefully:
 
 ---
 
-*This document is the blueprint. The implementation matches it fully (v4.0.0).*
+*This document is the blueprint. The implementation matches it fully (v5.0.0).*
+
+---
+
+## Appendix D: Seven Advanced Cognitive Capabilities (v5.0)
+
+**Date:** 2026-03-31  
+**Trigger:** The core cognitive system (dream cycles, normalization, tensions,
+decay, speculative memory) is stable and battle-tested on production systems.
+The next level is making DreamGraph not just *observant* but *truly intelligent*:
+reasoning causally, dreaming adversarially, thinking temporally, learning from
+other instances, narrating its understanding, proposing concrete fixes, and
+sensing live runtime behavior.
+
+### D.1 Overview
+
+Seven new capabilities, each in its own module, all backwards-compatible:
+
+| # | Capability | Module | State | Writes to |
+|---|-----------|--------|-------|-----------|
+| 1 | Causal Reasoning Engine | `causal.ts` | REM (causal_replay) / AWAKE (analysis) | dream_graph.json (via REM) |
+| 2 | Adversarial Dreaming | `adversarial.ts` | NIGHTMARE (new state) | threat_log.json |
+| 3 | Temporal Dreaming | `temporal.ts` | AWAKE (analysis only) | Nothing |
+| 4 | Multi-System Federation | `federation.ts` | AWAKE | dream_archetypes.json |
+| 5 | Dream Narratives | `narrator.ts` | AWAKE | Nothing |
+| 6 | Intervention Engine | `intervention.ts` | AWAKE | Nothing |
+| 7 | Embodied Senses | `runtime-senses.ts` | AWAKE | Nothing |
+
+### D.2 Causal Reasoning Engine (`src/cognitive/causal.ts`)
+
+Mines `dream_history.json` and `tension_log.json` for cause→effect inference
+chains. Instead of just structural relationships (A connects to B), causal
+reasoning identifies that *changing A causes B to fail*.
+
+#### D.2.1 Architecture
+
+```
+buildTensionTimeline()
+    ↓
+discoverCausalLinks(events, maxLag=5)
+    ↓  (filter: ≥2 co-occurrences, strength ≥0.3)
+buildCausalChains(links, maxDepth=4)
+    ↓  (BFS, multiplicative strength)
+CausalInsights { chains, propagation_hotspots, predicted_impacts }
+```
+
+**Timeline Construction:**
+- Extracts tension events from both active signals and resolved archive
+- Each event records: entity, cycle, urgency, type, domain, resolved status
+- Events are sorted chronologically
+
+**Causal Link Discovery (`discoverCausalLinks`):**
+- For each entity pair A, B: count co-occurrences where tension in A
+  precedes tension in B within `maxLag` cycles
+- Requires ≥ 2 co-occurrences for statistical significance
+- Correlation strength = co-occurrences / max possible (normalized to 0–1)
+- Results sorted by correlation strength (descending)
+
+**Chain Building (`buildCausalChains`):**
+- BFS from each causal link as root
+- Chains up to `maxDepth=4` hops
+- Total chain strength = product of link strengths
+- Returns top 20 chains by total strength
+
+#### D.2.2 Dream Strategy: `causal_replay`
+
+Added as the 7th dream strategy in `dreamer.ts`:
+
+```typescript
+export async function causalReplayDream(cycle: number, max: number): Promise<DreamEdge[]>
+```
+
+- **Precondition:** Engine must be in REM state
+- For each strong causal link, generates a predictive dream edge
+- Edge relation: `"causal_dependency"`
+- Confidence: `link.correlation_strength × 0.8`
+- TTL: `DEFAULT_DECAY.ttl + 2` (causal edges get extended lifespan)
+- Pre-loaded reinforcement count from historical observation count
+- Meta contains: `causal_lag`, `observed_count`, `correlation_strength`
+
+#### D.2.3 Data Schemas
+
+```typescript
+interface CausalLink {
+  cause_entity: string;
+  effect_entity: string;
+  lag_cycles: number;              // Average cycle delay
+  correlation_strength: number;    // 0–1
+  observed_count: number;
+  first_observed: string;
+  last_observed: string;
+  description: string;
+}
+
+interface CausalChain {
+  id: string;
+  links: CausalLink[];
+  total_strength: number;          // Product of all link strengths
+  root_cause: string;
+  terminal_effect: string;
+  discovered_at: string;
+}
+
+interface CausalInsights {
+  chains: CausalChain[];
+  propagation_hotspots: Array<{
+    entity: string;
+    downstream_count: number;
+    avg_lag: number;
+  }>;
+  predicted_impacts: Array<{
+    if_changed: string;
+    likely_affected: string[];
+    confidence: number;
+  }>;
+}
+```
+
+#### D.2.4 MCP Tool
+
+| Field | Value |
+|-------|-------|
+| **Tool name** | `get_causal_insights` |
+| **Parameters** | None |
+| **Output** | `CausalInsights` |
+
+### D.3 Adversarial Dreaming — NIGHTMARE State (`src/cognitive/adversarial.ts`)
+
+A fundamentally new cognitive state where the dreamer actively tries to **BREAK**
+the system. Instead of finding connections, it finds attack surfaces.
+
+#### D.3.1 State Machine Changes
+
+New methods on `CognitiveEngine`:
+
+```typescript
+enterNightmare(): void    // AWAKE → NIGHTMARE (asserts AWAKE)
+wakeFromNightmare(): void // NIGHTMARE → AWAKE (asserts NIGHTMARE)
+```
+
+Interrupt handler updated: if interrupted during NIGHTMARE → quarantine and
+return to AWAKE.
+
+#### D.3.2 Security Entity Snapshot
+
+Before scanning, the system builds a `SecurityEntity` map from the fact graph:
+
+```typescript
+interface SecurityEntity {
+  id: string;
+  type: "feature" | "workflow" | "data_model";
+  name: string; domain: string; keywords: string[]; tags: string[];
+  has_auth_refs: boolean;         // Regex match: auth|jwt|rbac|session|login|password
+  has_rls_refs: boolean;          // Regex match: rls|row.level|policy|permission
+  has_validation_refs: boolean;   // Regex match: validat|sanitiz|check|constrain
+  accepts_input: boolean;         // Regex match: input|form|submit|upload|create|write|post
+  stores_data: boolean;           // Regex match or type === "data_model"
+  links: Array<{ target, type, relationship, strength }>;
+}
+```
+
+#### D.3.3 Five Adversarial Strategies
+
+| Strategy | Scans for | Key signal | CWE |
+|----------|----------|------------|-----|
+| `privilege_escalation` | Non-auth entities directly accessing data stores | `has_auth_refs === false` on accessor, `stores_data === true` on target | CWE-269 |
+| `data_leak_path` | Sensitive data flowing to user-facing features | `stores_data` + sensitive keywords → `accepts_input` target | CWE-200 |
+| `injection_surface` | Unvalidated input reaching data stores | `accepts_input && !has_validation_refs` → data stores | CWE-20 |
+| `missing_validation` | Workflows writing to data without guards | Workflow with write-links but no validation refs | CWE-20 |
+| `broken_access_control` | Data entities without RLS/auth referenced by features | `!has_rls_refs && !has_auth_refs` on data_model entities | CWE-862 |
+
+#### D.3.4 Data Schemas
+
+```typescript
+type ThreatSeverity = "critical" | "high" | "medium" | "low" | "info";
+
+interface ThreatEdge {
+  id: string;
+  from: string; to: string;
+  threat_category: AdversarialStrategy;
+  severity: ThreatSeverity;
+  cwe_id?: string;
+  attack_vector: string;
+  blast_radius: string[];
+  confidence: number;
+  description: string;
+  mitigation: string;
+  discovered_at: string;
+  dream_cycle: number;
+}
+
+interface NightmareResult {
+  cycle_number: number;
+  threats_found: ThreatEdge[];
+  attack_surfaces: Array<{ entity, exposure_type, severity }>;
+  summary: { critical, high, medium, low, info };
+  duration_ms: number;
+}
+
+interface ThreatLogFile {
+  metadata: {
+    description: string; schema_version: string;
+    total_threats: number;
+    last_nightmare_cycle: string | null;
+    total_nightmare_cycles: number;
+  };
+  threats: ThreatEdge[];
+}
+```
+
+#### D.3.5 MCP Tool & Resource
+
+| Tool | `nightmare_cycle` |
+|------|-------------------|
+| Parameters | `strategy` (enum: privilege_escalation, data_leak_path, injection_surface, missing_validation, broken_access_control, all_threats) |
+| Output | `NightmareResult` |
+
+| Resource | `dream://threats` |
+|----------|-------------------|
+| Content | JSON serialization of `ThreatLogFile` |
+
+### D.4 Temporal Dreaming (`src/cognitive/temporal.ts`)
+
+Adds a time dimension to reasoning. Analyzes `dream_history.json` and
+`tension_log.json` without modifying any files.
+
+#### D.4.1 Four Analysis Modes
+
+| Mode | Function | What it discovers |
+|------|----------|-------------------|
+| **Trajectory Analysis** | `buildTrajectories()` | Urgency-over-time curves for each tension. Classified as: rising, falling, stable, spike, resolved |
+| **Precognition** | `predictFutureTensions()` | Extrapolates rising trajectories to estimate cycles-to-critical. Also predicts recurrence from resolved domain history |
+| **Seasonal Detection** | `detectSeasonalPatterns()` | Finds cyclical activity peaks per domain using local maxima analysis and average period calculation |
+| **Retrocognition** | `findRetrocognitiveMatches()` | Matches current active tensions against historical resolved trajectories with similar profiles |
+
+#### D.4.2 Data Schemas
+
+```typescript
+interface TensionTrajectory {
+  tension_id: string;
+  domain: TensionDomain;
+  urgency_over_time: Array<{ cycle: number; urgency: number }>;
+  peak_urgency: number;
+  resolution_cycle?: number;
+  pattern: "rising" | "falling" | "stable" | "spike" | "resolved";
+}
+
+interface TemporalPrediction {
+  entity_id: string;
+  predicted_tension_type: string;
+  confidence: number;
+  estimated_cycles_to_critical: number;
+  basis: string;                    // Human-readable rationale
+}
+
+interface SeasonalPattern {
+  domain: string;
+  period_cycles: number;
+  description: string;
+  next_expected_peak: number;
+}
+
+interface TemporalInsights {
+  trajectories: TensionTrajectory[];
+  predictions: TemporalPrediction[];
+  seasonal_patterns: SeasonalPattern[];
+  retrocognition: Array<{
+    pattern: string;
+    past_resolution: string;
+    latent_matches: string[];
+  }>;
+  time_horizon: {
+    total_cycles_analyzed: number;
+    oldest_data: string;
+    newest_data: string;
+  };
+}
+```
+
+#### D.4.3 MCP Tool
+
+| Field | Value |
+|-------|-------|
+| **Tool name** | `get_temporal_insights` |
+| **Parameters** | None |
+| **Output** | `TemporalInsights` |
+
+### D.5 Multi-System Dream Federation (`src/cognitive/federation.ts`)
+
+Enables cross-project learning by extracting anonymized architectural patterns.
+
+#### D.5.1 Archetype Extraction
+
+Validated edges are abstracted into transferable archetypes:
+- Entity names → generic roles (e.g., `"user_auth"` → `"auth_component"`)
+- Pattern types classified from relation keywords: `security_pattern`,
+  `structural_gap`, `cross_domain_bridge`, `tension_resolution`,
+  `symmetry_pattern`, `reinforcement_pattern`, `causal_pattern`,
+  `generic_connection`
+- Deduplicated by `pattern_type:relation_pattern` key
+
+#### D.5.2 Import Protocol
+
+When archetypes are imported from another instance:
+1. Deduplicate against existing archetypes
+2. Duplicate matches → reinforce (increment `times_validated`, boost confidence)
+3. Novel archetypes → create tension signals (type: `missing_link`, urgency
+   proportional to confidence × 0.7, capped at 0.8) so the dreamer checks
+   whether the same pattern exists in this system
+
+#### D.5.3 Configuration
+
+```typescript
+interface FederationConfig {
+  instance_id: string;      // Unique instance identifier
+  allow_export: boolean;    // Enable archetype export (default: true)
+  allow_import: boolean;    // Enable archetype import (default: true)
+  anonymize: boolean;       // Anonymize entity names in exports (default: true)
+}
+// Configured via DREAMGRAPH_FEDERATION env var (JSON)
+```
+
+#### D.5.4 Data Schemas
+
+```typescript
+interface DreamArchetype {
+  id: string;
+  pattern_type: string;
+  description: string;
+  entity_roles: string[];        // Abstracted names
+  relation_pattern: string;
+  confidence: number;
+  source_instance?: string;
+  times_validated: number;
+  created_at: string;
+}
+
+interface FederatedExchangeFile {
+  metadata: {
+    description: string; schema_version: string;
+    source_instance: string; exported_at: string;
+    total_archetypes: number;
+  };
+  archetypes: DreamArchetype[];
+}
+
+interface ExportArchetypesOutput {
+  archetypes_exported: number;
+  file_path: string;
+  instance_id: string;
+  timestamp: string;
+}
+
+interface ImportArchetypesOutput {
+  archetypes_imported: number;
+  archetypes_skipped: number;
+  tensions_created: number;
+  source_instance: string;
+  timestamp: string;
+}
+```
+
+#### D.5.5 MCP Tools & Resource
+
+| Tool | Parameters | Output |
+|------|-----------|--------|
+| `export_dream_archetypes` | None | `ExportArchetypesOutput` |
+| `import_dream_archetypes` | `file_path` (string, required) | `ImportArchetypesOutput` |
+
+| Resource | `dream://archetypes` |
+|----------|---------------------|
+| Content | JSON serialization of `FederatedExchangeFile` |
+
+### D.6 Dream Narratives (`src/cognitive/narrator.ts`)
+
+Generates a coherent narrative of the system's evolving understanding — not a
+log, a *story*.
+
+#### D.6.1 Architecture
+
+```
+loadHistory() + loadTensions() + loadValidatedEdges()
+    ↓
+divideIntoEpochs(sessions, depth)
+    ↓  (epoch size: executive=1/3, technical=1/6, full=1/10)
+narrateEpoch() per epoch
+    ↓
+generateEpilogue()
+    ↓
+assessHealth()
+    ↓
+SystemNarrative { title, chapters[], epilogue, overall_health }
+```
+
+**Epoch Division:** History is divided into narrative "chapters" based on depth:
+- `executive`: ~3 chapters (high-level summary)
+- `technical`: ~6 chapters (detailed with entity references)
+- `full`: ~10 chapters (cycle-by-cycle)
+
+**Chapter Titles:** Auto-generated from epoch content:
+- "The Awakening" (first epoch)
+- "A Phase of Discovery" (many promotions)
+- "Resolving Contradictions" (many resolutions)
+- "Selective Forgetting" (high decay)
+- "Reinforcing Beliefs" (high merge rate)
+
+**Health Assessment:**
+- `"healthy — no open tensions"` — zero unresolved tensions
+- `"critical — high-urgency tensions require attention"` — max urgency > 0.8
+- `"attention needed — moderate tensions remain"` — max urgency > 0.5
+- `"overloaded — too many open tensions"` — > 20 unresolved
+- `"stable — only low-priority tensions remain"` — default
+
+#### D.6.2 Data Schemas
+
+```typescript
+type NarrativeDepth = "executive" | "technical" | "full";
+
+interface NarrativeChapter {
+  title: string;
+  cycle_range: [number, number];
+  key_discoveries: string[];
+  tensions_addressed: string[];
+  narrative_text: string;
+}
+
+interface SystemNarrative {
+  title: string;
+  depth: NarrativeDepth;
+  generated_at: string;
+  total_cycles_covered: number;
+  chapters: NarrativeChapter[];
+  epilogue: string;
+  overall_health: string;
+}
+```
+
+#### D.6.3 MCP Tool
+
+| Field | Value |
+|-------|-------|
+| **Tool name** | `get_system_narrative` |
+| **Parameters** | `depth` (enum: executive, technical, full; default: technical) |
+| **Output** | `SystemNarrative` |
+
+### D.7 Intervention Engine (`src/cognitive/intervention.ts`)
+
+Bridges the gap from "awareness" to "remedy." Generates concrete remediation
+plans from the highest-urgency unresolved tensions.
+
+#### D.7.1 Strategy Selection
+
+Each tension type maps to a remediation strategy:
+
+| Tension Type | Strategy | Key Actions |
+|-------------|----------|-------------|
+| `missing_link` | Add connection | 1. Analyze isolation reason. 2. Implement integration layer |
+| `weak_connection` | Strengthen | Review entities for explicit references, shared types, integration tests |
+| `hard_query` | Make explicit | Add documentation/API surface + create index for common queries |
+| `ungrounded_dream` | Verify | Read source code/DB to confirm or deny speculation |
+| `code_insight` | Apply fix | Direct code-level improvement based on analysis |
+
+#### D.7.2 Plan Composition
+
+Each `RemediationPlan` contains:
+
+```typescript
+interface RemediationPlan {
+  id: string;
+  tension_id: string;
+  title: string;
+  severity: "critical" | "high" | "medium" | "low";
+  steps: RemediationStep[];
+  adr_conflicts: string[];           // ADR IDs that may conflict
+  new_tensions_predicted: string[];   // Side effects
+  confidence: number;
+  generated_at: string;
+}
+
+interface RemediationStep {
+  order: number;
+  description: string;
+  files: FileChange[];
+  tests_to_add: string[];
+  estimated_effort: "trivial" | "small" | "medium" | "large";
+}
+
+interface FileChange {
+  file_path: string;
+  description: string;
+  change_type: "modify" | "create" | "delete";
+  rationale: string;
+}
+```
+
+**ADR Conflict Detection:** Checks each step's file paths against active ADR
+titles and decisions via keyword matching. Warns if a remediation may violate
+an existing architectural decision.
+
+**New Tension Prediction:** Heuristic-based — large footprint changes predict
+structural coupling, new files predict build/test pipeline gaps, multi-entity
+connections predict dependency chains.
+
+**Confidence Scoring:** Base 0.5 + urgency contribution (0.2) + entity count
+bonus (0.1) + occurrence bonus (0.05) + test coverage bonus (0.1) − complexity
+penalty (0.1 for 5+ steps).
+
+#### D.7.3 MCP Tool
+
+| Field | Value |
+|-------|-------|
+| **Tool name** | `get_remediation_plan` |
+| **Parameters** | `max_plans` (number, default 5), `min_urgency` (number, default 0.3) |
+| **Output** | `RemediationPlanOutput { plans, total_tensions_analyzed, plans_generated, skipped_low_urgency, timestamp }` |
+
+### D.8 Embodied Senses — Runtime Awareness (`src/tools/runtime-senses.ts`)
+
+Connects DreamGraph to live runtime metrics endpoints.
+
+#### D.8.1 Supported Formats
+
+| Format | Parser | Expected Input |
+|--------|--------|---------------|
+| `prometheus` | `parsePrometheusMetrics()` | JSON query result: `[{ metric: { entity }, value }]` |
+| `opentelemetry` | `parseOtelMetrics()` | OTLP JSON: `{ resourceMetrics: [{ scopeMetrics: [{ metrics }] }] }` |
+| `custom_json` | Direct pass-through | `{ [entityId]: { request_count, error_rate, latency_p99, throughput, memory_usage } }` |
+
+#### D.8.2 Analysis Pipeline
+
+```
+fetchMetrics()
+    ↓
+parseByFormat()
+    ↓
+analyzeRuntime()
+    ├── Convert to RuntimeObservation[]
+    ├── Usage ranking (request_count, descending)
+    ├── Dead feature detection (known features with zero usage)
+    ├── Error hotspots (error_rate > 1%)
+    └── Behavioral correlations:
+        ├── error_cascade (similar error rates between entity pairs)
+        └── co_occurrence (similar usage volume between entity pairs)
+```
+
+#### D.8.3 Data Schemas
+
+```typescript
+interface RuntimeMetricConfig {
+  endpoint?: string;
+  type: "opentelemetry" | "prometheus" | "custom_json";
+  timeout_ms: number;
+}
+
+interface RuntimeObservation {
+  entity_id: string;
+  metric_type: "request_count" | "error_rate" | "latency_p99" | "throughput" | "memory_usage";
+  value: number;
+  unit: string;
+  observed_at: string;
+}
+
+interface BehavioralCorrelation {
+  entities: [string, string];
+  correlation_type: "sequential_usage" | "co_occurrence" | "error_cascade";
+  strength: number;
+  sample_size: number;
+  description: string;
+}
+
+interface RuntimeInsightsOutput {
+  observations: RuntimeObservation[];
+  correlations: BehavioralCorrelation[];
+  feature_usage_ranking: Array<{ entity: string; usage_score: number }>;
+  dead_features: string[];
+  error_hotspots: Array<{ entity: string; error_rate: number }>;
+  source: string;
+  timestamp: string;
+}
+```
+
+#### D.8.4 Configuration
+
+| Env Var | Default | Description |
+|---------|---------|-------------|
+| `DREAMGRAPH_RUNTIME_ENDPOINT` | (none) | Metrics endpoint URL |
+| `DREAMGRAPH_RUNTIME_TYPE` | `"prometheus"` | Format: opentelemetry, prometheus, custom_json |
+| `DREAMGRAPH_RUNTIME_TIMEOUT` | `5000` | Fetch timeout in ms |
+
+When no endpoint is configured, the tool returns an empty result with a
+descriptive message explaining what data would be available.
+
+#### D.8.5 MCP Tool
+
+| Field | Value |
+|-------|-------|
+| **Tool name** | `query_runtime_metrics` |
+| **Parameters** | `entity_filter` (string, optional), `include_correlations` (boolean, default: true) |
+| **Output** | `RuntimeInsightsOutput` |
+
+### D.9 Wiring Summary
+
+#### D.9.1 Files Modified
+
+| File | Changes |
+|------|---------|
+| `src/cognitive/types.ts` | Added ~300 lines: `CognitiveStateName` includes `"nightmare"`, `DreamStrategy` includes `"causal_replay"`, `AdversarialStrategy` union, and all interfaces for the 7 capabilities |
+| `src/cognitive/engine.ts` | Added `enterNightmare()`, `wakeFromNightmare()`. Updated interrupt handler to quarantine nightmare state |
+| `src/cognitive/dreamer.ts` | Added `causal_replay` to `allStrategies`. Import and execution block for `causalReplayDream()` |
+| `src/cognitive/register.ts` | Added 7 new tools (nightmare_cycle, get_causal_insights, get_temporal_insights, export_dream_archetypes, import_dream_archetypes, get_system_narrative, get_remediation_plan). Added 2 new resources (dream://threats, dream://archetypes). Updated dream_cycle strategy enum. Cognitive tools: 7 → 14, resources: 8 → 10 |
+| `src/tools/register.ts` | Added `registerRuntimeSensesTools()` import and call. Total tools: 20 → 34 |
+| `src/types/index.ts` | Re-exported all ~30 new types + `DEFAULT_FEDERATION_CONFIG`, `DEFAULT_RUNTIME_CONFIG` |
+
+#### D.9.2 Files Created
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `src/cognitive/causal.ts` | 332 | Causal Reasoning Engine |
+| `src/cognitive/temporal.ts` | 393 | Temporal Dreaming |
+| `src/cognitive/adversarial.ts` | 573 | Adversarial Dreaming (NIGHTMARE) |
+| `src/cognitive/federation.ts` | 304 | Multi-System Federation |
+| `src/cognitive/narrator.ts` | 347 | Dream Narratives |
+| `src/cognitive/intervention.ts` | 429 | Intervention Engine |
+| `src/tools/runtime-senses.ts` | 407 | Embodied Senses |
+
+#### D.9.3 Data Files Created at Runtime
+
+| File | Created by | Content |
+|------|-----------|---------|
+| `data/threat_log.json` | `adversarial.ts` on first nightmare cycle | Threat edges with severity, CWE IDs, blast radius |
+| `data/dream_archetypes.json` | `federation.ts` on first export | Anonymized architectural patterns |
+
+### D.10 Backwards Compatibility
+
+All changes are **strictly additive**:
+
+| Change | Impact on existing code |
+|--------|------------------------|
+| New `"nightmare"` in `CognitiveStateName` | Existing state checks use string literals; "nightmare" is never matched by old code |
+| New `"causal_replay"` in `DreamStrategy` | Old strategy selection ignores unknown strategies; "all" already cycles through allStrategies array |
+| New engine methods | enterNightmare()/wakeFromNightmare() are new methods; no existing signatures changed |
+| New types/interfaces | All additive; existing code references zero new types |
+| New tools/resources | New MCP registrations; existing tool names and schemas unchanged |
+| New data files | Created only when new features are used; existing data files unmodified |
+| New environment variables | All optional with sensible defaults |
+
+### D.11 Implementation Checklist
+
+43. ~~Add causal reasoning types to `types.ts`~~ ✓
+44. ~~Add adversarial dreaming types (ThreatEdge, NightmareResult, ThreatLogFile)~~ ✓
+45. ~~Add temporal dreaming types (TensionTrajectory, TemporalPrediction, SeasonalPattern)~~ ✓
+46. ~~Add federation types (DreamArchetype, FederationConfig, FederatedExchangeFile)~~ ✓
+47. ~~Add narrative types (NarrativeChapter, SystemNarrative)~~ ✓
+48. ~~Add intervention types (RemediationStep, RemediationPlan, FileChange)~~ ✓
+49. ~~Add runtime senses types (RuntimeObservation, BehavioralCorrelation)~~ ✓
+50. ~~Create `src/cognitive/causal.ts`~~ ✓
+51. ~~Create `src/cognitive/adversarial.ts`~~ ✓
+52. ~~Create `src/cognitive/temporal.ts`~~ ✓
+53. ~~Create `src/cognitive/federation.ts`~~ ✓
+54. ~~Create `src/cognitive/narrator.ts`~~ ✓
+55. ~~Create `src/cognitive/intervention.ts`~~ ✓
+56. ~~Create `src/tools/runtime-senses.ts`~~ ✓
+57. ~~Add NIGHTMARE state to engine (enterNightmare, wakeFromNightmare)~~ ✓
+58. ~~Add causal_replay to dreamer.ts~~ ✓
+59. ~~Wire 7 new tools + 2 new resources in cognitive/register.ts~~ ✓
+60. ~~Wire runtime-senses in tools/register.ts~~ ✓
+61. ~~Re-export all new types in types/index.ts~~ ✓
+62. ~~Build clean (zero errors)~~ ✓

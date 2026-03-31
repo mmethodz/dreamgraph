@@ -15,18 +15,20 @@
  * - Duplicate suppression via engine.deduplicateAndAppend*()
  * - Tension-directed dreaming (strategy #6)
  *
- * Six dream strategies:
+ * Six + one dream strategies:
  * 1. Gap Detection — entity pairs with no direct edge but shared context
  * 2. Weak Reinforcement — strengthen edges rated "weak"
  * 3. Cross-Domain Bridging — connect different domains via shared keywords
  * 4. Missing Abstraction — propose hypothetical unifying features
  * 5. Symmetry Completion — propose reverse edges where only one direction exists
  * 6. Tension Directed — explore areas where the system is struggling
+ * 7. Causal Replay — mine dream history for cause→effect chains
  */
 
 import { loadJsonData } from "../utils/cache.js";
 import { logger } from "../utils/logger.js";
 import { engine } from "./engine.js";
+import { causalReplayDream } from "./causal.js";
 import type { Feature, Workflow, DataModelEntity } from "../types/index.js";
 import type {
   DreamNode,
@@ -777,6 +779,7 @@ export async function dream(
     "missing_abstraction",
     "symmetry_completion",
     "tension_directed",
+    "causal_replay",
   ];
 
   const strategiesToRun: DreamStrategy[] =
@@ -853,6 +856,19 @@ export async function dream(
     } else {
       strategyYields["tension_directed"] = 0;
       logger.debug("Tension-directed: no unresolved tensions");
+    }
+  }
+
+  // Causal replay dreaming — mines history for cause-effect patterns
+  if (strategiesToRun.includes("causal_replay")) {
+    try {
+      const causalEdges = await causalReplayDream(cycle, perStrategy);
+      allEdges.push(...causalEdges);
+      strategyYields["causal_replay"] = causalEdges.length;
+      logger.debug(`Causal replay: ${causalEdges.length} dream edges`);
+    } catch (err) {
+      strategyYields["causal_replay"] = 0;
+      logger.debug(`Causal replay: skipped (${err instanceof Error ? err.message : "error"})`);
     }
   }
 

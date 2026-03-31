@@ -197,6 +197,7 @@ export type ToolResponse<T = unknown> = ToolSuccess<T> | ToolError;
 export type {
   CognitiveStateName,
   DreamStrategy,
+  AdversarialStrategy,
   NormalizationOutcome,
   TensionDomain,
   TensionResolutionType,
@@ -265,5 +266,44 @@ export type {
   ExportLivingDocsInput,
   ExportLivingDocsOutput,
   ExportedFile,
+  // Causal Reasoning
+  CausalLink,
+  CausalChain,
+  CausalInsights,
+  // Multi-System Dreaming (Federation)
+  DreamArchetype,
+  FederationConfig,
+  FederatedExchangeFile,
+  ExportArchetypesOutput,
+  ImportArchetypesOutput,
+  // Temporal Dreaming
+  TensionTrajectory,
+  TemporalPrediction,
+  SeasonalPattern,
+  TemporalInsights,
+  // Adversarial Dreaming (NIGHTMARE)
+  ThreatSeverity,
+  ThreatEdge,
+  NightmareResult,
+  ThreatLogFile,
+  // Embodied Senses (Runtime)
+  RuntimeMetricConfig,
+  RuntimeObservation,
+  BehavioralCorrelation,
+  RuntimeInsightsOutput,
+  // Dream Narratives
+  NarrativeDepth,
+  NarrativeChapter,
+  SystemNarrative,
+  // Intervention Engine
+  FileChange,
+  RemediationStep,
+  RemediationPlan,
+  RemediationPlanOutput,
+} from "../cognitive/types.js";
+
+export {
+  DEFAULT_FEDERATION_CONFIG,
+  DEFAULT_RUNTIME_CONFIG,
 } from "../cognitive/types.js";
 
