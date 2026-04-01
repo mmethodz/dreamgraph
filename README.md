@@ -475,6 +475,20 @@ Add a single JSON block to your MCP client configuration.
 }
 ```
 
+**[OpenClaw](https://docs.openclaw.ai/cli/mcp)** — register DreamGraph as an MCP server in one command:
+
+```bash
+openclaw mcp set dreamgraph '{"command":"node","args":["/absolute/path/dreamgraph/dist/index.js"]}'
+```
+
+Replace `/absolute/path/dreamgraph` with the actual path to your DreamGraph checkout. To pass environment variables, add an `env` key:
+
+```bash
+openclaw mcp set dreamgraph '{"command":"node","args":["/absolute/path/dreamgraph/dist/index.js"],"env":{"DREAMGRAPH_REPOS":"{\"my-app\":\"/path/to/my-app\"}"}}'
+```
+
+Once registered, OpenClaw can talk to DreamGraph directly — every tool, resource, and dream cycle is available through the OpenClaw CLI and agent runtime. See the [OpenClaw MCP docs](https://docs.openclaw.ai/cli/mcp) for more details.
+
 ### 3. Introduce your project
 
 Tell the AI:
