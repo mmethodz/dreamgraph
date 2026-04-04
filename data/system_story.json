@@ -1,52 +1,12 @@
-{
+﻿{
   "metadata": {
-    "description": "DreamGraph System Autobiography — a persistent, evolving narrative of system understanding.",
+    "description": "DreamGraph System Autobiography  a persistent, evolving narrative of system understanding.",
     "schema_version": "1.0.0",
     "title": "The DreamGraph Chronicle",
-    "started_at": "2026-04-04T17:14:25.205Z",
-    "last_updated": "2026-04-04T18:04:25.557Z",
-    "total_chapters": 2,
-    "total_cycles_covered": 20
+    "started_at": null,
+    "last_updated": null,
+    "total_chapters": 0,
+    "total_cycles_covered": 0
   },
-  "chapters": [
-    {
-      "title": "Progress: Cycles 1–10",
-      "cycle_range": [
-        1,
-        10
-      ],
-      "key_discoveries": [],
-      "tensions_addressed": [],
-      "narrative_text": "Since cycle 0, 10 new dream cycle(s) were performed (1–10). No unresolved tensions remain — the system is in a healthy state.",
-      "chapter_number": 1,
-      "generated_at": "2026-04-04T17:14:25.205Z",
-      "diff": {
-        "new_validated_edges": 0,
-        "tensions_created": 0,
-        "tensions_resolved": 0,
-        "threats_discovered": 0,
-        "archetypes_exchanged": 0
-      }
-    },
-    {
-      "title": "Progress: Cycles 11–20",
-      "cycle_range": [
-        11,
-        20
-      ],
-      "key_discoveries": [],
-      "tensions_addressed": [],
-      "narrative_text": "Since cycle 10, 10 new dream cycle(s) were performed (11–20). No unresolved tensions remain — the system is in a healthy state.",
-      "chapter_number": 2,
-      "generated_at": "2026-04-04T18:04:25.556Z",
-      "diff": {
-        "new_validated_edges": 0,
-        "tensions_created": 0,
-        "tensions_resolved": 0,
-        "threats_discovered": 0,
-        "archetypes_exchanged": 0
-      }
-    }
-  ],
-  "digests": []
+  "chapters": []
 }
