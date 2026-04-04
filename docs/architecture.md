@@ -6,7 +6,7 @@
 
 DreamGraph is a **cognitive dreaming engine** for MCP (Model Context Protocol) knowledge graphs. It speculatively discovers hidden connections, validates them against a fact graph, and builds a persistent, evolving understanding of the systems it observes.
 
-**Version:** 5.1.0  
+**Version:** 5.2.0  
 **License:** MIT  
 **Runtime:** Node.js (TypeScript, ES2022, Node16 modules)  
 **Transport:** STDIO (JSON-RPC via stdin/stdout)
@@ -60,8 +60,8 @@ Speculative Edge → Normalization → Promotion Gate → Validated Edge
 graph TB
     subgraph "MCP Protocol Layer"
         Server["MCP Server<br/>STDIO Transport"]
-        Tools["37 Tools"]
-        Resources["13 Resources"]
+        Tools["43 Tools"]
+        Resources["15 Resources"]
     end
 
     subgraph "Cognitive Core"
@@ -83,6 +83,10 @@ graph TB
         Metacognition["Metacognitive Self-Tuning<br/>Strategy Optimization"]
         EventRouter["Event-Driven Dreaming<br/>Reactive Scoping"]
         ContinuousNarrative["Continuous Narrative<br/>Auto-Chapters"]
+    end
+
+    subgraph "v5.2 Capabilities"
+        Scheduler["Dream Scheduler<br/>Policy-Driven Orchestration"]
     end
 
     subgraph "Senses (External I/O)"
@@ -114,7 +118,9 @@ graph TB
     Engine --> Narrator
     Engine --> Metacognition
     Engine --> EventRouter
+    Engine --> Scheduler
     Narrator --> ContinuousNarrative
+    Scheduler --> Engine
     Dreamer --> DreamGraph
     Normalizer --> Validated
     Engine --> Tensions
@@ -178,6 +184,7 @@ src/
 │   ├── federation.ts        # Cross-project archetype exchange
 │   ├── metacognition.ts     # Metacognitive self-tuning (v5.1)
 │   ├── event-router.ts      # Event-driven dreaming (v5.1)
+│   ├── scheduler.ts         # Dream Scheduler — policy-driven orchestration (v5.2)
 │   ├── types.ts             # All cognitive type definitions
 │   └── register.ts          # Tool/resource registration + post-cycle hooks
 ├── tools/
@@ -222,7 +229,8 @@ data/
 ├── dream_history.json       # Full cycle audit trail
 ├── adr_log.json             # Architecture Decision Records
 ├── ui_registry.json         # Semantic UI elements
-└── system_story.json        # Auto-generated narrative (v5.1)
+├── system_story.json        # Auto-generated narrative (v5.1)
+└── schedules.json           # Dream Scheduler persistence (v5.2)
 ```
 
 ## Configuration
@@ -237,3 +245,4 @@ data/
 | `DATABASE_URL` | — | PostgreSQL connection string for DB senses |
 | `DREAMGRAPH_RUNTIME_ENDPOINT` | — | APM metrics endpoint URL |
 | `DREAMGRAPH_RUNTIME_TYPE` | — | Metrics format: `otlp`, `prometheus`, or `custom` |
+| `DREAMGRAPH_SCHEDULER` | `{"enabled":true}` | JSON config for dream scheduler (v5.2): `enabled`, `tick_interval_ms`, `max_runs_per_hour`, `cooldown_ms`, `nightmare_cooldown_ms`, `error_streak_pause_limit` |

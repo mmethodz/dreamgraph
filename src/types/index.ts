@@ -321,6 +321,14 @@ export type {
   WeeklyDigest,
   SystemStoryFile,
   NarrativeConfig,
+  // v5.2 — Dream Scheduling
+  ScheduleAction,
+  ScheduleTriggerType,
+  ScheduleStatus,
+  DreamSchedule,
+  ScheduleExecution,
+  ScheduleFile,
+  SchedulerConfig,
 } from "../cognitive/types.js";
 
 export {
@@ -328,5 +336,6 @@ export {
   DEFAULT_RUNTIME_CONFIG,
   DEFAULT_EVENT_ROUTER_CONFIG,
   DEFAULT_NARRATIVE_CONFIG,
+  DEFAULT_SCHEDULER_CONFIG,
 } from "../cognitive/types.js";
 

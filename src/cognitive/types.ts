@@ -1648,3 +1648,111 @@ export const DEFAULT_NARRATIVE_CONFIG: NarrativeConfig = {
   max_chapters: 100,
   auto_narrate: true,
 };
+
+// ===========================================================================
+// v5.2 — DREAM SCHEDULING
+// ===========================================================================
+
+/** Cognitive actions that can be scheduled */
+export type ScheduleAction =
+  | "dream_cycle"
+  | "nightmare_cycle"
+  | "metacognitive_analysis"
+  | "dispatch_cognitive_event"
+  | "narrative_chapter"
+  | "federation_export"
+  | "graph_maintenance";
+
+/** How a schedule is triggered */
+export type ScheduleTriggerType = "interval" | "cron_like" | "after_cycles" | "on_idle";
+
+/** Schedule status */
+export type ScheduleStatus = "active" | "paused" | "exhausted" | "error";
+
+/**
+ * A persistent dream schedule — policy-driven temporal orchestration
+ * for cognitive actions.
+ */
+export interface DreamSchedule {
+  id: string;
+  name: string;
+  action: ScheduleAction;
+  parameters: Record<string, unknown>;
+  trigger_type: ScheduleTriggerType;
+  /** For "interval" trigger: ms between runs */
+  interval_ms?: number;
+  /** For "cron_like" trigger: simple cron expression (hour-level: "0 6 * * *") */
+  cron?: string;
+  /** For "after_cycles" trigger: run every N dream cycles */
+  cycle_interval?: number;
+  /** For "on_idle" trigger: ms of inactivity before triggering */
+  idle_ms?: number;
+  enabled: boolean;
+  status: ScheduleStatus;
+  last_run_at: string | null;
+  next_run_at: string | null;
+  run_count: number;
+  /** Optional maximum number of executions (null = unlimited) */
+  max_runs: number | null;
+  /** Last cycle number when cycle-based schedule was evaluated */
+  last_cycle_checked: number;
+  error_count: number;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** A single execution log entry */
+export interface ScheduleExecution {
+  id: string;
+  schedule_id: string;
+  schedule_name: string;
+  action: ScheduleAction;
+  triggered_at: string;
+  completed_at: string;
+  duration_ms: number;
+  success: boolean;
+  result_summary: string;
+  error?: string;
+}
+
+/** Persistent schedule file */
+export interface ScheduleFile {
+  metadata: {
+    description: string;
+    schema_version: string;
+    total_schedules: number;
+    total_executions: number;
+    last_tick: string | null;
+  };
+  schedules: DreamSchedule[];
+  executions: ScheduleExecution[];
+}
+
+/** Configuration for the dream scheduler */
+export interface SchedulerConfig {
+  /** Whether the scheduler tick loop is enabled (default true) */
+  enabled: boolean;
+  /** Tick interval in ms — how often due schedules are checked (default 30_000) */
+  tick_interval_ms: number;
+  /** Maximum scheduled runs per hour across all schedules (default 30) */
+  max_runs_per_hour: number;
+  /** Minimum ms between any two scheduled runs (anti-storm, default 10_000) */
+  global_cooldown_ms: number;
+  /** Extra cooldown for nightmare_cycle actions in ms (default 300_000 = 5 min) */
+  nightmare_cooldown_ms: number;
+  /** Maximum execution history entries to retain (default 500) */
+  max_history: number;
+  /** Max consecutive errors before a schedule is paused (default 3) */
+  max_error_streak: number;
+}
+
+export const DEFAULT_SCHEDULER_CONFIG: SchedulerConfig = {
+  enabled: true,
+  tick_interval_ms: 30_000,
+  max_runs_per_hour: 30,
+  global_cooldown_ms: 10_000,
+  nightmare_cooldown_ms: 300_000,
+  max_history: 500,
+  max_error_streak: 3,
+};

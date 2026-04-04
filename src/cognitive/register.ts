@@ -49,6 +49,17 @@ import { generateNarrative, maybeAutoNarrate, generateDiffChapter, appendToStory
 import { runMetacognitiveAnalysis, getMetaLog } from "./metacognition.js";
 import { dispatchEvent, checkTensionThresholds, getEventLog } from "./event-router.js";
 import { generateRemediationPlans } from "./intervention.js";
+import {
+  createSchedule,
+  updateSchedule,
+  deleteSchedule,
+  runScheduleNow,
+  getSchedules,
+  getScheduleHistory,
+  getScheduleFile,
+  notifyCycleComplete,
+  recordActivity,
+} from "./scheduler.js";
 import { logger } from "../utils/logger.js";
 import { success, error, safeExecute } from "../utils/errors.js";
 import type {
@@ -70,6 +81,9 @@ import type {
   MetaLogEntry,
   EventLogEntry,
   SystemStoryFile,
+  DreamSchedule,
+  ScheduleExecution,
+  ScheduleFile,
 } from "../types/index.js";
 
 // ---------------------------------------------------------------------------
@@ -393,7 +407,59 @@ export function registerCognitiveResources(server: McpServer): void {
     }
   );
 
-  logger.info("Registered 13 cognitive resources");
+  // -------------------------------------------------------------------------
+  // v5.2 Resources
+  // -------------------------------------------------------------------------
+
+  // dream://schedules — Dream schedule registry
+  server.resource(
+    "dream-schedules",
+    "dream://schedules",
+    {
+      description:
+        "Dream Schedules — persistent schedule registry for policy-driven temporal orchestration of cognitive actions. Contains all active, paused, and exhausted schedules.",
+      mimeType: "application/json",
+    },
+    async (uri) => {
+      logger.debug(`Resource requested: ${uri.href}`);
+      const data = await getSchedules();
+      return {
+        contents: [
+          {
+            uri: uri.href,
+            mimeType: "application/json",
+            text: JSON.stringify(data, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  // dream://schedule-history — Schedule execution log
+  server.resource(
+    "dream-schedule-history",
+    "dream://schedule-history",
+    {
+      description:
+        "Schedule Execution History — audit trail of all scheduled action executions with timing, success/failure status, and result summaries.",
+      mimeType: "application/json",
+    },
+    async (uri) => {
+      logger.debug(`Resource requested: ${uri.href}`);
+      const data = await getScheduleHistory();
+      return {
+        contents: [
+          {
+            uri: uri.href,
+            mimeType: "application/json",
+            text: JSON.stringify(data, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  logger.info("Registered 15 cognitive resources");
 }
 
 // ---------------------------------------------------------------------------
@@ -462,6 +528,7 @@ export function registerCognitiveTools(server: McpServer): void {
         ),
     },
     async ({ strategy, max_dreams, auto_normalize }) => {
+      recordActivity(); // v5.2 — track activity for idle triggers
       const startTime = Date.now();
       const strat = strategy ?? "all";
       const maxD = max_dreams ?? 20;
@@ -620,6 +687,12 @@ export function registerCognitiveTools(server: McpServer): void {
             await checkTensionThresholds();
           } catch (e) {
             logger.warn(`Post-cycle tension threshold check failed: ${e}`);
+          }
+          // v5.2 — notify scheduler of cycle completion
+          try {
+            await notifyCycleComplete(engine.getCurrentDreamCycle());
+          } catch (e) {
+            logger.warn(`Post-cycle scheduler hook failed: ${e}`);
           }
 
           return success<DreamCycleOutput>({
@@ -1617,5 +1690,334 @@ export function registerCognitiveTools(server: McpServer): void {
     }
   );
 
-  logger.info("Registered 17 cognitive tools");
+  // =========================================================================
+  // v5.2 — DREAM SCHEDULING TOOLS
+  // =========================================================================
+
+  // =========================================================================
+  // schedule_dream — Create a new schedule
+  // =========================================================================
+  server.tool(
+    "schedule_dream",
+    "Create a new dream schedule for temporal orchestration of cognitive actions. " +
+      "Supports interval (every N ms), cycle-based (every N dream cycles), " +
+      "cron-like (hour/day patterns), and idle-time triggers. " +
+      "Actions: dream_cycle, nightmare_cycle, metacognitive_analysis, " +
+      "dispatch_cognitive_event, narrative_chapter, federation_export, graph_maintenance.",
+    {
+      name: z
+        .string()
+        .describe("Human-readable name for this schedule (e.g. 'Nightly nightmare scan')."),
+      action: z
+        .enum([
+          "dream_cycle",
+          "nightmare_cycle",
+          "metacognitive_analysis",
+          "dispatch_cognitive_event",
+          "narrative_chapter",
+          "federation_export",
+          "graph_maintenance",
+        ])
+        .describe("The cognitive action to execute."),
+      parameters: z
+        .record(z.string(), z.unknown())
+        .optional()
+        .describe(
+          "Action-specific parameters. For dream_cycle: {strategy, max_dreams}. " +
+          "For nightmare_cycle: {strategy}. For metacognitive_analysis: {window_size, auto_apply}. " +
+          "For dispatch_cognitive_event: {source, severity, description, payload}."
+        ),
+      trigger_type: z
+        .enum(["interval", "cron_like", "after_cycles", "on_idle"])
+        .describe(
+          "How the schedule is triggered: " +
+          "'interval' = every N ms, 'cron_like' = cron pattern, " +
+          "'after_cycles' = every N dream cycles, 'on_idle' = after N ms of inactivity."
+        ),
+      interval_ms: z
+        .number()
+        .min(60_000)
+        .optional()
+        .describe("For 'interval' trigger: milliseconds between runs (min 60s)."),
+      cron: z
+        .string()
+        .optional()
+        .describe(
+          "For 'cron_like' trigger: cron expression (min hour dom month dow). " +
+          "Example: '0 6 * * *' = daily at 6am, '0 0 * * 1' = weekly on Monday midnight."
+        ),
+      cycle_interval: z
+        .number()
+        .min(1)
+        .optional()
+        .describe("For 'after_cycles' trigger: run every N dream cycles."),
+      idle_ms: z
+        .number()
+        .min(60_000)
+        .optional()
+        .describe("For 'on_idle' trigger: milliseconds of inactivity before triggering (min 60s)."),
+      enabled: z
+        .boolean()
+        .optional()
+        .describe("Whether the schedule starts enabled (default: true)."),
+      max_runs: z
+        .number()
+        .min(1)
+        .optional()
+        .describe("Optional max execution count. Schedule pauses when reached. Default: unlimited."),
+    },
+    async ({ name, action, parameters, trigger_type, interval_ms, cron, cycle_interval, idle_ms, enabled, max_runs }) => {
+      logger.info(`schedule_dream tool called: name="${name}", action=${action}, trigger=${trigger_type}`);
+
+      const result = await safeExecute<DreamSchedule>(
+        async (): Promise<ToolResponse<DreamSchedule>> => {
+          const schedule = await createSchedule({
+            name,
+            action,
+            parameters: parameters ?? {},
+            trigger_type,
+            interval_ms,
+            cron,
+            cycle_interval,
+            idle_ms,
+            enabled,
+            max_runs: max_runs ?? null,
+          });
+          return success(schedule);
+        }
+      );
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  // =========================================================================
+  // list_schedules — List all schedules
+  // =========================================================================
+  server.tool(
+    "list_schedules",
+    "List all dream schedules with their status, next run time, last run time, " +
+      "run count, and configuration. Optionally filter by action type or enabled status.",
+    {
+      action: z
+        .enum([
+          "dream_cycle",
+          "nightmare_cycle",
+          "metacognitive_analysis",
+          "dispatch_cognitive_event",
+          "narrative_chapter",
+          "federation_export",
+          "graph_maintenance",
+        ])
+        .optional()
+        .describe("Filter by action type."),
+      enabled_only: z
+        .boolean()
+        .optional()
+        .describe("If true, only return enabled schedules. Default: false (all)."),
+    },
+    async ({ action, enabled_only }) => {
+      logger.info(`list_schedules tool called: action=${action ?? "all"}, enabled_only=${enabled_only ?? false}`);
+
+      const result = await safeExecute<{ schedules: DreamSchedule[]; total: number }>(
+        async (): Promise<ToolResponse<{ schedules: DreamSchedule[]; total: number }>> => {
+          let schedules = await getSchedules();
+          if (action) {
+            schedules = schedules.filter((s) => s.action === action);
+          }
+          if (enabled_only) {
+            schedules = schedules.filter((s) => s.enabled);
+          }
+          return success({ schedules, total: schedules.length });
+        }
+      );
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  // =========================================================================
+  // update_schedule — Modify a schedule
+  // =========================================================================
+  server.tool(
+    "update_schedule",
+    "Update an existing dream schedule. Can enable/disable, change parameters, " +
+      "modify trigger configuration, or set execution limits. " +
+      "Re-enabling an error-paused schedule resets its error counter.",
+    {
+      schedule_id: z
+        .string()
+        .describe("The ID of the schedule to update."),
+      name: z.string().optional().describe("New name."),
+      enabled: z.boolean().optional().describe("Enable or disable the schedule."),
+      parameters: z
+        .record(z.string(), z.unknown())
+        .optional()
+        .describe("New action parameters."),
+      interval_ms: z.number().min(60_000).optional().describe("New interval in ms."),
+      cron: z.string().optional().describe("New cron expression."),
+      cycle_interval: z.number().min(1).optional().describe("New cycle interval."),
+      idle_ms: z.number().min(60_000).optional().describe("New idle threshold in ms."),
+      max_runs: z.number().min(1).optional().describe("New max run count."),
+    },
+    async ({ schedule_id, name, enabled, parameters, interval_ms, cron, cycle_interval, idle_ms, max_runs }) => {
+      logger.info(`update_schedule tool called: id=${schedule_id}`);
+
+      const result = await safeExecute<DreamSchedule>(
+        async (): Promise<ToolResponse<DreamSchedule>> => {
+          const updated = await updateSchedule(schedule_id, {
+            name,
+            enabled,
+            parameters,
+            interval_ms,
+            cron,
+            cycle_interval,
+            idle_ms,
+            max_runs,
+          });
+          if (!updated) {
+            return error("NOT_FOUND", `Schedule not found: ${schedule_id}`);
+          }
+          return success(updated);
+        }
+      );
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  // =========================================================================
+  // run_schedule_now — Force immediate execution
+  // =========================================================================
+  server.tool(
+    "run_schedule_now",
+    "Force immediate execution of a schedule for testing or one-off triggers. " +
+      "Bypasses timing checks but still respects safety guards (rate limits, cooldowns). " +
+      "Records execution in schedule history.",
+    {
+      schedule_id: z
+        .string()
+        .describe("The ID of the schedule to execute immediately."),
+    },
+    async ({ schedule_id }) => {
+      logger.info(`run_schedule_now tool called: id=${schedule_id}`);
+
+      const result = await safeExecute<ScheduleExecution>(
+        async (): Promise<ToolResponse<ScheduleExecution>> => {
+          const execution = await runScheduleNow(schedule_id);
+          return success(execution);
+        }
+      );
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  // =========================================================================
+  // delete_schedule — Remove a schedule
+  // =========================================================================
+  server.tool(
+    "delete_schedule",
+    "Delete a dream schedule permanently. Execution history is retained " +
+      "for audit purposes. Use update_schedule to disable instead of deleting.",
+    {
+      schedule_id: z
+        .string()
+        .describe("The ID of the schedule to delete."),
+    },
+    async ({ schedule_id }) => {
+      logger.info(`delete_schedule tool called: id=${schedule_id}`);
+
+      const result = await safeExecute<{ deleted: boolean; schedule_id: string }>(
+        async (): Promise<ToolResponse<{ deleted: boolean; schedule_id: string }>> => {
+          const deleted = await deleteSchedule(schedule_id);
+          if (!deleted) {
+            return error("NOT_FOUND", `Schedule not found: ${schedule_id}`);
+          }
+          return success({ deleted: true, schedule_id });
+        }
+      );
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  // =========================================================================
+  // get_schedule_history — Execution audit trail
+  // =========================================================================
+  server.tool(
+    "get_schedule_history",
+    "Get the execution history of scheduled actions. " +
+      "Returns timing, success/failure status, and result summaries. " +
+      "Optionally filter by schedule ID or limit results.",
+    {
+      schedule_id: z
+        .string()
+        .optional()
+        .describe("Filter by schedule ID. Default: all schedules."),
+      limit: z
+        .number()
+        .min(1)
+        .max(500)
+        .optional()
+        .describe("Maximum number of history entries to return (default: 50)."),
+    },
+    async ({ schedule_id, limit }) => {
+      const lim = limit ?? 50;
+      logger.info(`get_schedule_history tool called: id=${schedule_id ?? "all"}, limit=${lim}`);
+
+      const result = await safeExecute<{ executions: ScheduleExecution[]; total: number }>(
+        async (): Promise<ToolResponse<{ executions: ScheduleExecution[]; total: number }>> => {
+          const executions = await getScheduleHistory(schedule_id, lim);
+          return success({ executions, total: executions.length });
+        }
+      );
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  logger.info("Registered 17 cognitive tools + 6 scheduler tools");
 }

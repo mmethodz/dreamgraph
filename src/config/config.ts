@@ -5,10 +5,11 @@
  * See README.md for the full list of supported env vars.
  */
 
-import type { EventRouterConfig, NarrativeConfig } from "../cognitive/types.js";
+import type { EventRouterConfig, NarrativeConfig, SchedulerConfig } from "../cognitive/types.js";
 import {
   DEFAULT_EVENT_ROUTER_CONFIG,
   DEFAULT_NARRATIVE_CONFIG,
+  DEFAULT_SCHEDULER_CONFIG,
 } from "../cognitive/types.js";
 
 function parseRepos(): Record<string, string> {
@@ -46,11 +47,22 @@ function parseNarrativeConfig(): NarrativeConfig {
   }
 }
 
+function parseSchedulerConfig(): SchedulerConfig {
+  const raw = process.env.DREAMGRAPH_SCHEDULER;
+  if (!raw) return { ...DEFAULT_SCHEDULER_CONFIG };
+  try {
+    const parsed = JSON.parse(raw);
+    return { ...DEFAULT_SCHEDULER_CONFIG, ...parsed };
+  } catch {
+    return { ...DEFAULT_SCHEDULER_CONFIG };
+  }
+}
+
 export const config = {
   /** Server metadata */
   server: {
     name: "dreamgraph",
-    version: "5.1.0",
+    version: "5.2.0",
   },
 
   /**
@@ -90,4 +102,7 @@ export const config = {
 
   /** v5.1 — Continuous narrative intelligence configuration */
   narrative: parseNarrativeConfig(),
+
+  /** v5.2 — Dream scheduler configuration */
+  scheduler: parseSchedulerConfig(),
 } as const;

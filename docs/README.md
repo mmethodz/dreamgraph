@@ -1,6 +1,6 @@
 # DreamGraph Documentation
 
-> **v5.1.0** — Comprehensive documentation generated from DreamGraph's own knowledge graph.
+> **v5.2.0** — Comprehensive documentation generated from DreamGraph's own knowledge graph.
 
 ---
 
@@ -8,7 +8,7 @@
 
 DreamGraph is a **cognitive dreaming engine** for MCP knowledge graphs. It speculatively discovers hidden connections between entities, validates them through a strict three-outcome classifier, and builds a persistent, evolving understanding of the systems it observes.
 
-It thinks in cycles: **dream → validate → learn → repeat**.
+It thinks in cycles: **dream → validate → learn → repeat** — and now schedules its own cognitive work autonomously.
 
 ---
 
@@ -18,16 +18,16 @@ It thinks in cycles: **dream → validate → learn → repeat**.
 System overview, cognitive states, state machine, promotion pipeline, feature dependency diagram, source layout, data directory, and configuration reference.
 
 ### [Cognitive Engine — Deep Dive](cognitive-engine.md)
-How the engine thinks: state machine internals, 8 dream strategies, normalization pipeline, speculative memory lifecycle, tension system, adversarial dreaming, causal/temporal analysis, and all v5.1 capabilities (metacognitive self-tuning, event-driven dreaming, continuous narrative).
+How the engine thinks: state machine internals, 8 dream strategies, normalization pipeline, speculative memory lifecycle, tension system, adversarial dreaming, causal/temporal analysis, v5.1 capabilities (metacognitive self-tuning, event-driven dreaming, continuous narrative), and v5.2 dream scheduling.
 
 ### [Tools Reference](tools-reference.md)
-Complete catalog of all **37 MCP tools** (17 cognitive + 20 general) and **13 MCP resources**, with parameters, types, defaults, and descriptions.
+Complete catalog of all **43 MCP tools** (23 cognitive + 20 general) and **15 MCP resources**, with parameters, types, defaults, and descriptions.
 
 ### [Data Model](data-model.md)
-All **12 data stores**: dream graph, candidate edges, validated edges, tension log, dream history, threat log, archetypes, ADR log, UI registry, fact graph, capabilities, and system story. Full schemas and relationship map.
+All **13 data stores**: dream graph, candidate edges, validated edges, tension log, dream history, threat log, archetypes, ADR log, UI registry, fact graph, capabilities, system story, and schedules. Full schemas and relationship map.
 
 ### [Workflows](workflows.md)
-Step-by-step flows for all **9 operational processes**: dream cycle, nightmare cycle, normalization pipeline, tension lifecycle, edge promotion, federation, interruption protocol, living docs export, and insight solidification.
+Step-by-step flows for all **10 operational processes**: dream cycle, nightmare cycle, normalization pipeline, tension lifecycle, edge promotion, federation, interruption protocol, living docs export, insight solidification, and schedule execution.
 
 ### [The DreamGraph Chronicle](narrative.md)
 The system's auto-generated autobiography — 6 chapters covering 60 dream cycles, cumulative statistics, weekly digest, and trend analysis. Written by DreamGraph about itself.
@@ -67,6 +67,12 @@ Add to your MCP client configuration:
 dream_cycle(strategy="all", max_dreams=20)
 ```
 
+### Schedule Recurring Dreams
+
+```
+schedule_dream(action="dream_cycle", trigger_type="interval", interval_seconds=3600, strategy="tension_directed")
+```
+
 ### Check Status
 
 ```
@@ -81,16 +87,16 @@ get_system_narrative(depth="technical")
 
 ---
 
-## Key Numbers (after 60 cycles)
+## Key Numbers (after 90 cycles)
 
 | Metric | Value |
 |--------|-------|
-| Validated connections | 208 |
+| Validated connections | 280+ |
 | Dream strategies | 8 |
-| MCP tools | 37 |
-| MCP resources | 13 |
-| Data stores | 12 |
-| Workflows | 9 |
+| MCP tools | 43 |
+| MCP resources | 15 |
+| Data stores | 13 |
+| Workflows | 10 |
 | Features | 27 |
 | Promotion threshold | 0.62 confidence |
 | Calibrated accuracy | 97.5%+ above threshold |

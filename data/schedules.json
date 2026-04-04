@@ -1,0 +1,11 @@
+{
+  "metadata": {
+    "description": "Dream Scheduler — persistent schedule registry and execution log.",
+    "schema_version": "1.0.0",
+    "total_schedules": 0,
+    "total_executions": 0,
+    "last_tick": null
+  },
+  "schedules": [],
+  "executions": []
+}
