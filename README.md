@@ -2,7 +2,7 @@
   <img src="dreamgraph.jpeg" alt="DreamGraph - Autonomous Cognitive Layer" width="400" />
 </p>
 
-# DreamGraph v5.1 — Autonomous Cognitive Layer for Software Systems
+# DreamGraph v5.2 — Autonomous Cognitive Layer for Software Systems
 
 Traditional AI systems answer questions. DreamGraph reduces uncertainty over time — it finds, verifies, and resolves problems in your system autonomously.
 
@@ -1080,7 +1080,6 @@ You can think of DreamGraph as:
 - Metacognition = self-improvement
 - Events = reflexes
 - System story = autobiography
-- Scheduling = planning
 
 ---
 
