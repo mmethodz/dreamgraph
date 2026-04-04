@@ -300,10 +300,33 @@ export type {
   RemediationStep,
   RemediationPlan,
   RemediationPlanOutput,
+  // v5.1 — Metacognitive Self-Tuning
+  StrategyMetrics,
+  CalibrationBucket,
+  ThresholdRecommendation,
+  DomainDecayProfile,
+  MetaLogEntry,
+  MetaLogFile,
+  // v5.1 — Event-Driven Dreaming
+  EventSource,
+  EventSeverity,
+  CognitiveEvent,
+  EntityScope,
+  EventLogEntry,
+  EventLogFile,
+  EventRouterConfig,
+  // v5.1 — Continuous Narrative Intelligence
+  StoryMetadata,
+  StoryChapter,
+  WeeklyDigest,
+  SystemStoryFile,
+  NarrativeConfig,
 } from "../cognitive/types.js";
 
 export {
   DEFAULT_FEDERATION_CONFIG,
   DEFAULT_RUNTIME_CONFIG,
+  DEFAULT_EVENT_ROUTER_CONFIG,
+  DEFAULT_NARRATIVE_CONFIG,
 } from "../cognitive/types.js";
 

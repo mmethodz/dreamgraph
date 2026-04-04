@@ -1,6 +1,6 @@
 {
   "name": "dreamgraph",
-  "version": "2.0.0",
+  "version": "5.1.0",
   "description": "DreamGraph — A cognitive dreaming engine for MCP servers. Builds, explores, and self-heals knowledge graphs through speculative reasoning.",
   "type": "module",
   "bin": {

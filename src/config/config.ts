@@ -5,6 +5,12 @@
  * See README.md for the full list of supported env vars.
  */
 
+import type { EventRouterConfig, NarrativeConfig } from "../cognitive/types.js";
+import {
+  DEFAULT_EVENT_ROUTER_CONFIG,
+  DEFAULT_NARRATIVE_CONFIG,
+} from "../cognitive/types.js";
+
 function parseRepos(): Record<string, string> {
   const raw = process.env.DREAMGRAPH_REPOS ?? "{}";
   try {
@@ -18,11 +24,33 @@ function parseRepos(): Record<string, string> {
   return {};
 }
 
+function parseEventRouterConfig(): EventRouterConfig {
+  const raw = process.env.DREAMGRAPH_EVENTS;
+  if (!raw) return { ...DEFAULT_EVENT_ROUTER_CONFIG };
+  try {
+    const parsed = JSON.parse(raw);
+    return { ...DEFAULT_EVENT_ROUTER_CONFIG, ...parsed };
+  } catch {
+    return { ...DEFAULT_EVENT_ROUTER_CONFIG };
+  }
+}
+
+function parseNarrativeConfig(): NarrativeConfig {
+  const raw = process.env.DREAMGRAPH_NARRATIVE;
+  if (!raw) return { ...DEFAULT_NARRATIVE_CONFIG };
+  try {
+    const parsed = JSON.parse(raw);
+    return { ...DEFAULT_NARRATIVE_CONFIG, ...parsed };
+  } catch {
+    return { ...DEFAULT_NARRATIVE_CONFIG };
+  }
+}
+
 export const config = {
   /** Server metadata */
   server: {
     name: "dreamgraph",
-    version: "1.0.0",
+    version: "5.1.0",
   },
 
   /**
@@ -56,4 +84,10 @@ export const config = {
     /** Enable verbose stderr logging */
     debug: process.env.DREAMGRAPH_DEBUG === "true",
   },
+
+  /** v5.1 — Event-driven dreaming configuration */
+  events: parseEventRouterConfig(),
+
+  /** v5.1 — Continuous narrative intelligence configuration */
+  narrative: parseNarrativeConfig(),
 } as const;

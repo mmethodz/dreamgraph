@@ -2,11 +2,11 @@
   <img src="dreamgraph.jpeg" alt="DreamGraph - Autonomous Cognitive Layer" width="400" />
 </p>
 
-# DreamGraph — Autonomous Cognitive Layer for Software Systems
+# DreamGraph v5.1 — Autonomous Cognitive Layer for Software Systems
 
 Traditional AI systems answer questions. DreamGraph reduces uncertainty over time — it finds, verifies, and resolves problems in your system autonomously.
 
-A self-regulating AI cognitive layer that discovers, verifies, and resolves system-level insights through structured "dream cycles" — and now dreams adversarially, reasons causally, thinks temporally, narrates its own understanding, and proposes concrete fixes.
+A self-regulating AI cognitive layer that discovers, verifies, and resolves system-level insights through structured "dream cycles" — and now dreams adversarially, reasons causally, thinks temporally, narrates its own understanding, proposes concrete fixes, tunes its own thresholds, reacts to events, and writes its own autobiography.
 
 ---
 
@@ -26,6 +26,9 @@ DreamGraph is a cognitive layer for software systems that continuously discovers
 - **System autobiography** — narrative understanding, not just data
 - **Intervention planning** — from insight to concrete remediation
 - **Runtime/APM awareness** — embodied senses from live metrics
+- **Metacognitive self-tuning** — analyzes its own performance and adjusts thresholds
+- **Event-driven dreaming** — reactive cognition triggered by system changes
+- **Continuous narrative** — persistent, auto-accumulated system autobiography
 
 It is not a chatbot.
 
@@ -120,9 +123,9 @@ Not all ideas are immediately provable. The system retains latent hypotheses tha
 
 ---
 
-## The Seven Cognitive Capabilities
+## The Ten Cognitive Capabilities
 
-DreamGraph v2 introduces seven advanced cognitive features that take the system from "observant" to "truly intelligent."
+DreamGraph's cognitive engine provides ten advanced features that take the system from "observant" to "truly intelligent."
 
 ### 1. Causal Reasoning Engine
 
@@ -224,6 +227,70 @@ Connects DreamGraph to live runtime metrics — OpenTelemetry, Prometheus, or cu
 Gracefully degrades when no endpoint is configured.
 
 **Tool:** `query_runtime_metrics`
+
+### 8. Metacognitive Self-Tuning
+
+DreamGraph analyses its own performance and recommends (or auto-applies) threshold adjustments — closing the feedback loop between dreaming and tuning.
+
+Three analysis modes:
+
+| Mode | What it measures |
+|---|---|
+| **Strategy Performance** | Per-strategy precision, recall, validation lag, consecutive zero-yield cycles, recommended budget weight |
+| **Promotion Calibration** | Actual validation rates per confidence bucket — reveals whether thresholds are too strict or too lenient |
+| **Domain Decay Profiles** | Per-domain optimal TTL and urgency decay based on historical resolution patterns |
+
+Safety guarantees:
+- Hard min/max guards on all threshold adjustments (confidence never below 0.55 or above 0.90)
+- Auto-tuning is in-memory only — resets on restart, never persists to disk
+- Every action logged to `data/meta_log.json` with basis and old/new values
+
+**Tool:** `metacognitive_analysis`
+**Resource:** `dream://metacognition`
+
+### 9. Event-Driven Dreaming
+
+Dream cycles are triggered on-demand, but the most valuable time to think is *when something changes*. The event router creates a reactive layer that classifies events, resolves affected entities, and recommends cognitive actions.
+
+| Event Source | Trigger Condition | Cognitive Response |
+|---|---|---|
+| `git_webhook` | Push to configured branch | Scoped `dream_cycle` (strategy: `tension_directed`) |
+| `ci_cd` | Deploy failure | Scoped `nightmare_cycle` on deployment entities |
+| `ci_cd` | Deploy success | Scoped `dream_cycle` (strategy: `gap_detection`) |
+| `runtime_anomaly` | Error rate exceeds threshold | `get_causal_insights` + scoped `dream_cycle` |
+| `tension_threshold` | Tension urgency > 0.8 | Auto-trigger `get_remediation_plan` |
+| `federation_import` | Archetypes imported | Scoped `dream_cycle` (strategy: `cross_domain`) |
+| `manual` | User dispatches event | Execute specified cognitive action |
+
+Safety guarantees:
+- Cooldown timer between auto-triggered cycles (default: 60s)
+- Maximum auto-triggered cycles per hour (default: 10)
+- Full audit trail in `data/event_log.json`
+- Internal tension threshold trigger fires automatically after each `dream_cycle`
+
+**Tool:** `dispatch_cognitive_event`
+**Resource:** `dream://events`
+
+### 10. Continuous Narrative Intelligence
+
+The existing `get_system_narrative` tool generates narratives on-demand and writes nothing. Continuous Narrative makes the narrative *persistent and automatic* — a living system autobiography that evolves over time.
+
+After every N dream cycles (configurable, default: 10):
+
+```
+loadExistingStory()
+  → computeDiffSinceLastChapter()
+  → generateDiffChapter()
+  → appendToStory()
+  → generateWeeklyDigest() (if due)
+```
+
+Diff chapters capture *what changed* — new validated edges, tensions resolved, threats discovered — instead of regenerating the full narrative each time.
+
+Weekly digests aggregate multiple chapters into health-trended summaries with key changes, top tensions, and top discoveries.
+
+**Tool:** `get_system_story`
+**Resource:** `dream://story`
 
 ---
 
@@ -561,6 +628,8 @@ You can also skip the manual data step entirely and just point the agent at your
 | `DREAMGRAPH_RUNTIME_ENDPOINT` | No | URL of a runtime metrics endpoint (OpenTelemetry, Prometheus, or custom JSON). Example: `http://localhost:9090/api/v1/query` |
 | `DREAMGRAPH_RUNTIME_TYPE` | No | Metrics endpoint format: `"opentelemetry"`, `"prometheus"`, or `"custom_json"` (default: `"prometheus"`) |
 | `DREAMGRAPH_RUNTIME_TIMEOUT` | No | Timeout in milliseconds for runtime metrics fetch (default: `5000`) |
+| `DREAMGRAPH_EVENTS` | No | JSON config for the event router: `{"tension_threshold": 0.8, "cooldown_ms": 60000, "max_auto_cycles_per_hour": 10, "runtime_error_threshold": 0.05}` |
+| `DREAMGRAPH_NARRATIVE` | No | JSON config for continuous narrative: `{"auto_narrate": true, "narrative_interval": 10, "digest_interval": 50, "max_chapters": 100}` |
 
 None are required. Without `DREAMGRAPH_REPOS`, code/git tools will be unavailable. Without `DATABASE_URL`, the `query_db_schema` tool will be unavailable. Without `DREAMGRAPH_RUNTIME_ENDPOINT`, the `query_runtime_metrics` tool will return a configuration hint. The cognitive engine works regardless — it just has fewer senses.
 
@@ -571,7 +640,7 @@ None are required. Without `DREAMGRAPH_REPOS`, code/git tools will be unavailabl
 ```
                 +--------------+
                 |   MCP Layer  |
-                | (34 tools)   |
+                | (37 tools)   |
                 +------+-------+
                        |
         +--------------v--------------+
@@ -587,6 +656,8 @@ None are required. Without `DREAMGRAPH_REPOS`, code/git tools will be unavailabl
         |  - Temporal analysis        |
         |  - Narrative synthesis       |
         |  - Intervention planning    |
+        |  - Metacognitive tuning     |
+        |  - Event-driven dreaming    |
         +--------------+--------------+
                        |
         +--------------v--------------+
@@ -598,6 +669,9 @@ None are required. Without `DREAMGRAPH_REPOS`, code/git tools will be unavailabl
         |  - Resolution archive       |
         |  - Threat log               |
         |  - Dream archetypes         |
+        |  - Meta log (self-tuning)   |
+        |  - Event log                |
+        |  - System story             |
         +-----------------------------+
                        |
         +--------------v--------------+
@@ -624,8 +698,10 @@ src/
 │   ├── temporal.ts         # Temporal Dreaming (retro/precognition)
 │   ├── adversarial.ts      # Adversarial Dreaming (NIGHTMARE state)
 │   ├── federation.ts       # Multi-System Dream Federation
-│   ├── narrator.ts         # Dream Narratives (system autobiography)
-│   └── intervention.ts     # Intervention Engine (remediation plans)
+│   ├── narrator.ts         # Dream Narratives (system autobiography + continuous story)
+│   ├── intervention.ts     # Intervention Engine (remediation plans)
+│   ├── metacognition.ts    # Metacognitive Self-Tuning Engine
+│   └── event-router.ts     # Event-Driven Dreaming (reactive cognition)
 ├── tools/                  # MCP tools (senses)
 │   ├── code-senses.ts      # list_directory, read_source_code, create_file
 │   ├── git-senses.ts       # git_log, git_blame
@@ -665,14 +741,15 @@ data/
 ├── adr_log.json            # [runtime] Architecture Decision Records
 ├── ui_registry.json        # [runtime] Semantic UI element registry
 ├── threat_log.json         # [runtime] Adversarial scan results (NIGHTMARE)
-└── dream_archetypes.json   # [runtime] Federated dream archetypes
-```
+└── dream_archetypes.json   # [runtime] Federated dream archetypes├── meta_log.json           # [runtime] Metacognitive analysis audit trail
+├── event_log.json          # [runtime] Cognitive event dispatch log
+└── system_story.json       # [runtime] Persistent system autobiography```
 
 ---
 
-## MCP Tools (34 total)
+## MCP Tools (37 total)
 
-### Cognitive Tools (14)
+### Cognitive Tools (17)
 
 | Tool | Description |
 |---|---|
@@ -690,6 +767,9 @@ data/
 | `import_dream_archetypes` | Import archetypes from another DreamGraph instance |
 | `get_system_narrative` | Generate a coherent story of the system's evolving understanding |
 | `get_remediation_plan` | Generate concrete fix plans for high-urgency tensions |
+| `metacognitive_analysis` | Analyze DreamGraph's own performance: strategy precision/recall, promotion calibration, domain decay profiles. Optional auto-apply |
+| `dispatch_cognitive_event` | Dispatch a cognitive event (git push, CI/CD signal, runtime anomaly, manual trigger) that classifies, scopes, and recommends a cognitive response |
+| `get_system_story` | Read the persistent system autobiography — auto-accumulated diff chapters, weekly digests, health trends |
 
 ### Sense Tools (12)
 
@@ -721,7 +801,7 @@ data/
 | `generate_ui_migration_plan` | Gap analysis between source and target platforms with data contract summaries and complexity estimates |
 | `export_living_docs` | Export the knowledge graph as structured Markdown for Docusaurus, Nextra, MkDocs, or plain GitHub. Stateless and idempotent |
 
-### MCP Resources (10)
+### MCP Resources (13)
 
 Read-only views the agent can inspect at any time:
 
@@ -737,6 +817,9 @@ Read-only views the agent can inspect at any time:
 | UI Registry | `dream://ui-registry` | Semantic UI element definitions with data contracts and platform implementations |
 | Threats | `dream://threats` | Adversarial scan results — threat edges with severity and CWE IDs |
 | Archetypes | `dream://archetypes` | Federated dream archetypes — anonymized transferable patterns |
+| Metacognition | `dream://metacognition` | Self-tuning audit trail — strategy metrics, calibration buckets, threshold recommendations |
+| Events | `dream://events` | Cognitive event dispatch log — event classification, entity scoping, action outcomes |
+| Story | `dream://story` | Persistent system autobiography — diff chapters, weekly digests, health trends |
 
 ---
 
@@ -939,6 +1022,10 @@ This project introduces a cognitive model with the following primitives:
 | **Reinforcement** | When the dreamer re-discovers an existing connection, strengthening confidence |
 | **Remediation Plan** | A concrete, step-by-step fix proposal generated from a tension |
 | **System Narrative** | A coherent story of how understanding evolved over dream cycles |
+| **Meta Log** | Audit trail of metacognitive self-analysis — strategy metrics, threshold recommendations |
+| **Cognitive Event** | An external or internal signal that triggers reactive cognition |
+| **System Story** | The persistent, auto-accumulated autobiography (diff chapters + weekly digests) |
+| **Calibration Bucket** | A confidence range used to measure actual validation rates vs. thresholds |
 
 You can think of DreamGraph as:
 
@@ -948,6 +1035,9 @@ You can think of DreamGraph as:
 - Truth filter = reality check
 - Resolution = decision
 - Narrative = memory
+- Metacognition = self-improvement
+- Events = reflexes
+- System story = autobiography
 
 ---
 

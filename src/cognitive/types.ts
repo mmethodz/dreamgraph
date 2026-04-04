@@ -1413,3 +1413,238 @@ export interface RemediationPlanOutput {
   skipped_low_urgency: number;
   timestamp: string;
 }
+
+// ===========================================================================
+// v5.1 — METACOGNITIVE SELF-TUNING
+// ===========================================================================
+
+/** Per-strategy performance metrics over a rolling window */
+export interface StrategyMetrics {
+  strategy: DreamStrategy;
+  /** Total edges generated */
+  total_generated: number;
+  /** Edges that eventually reached "validated" status */
+  total_validated: number;
+  /** Precision: validated / generated (0–1) */
+  precision: number;
+  /** Tensions resolved by edges originating from this strategy */
+  tensions_resolved: number;
+  /** Recall proxy: tensions_resolved / total_tensions_in_window */
+  recall: number;
+  /** Average cycles from generation to validation */
+  avg_validation_lag: number;
+  /** Consecutive zero-yield cycles */
+  consecutive_zero_yield: number;
+  /** Recommended budget weight adjustment */
+  recommended_weight: number;
+}
+
+/** Calibration bucket for promotion threshold analysis */
+export interface CalibrationBucket {
+  confidence_range: [number, number];
+  total_edges: number;
+  eventually_validated: number;
+  validation_rate: number;
+}
+
+/** Recommendation for adjusting a promotion threshold */
+export interface ThresholdRecommendation {
+  parameter: keyof PromotionConfig;
+  current_value: number;
+  recommended_value: number;
+  basis: string;
+  confidence: number;
+}
+
+/** Domain-specific decay profile analysis */
+export interface DomainDecayProfile {
+  domain: TensionDomain;
+  avg_resolution_cycles: number;
+  false_positive_rate: number;
+  recommended_ttl: number;
+  recommended_urgency_decay: number;
+  current_ttl: number;
+  current_decay: number;
+}
+
+/** A single meta-log entry recording analysis results */
+export interface MetaLogEntry {
+  id: string;
+  timestamp: string;
+  cycle_window: [number, number];
+  strategy_metrics: StrategyMetrics[];
+  threshold_recommendations: ThresholdRecommendation[];
+  domain_decay_profiles: DomainDecayProfile[];
+  calibration_buckets: CalibrationBucket[];
+  actions_taken: Array<{
+    type: "threshold_adjustment" | "decay_adjustment" | "strategy_weight";
+    parameter: string;
+    old_value: number;
+    new_value: number;
+    basis: string;
+  }>;
+  overall_health: string;
+}
+
+/** Meta log file persisted to disk */
+export interface MetaLogFile {
+  metadata: {
+    description: string;
+    schema_version: string;
+    total_entries: number;
+    last_analysis: string | null;
+  };
+  entries: MetaLogEntry[];
+}
+
+// ===========================================================================
+// v5.1 — EVENT-DRIVEN DREAMING
+// ===========================================================================
+
+/** Sources of cognitive events */
+export type EventSource =
+  | "git_webhook"
+  | "ci_cd"
+  | "runtime_anomaly"
+  | "tension_threshold"
+  | "federation_import"
+  | "manual";
+
+/** Event severity levels */
+export type EventSeverity = "critical" | "high" | "medium" | "low" | "info";
+
+/** A cognitive event that may trigger a dream response */
+export interface CognitiveEvent {
+  id: string;
+  source: EventSource;
+  severity: EventSeverity;
+  timestamp: string;
+  payload: Record<string, unknown>;
+  affected_entities: string[];
+  description: string;
+}
+
+/** Entity scope resolved from an event */
+export interface EntityScope {
+  /** Directly affected entity IDs */
+  primary: string[];
+  /** Entities connected to primary via validated edges (1-hop) */
+  secondary: string[];
+  /** Combined scope */
+  all: string[];
+}
+
+/** A single event log entry */
+export interface EventLogEntry {
+  event: CognitiveEvent;
+  classification: {
+    response_type: string;
+    entity_scope: EntityScope;
+    strategy: string;
+  };
+  result: {
+    action_taken: string;
+    duration_ms: number;
+    outcome_summary: string;
+  };
+  timestamp: string;
+}
+
+/** Event log file persisted to disk */
+export interface EventLogFile {
+  metadata: {
+    description: string;
+    schema_version: string;
+    total_events: number;
+    last_event: string | null;
+  };
+  events: EventLogEntry[];
+}
+
+/** Configuration for the event router */
+export interface EventRouterConfig {
+  /** Tension urgency threshold for auto-triggering (default 0.8) */
+  tension_threshold: number;
+  /** Error rate threshold for runtime anomaly triggers (default 0.05) */
+  runtime_error_threshold: number;
+  /** Cooldown between auto-triggered cycles in ms (default 60_000) */
+  cooldown_ms: number;
+  /** Maximum auto-triggered cycles per hour (default 10) */
+  max_auto_cycles_per_hour: number;
+}
+
+export const DEFAULT_EVENT_ROUTER_CONFIG: EventRouterConfig = {
+  tension_threshold: 0.8,
+  runtime_error_threshold: 0.05,
+  cooldown_ms: 60_000,
+  max_auto_cycles_per_hour: 10,
+};
+
+// ===========================================================================
+// v5.1 — CONTINUOUS NARRATIVE INTELLIGENCE
+// ===========================================================================
+
+/** Story metadata for the persistent autobiography */
+export interface StoryMetadata {
+  description: string;
+  schema_version: string;
+  title: string;
+  started_at: string;
+  last_updated: string;
+  total_chapters: number;
+  total_cycles_covered: number;
+}
+
+/** A diff chapter — what changed since the last chapter */
+export interface StoryChapter extends NarrativeChapter {
+  /** Sequential chapter number */
+  chapter_number: number;
+  /** Timestamp of generation */
+  generated_at: string;
+  /** What changed since the last chapter */
+  diff: {
+    new_validated_edges: number;
+    tensions_created: number;
+    tensions_resolved: number;
+    threats_discovered: number;
+    archetypes_exchanged: number;
+  };
+}
+
+/** Weekly digest summarizing multiple chapters */
+export interface WeeklyDigest {
+  id: string;
+  generated_at: string;
+  cycle_range: [number, number];
+  summary: string;
+  key_changes: string[];
+  health_trend: "improving" | "stable" | "degrading";
+  top_tensions: string[];
+  top_discoveries: string[];
+}
+
+/** Persistent system autobiography file */
+export interface SystemStoryFile {
+  metadata: StoryMetadata;
+  chapters: StoryChapter[];
+  digests: WeeklyDigest[];
+}
+
+/** Configuration for continuous narrative */
+export interface NarrativeConfig {
+  /** Cycles between auto-generated chapters (default 10) */
+  narrative_interval: number;
+  /** Cycles between weekly digests (default 50) */
+  digest_interval: number;
+  /** Max chapters to retain (oldest pruned) (default 100) */
+  max_chapters: number;
+  /** Enable automatic chapter generation (default true) */
+  auto_narrate: boolean;
+}
+
+export const DEFAULT_NARRATIVE_CONFIG: NarrativeConfig = {
+  narrative_interval: 10,
+  digest_interval: 50,
+  max_chapters: 100,
+  auto_narrate: true,
+};

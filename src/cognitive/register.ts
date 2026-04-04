@@ -45,7 +45,9 @@ import { analyzeCausality } from "./causal.js";
 import { analyzeTemporalPatterns } from "./temporal.js";
 import { exportArchetypes, importArchetypes, getArchetypes } from "./federation.js";
 import { nightmare, getThreatLog, clearThreatLog } from "./adversarial.js";
-import { generateNarrative } from "./narrator.js";
+import { generateNarrative, maybeAutoNarrate, generateDiffChapter, appendToStory, getSystemStory, generateWeeklyDigest } from "./narrator.js";
+import { runMetacognitiveAnalysis, getMetaLog } from "./metacognition.js";
+import { dispatchEvent, checkTensionThresholds, getEventLog } from "./event-router.js";
 import { generateRemediationPlans } from "./intervention.js";
 import { logger } from "../utils/logger.js";
 import { success, error, safeExecute } from "../utils/errors.js";
@@ -65,6 +67,9 @@ import type {
   NightmareResult,
   SystemNarrative,
   RemediationPlanOutput,
+  MetaLogEntry,
+  EventLogEntry,
+  SystemStoryFile,
 } from "../types/index.js";
 
 // ---------------------------------------------------------------------------
@@ -312,7 +317,83 @@ export function registerCognitiveResources(server: McpServer): void {
     }
   );
 
-  logger.info("Registered 10 cognitive resources");
+  // -------------------------------------------------------------------------
+  // v5.1 Resources
+  // -------------------------------------------------------------------------
+
+  // dream://metacognition — Metacognitive analysis log
+  server.resource(
+    "dream-metacognition",
+    "dream://metacognition",
+    {
+      description:
+        "Metacognitive Analysis Log — self-tuning audit trail. Contains per-strategy performance metrics, promotion calibration buckets, threshold recommendations, and domain decay profiles.",
+      mimeType: "application/json",
+    },
+    async (uri) => {
+      logger.debug(`Resource requested: ${uri.href}`);
+      const data = await getMetaLog();
+      return {
+        contents: [
+          {
+            uri: uri.href,
+            mimeType: "application/json",
+            text: JSON.stringify(data, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  // dream://events — Cognitive event log
+  server.resource(
+    "dream-events",
+    "dream://events",
+    {
+      description:
+        "Cognitive Event Log — audit trail of dispatched events (git webhooks, CI/CD signals, runtime anomalies, tension thresholds, manual triggers) and their cognitive responses.",
+      mimeType: "application/json",
+    },
+    async (uri) => {
+      logger.debug(`Resource requested: ${uri.href}`);
+      const data = await getEventLog();
+      return {
+        contents: [
+          {
+            uri: uri.href,
+            mimeType: "application/json",
+            text: JSON.stringify(data, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  // dream://story — Persistent system autobiography
+  server.resource(
+    "dream-story",
+    "dream://story",
+    {
+      description:
+        "System Autobiography — persistent, auto-accumulated narrative of DreamGraph's evolving understanding. Contains diff chapters, weekly digests, and health trends.",
+      mimeType: "application/json",
+    },
+    async (uri) => {
+      logger.debug(`Resource requested: ${uri.href}`);
+      const data = await getSystemStory();
+      return {
+        contents: [
+          {
+            uri: uri.href,
+            mimeType: "application/json",
+            text: JSON.stringify(data, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  logger.info("Registered 13 cognitive resources");
 }
 
 // ---------------------------------------------------------------------------
@@ -528,6 +609,18 @@ export function registerCognitiveTools(server: McpServer): void {
             tensions_decayed: tensionDecayResult.decayed,
           };
           await engine.appendHistoryEntry(historyEntry);
+
+          // v5.1 post-cycle hooks (fire-and-forget, errors logged but not propagated)
+          try {
+            await maybeAutoNarrate();
+          } catch (e) {
+            logger.warn(`Post-cycle narrator hook failed: ${e}`);
+          }
+          try {
+            await checkTensionThresholds();
+          } catch (e) {
+            logger.warn(`Post-cycle tension threshold check failed: ${e}`);
+          }
 
           return success<DreamCycleOutput>({
             cycle_number: engine.getCurrentDreamCycle(),
@@ -1354,5 +1447,175 @@ export function registerCognitiveTools(server: McpServer): void {
     }
   );
 
-  logger.info("Registered 14 cognitive tools");
+  // =========================================================================
+  // v5.1 — metacognitive_analysis
+  // =========================================================================
+  server.tool(
+    "metacognitive_analysis",
+    "Analyze DreamGraph's own performance: per-strategy precision/recall, " +
+      "promotion threshold calibration (actual validation rates per confidence bucket), " +
+      "and domain-specific decay profiles. Optionally auto-apply recommended thresholds (in-memory only).",
+    {
+      window_size: z
+        .number()
+        .min(5)
+        .max(500)
+        .optional()
+        .describe("Number of recent dream cycles to analyze (default: 50)."),
+      auto_apply: z
+        .boolean()
+        .optional()
+        .describe(
+          "If true, apply recommended thresholds to in-memory engine state. " +
+          "Bounded by safety guards. Resets on restart. Default: false."
+        ),
+    },
+    async ({ window_size, auto_apply }) => {
+      const ws = window_size ?? 50;
+      const aa = auto_apply ?? false;
+      logger.info(`metacognitive_analysis tool called: window=${ws}, auto_apply=${aa}`);
+
+      const result = await safeExecute<MetaLogEntry>(
+        async (): Promise<ToolResponse<MetaLogEntry>> => {
+          const entry = await runMetacognitiveAnalysis(ws, aa);
+          return success(entry);
+        }
+      );
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  // =========================================================================
+  // v5.1 — dispatch_cognitive_event
+  // =========================================================================
+  server.tool(
+    "dispatch_cognitive_event",
+    "Dispatch a cognitive event that may trigger a reactive dream cycle. " +
+      "Events are classified, entity-scoped, and logged. " +
+      "Supports sources: git_webhook, ci_cd, runtime_anomaly, tension_threshold, federation_import, manual.",
+    {
+      source: z
+        .enum([
+          "git_webhook",
+          "ci_cd",
+          "runtime_anomaly",
+          "tension_threshold",
+          "federation_import",
+          "manual",
+        ])
+        .describe("The event source type."),
+      severity: z
+        .enum(["critical", "high", "medium", "low", "info"])
+        .describe("Event severity level."),
+      description: z
+        .string()
+        .describe("Human-readable event description."),
+      affected_entities: z
+        .array(z.string())
+        .optional()
+        .describe("Entity IDs affected by this event (for scoping). Default: []."),
+      payload: z
+        .record(z.string(), z.unknown())
+        .optional()
+        .describe("Arbitrary event payload data."),
+    },
+    async ({ source, severity, description: desc, affected_entities, payload }) => {
+      logger.info(`dispatch_cognitive_event tool called: source=${source}, severity=${severity}`);
+
+      const result = await safeExecute<EventLogEntry>(
+        async (): Promise<ToolResponse<EventLogEntry>> => {
+          const event = {
+            id: `evt_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            source,
+            severity,
+            timestamp: new Date().toISOString(),
+            payload: payload ?? {},
+            affected_entities: affected_entities ?? [],
+            description: desc,
+          };
+          const entry = await dispatchEvent(event);
+          return success(entry);
+        }
+      );
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  // =========================================================================
+  // v5.1 — get_system_story
+  // =========================================================================
+  server.tool(
+    "get_system_story",
+    "Read the persistent system autobiography — a living narrative that " +
+      "auto-accumulates diff chapters after every N dream cycles. " +
+      "Optionally return only recent chapters or weekly digests only.",
+    {
+      last_n_chapters: z
+        .number()
+        .min(1)
+        .max(100)
+        .optional()
+        .describe("Return only the N most recent chapters. Default: all."),
+      digest_only: z
+        .boolean()
+        .optional()
+        .describe("If true, return only weekly digests (no chapters). Default: false."),
+    },
+    async ({ last_n_chapters, digest_only }) => {
+      const digestOnly = digest_only ?? false;
+      logger.info(
+        `get_system_story tool called: last_n=${last_n_chapters ?? "all"}, digest_only=${digestOnly}`
+      );
+
+      const result = await safeExecute<SystemStoryFile>(
+        async (): Promise<ToolResponse<SystemStoryFile>> => {
+          const story = await getSystemStory();
+
+          // Apply filters
+          if (digestOnly) {
+            return success({
+              ...story,
+              chapters: [],
+            });
+          }
+
+          if (last_n_chapters !== undefined) {
+            return success({
+              ...story,
+              chapters: story.chapters.slice(-last_n_chapters),
+            });
+          }
+
+          return success(story);
+        }
+      );
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  logger.info("Registered 17 cognitive tools");
 }
