@@ -29,6 +29,7 @@ DreamGraph is a cognitive layer for software systems that continuously discovers
 - **Metacognitive self-tuning** — analyzes its own performance and adjusts thresholds
 - **Event-driven dreaming** — reactive cognition triggered by system changes
 - **Continuous narrative** — persistent, auto-accumulated system autobiography
+- **Dream scheduling** — policy-driven temporal orchestration for autonomous cognitive work
 
 It is not a chatbot.
 
@@ -123,9 +124,9 @@ Not all ideas are immediately provable. The system retains latent hypotheses tha
 
 ---
 
-## The Ten Cognitive Capabilities
+## The Eleven Cognitive Capabilities
 
-DreamGraph's cognitive engine provides ten advanced features that take the system from "observant" to "truly intelligent."
+DreamGraph's cognitive engine provides eleven advanced features that take the system from "observant" to "truly intelligent."
 
 ### 1. Causal Reasoning Engine
 
@@ -291,6 +292,32 @@ Weekly digests aggregate multiple chapters into health-trended summaries with ke
 
 **Tool:** `get_system_story`
 **Resource:** `dream://story`
+
+### 11. Dream Scheduling (v5.2)
+
+DreamGraph can now **schedule its own cognitive work** — policy-driven temporal orchestration that runs dream cycles, nightmare scans, and other cognitive actions automatically.
+
+Four trigger types:
+
+| Trigger | What it does |
+|---|---|
+| `interval` | Fixed timer — dream every N seconds |
+| `cron_like` | Hour/minute/day-of-week pattern — dream at 03:00 on weekdays |
+| `after_cycles` | Fire after N dream cycles complete |
+| `on_idle` | Fire after N seconds of inactivity |
+
+Seven schedulable actions: `dream_cycle`, `nightmare_cycle`, `normalize_dreams`, `metacognitive_analysis`, `get_causal_insights`, `get_temporal_insights`, `export_dream_archetypes`.
+
+Safety guards prevent runaway activity:
+- Max 30 runs/hour across all schedules
+- 10s cooldown between runs (5min after nightmares)
+- Auto-pause after 3 consecutive failures
+- Only one action executes at a time
+
+Schedules persist to disk and survive restarts.
+
+**Tools:** `schedule_dream`, `list_schedules`, `update_schedule`, `run_schedule_now`, `delete_schedule`, `get_schedule_history`  
+**Resources:** `dream://schedules`, `dream://schedule-history`
 
 ---
 
@@ -630,6 +657,7 @@ You can also skip the manual data step entirely and just point the agent at your
 | `DREAMGRAPH_RUNTIME_TIMEOUT` | No | Timeout in milliseconds for runtime metrics fetch (default: `5000`) |
 | `DREAMGRAPH_EVENTS` | No | JSON config for the event router: `{"tension_threshold": 0.8, "cooldown_ms": 60000, "max_auto_cycles_per_hour": 10, "runtime_error_threshold": 0.05}` |
 | `DREAMGRAPH_NARRATIVE` | No | JSON config for continuous narrative: `{"auto_narrate": true, "narrative_interval": 10, "digest_interval": 50, "max_chapters": 100}` |
+| `DREAMGRAPH_SCHEDULER` | No | JSON config for the dream scheduler (v5.2): `{"enabled": true, "tick_interval_ms": 30000, "max_runs_per_hour": 30, "cooldown_ms": 10000, "nightmare_cooldown_ms": 300000, "error_streak_pause_limit": 3}` |
 
 None are required. Without `DREAMGRAPH_REPOS`, code/git tools will be unavailable. Without `DATABASE_URL`, the `query_db_schema` tool will be unavailable. Without `DREAMGRAPH_RUNTIME_ENDPOINT`, the `query_runtime_metrics` tool will return a configuration hint. The cognitive engine works regardless — it just has fewer senses.
 
@@ -640,7 +668,7 @@ None are required. Without `DREAMGRAPH_REPOS`, code/git tools will be unavailabl
 ```
                 +--------------+
                 |   MCP Layer  |
-                | (37 tools)   |
+                | (43 tools)   |
                 +------+-------+
                        |
         +--------------v--------------+
@@ -658,6 +686,7 @@ None are required. Without `DREAMGRAPH_REPOS`, code/git tools will be unavailabl
         |  - Intervention planning    |
         |  - Metacognitive tuning     |
         |  - Event-driven dreaming    |
+        |  - Dream scheduling         |
         +--------------+--------------+
                        |
         +--------------v--------------+
@@ -672,6 +701,7 @@ None are required. Without `DREAMGRAPH_REPOS`, code/git tools will be unavailabl
         |  - Meta log (self-tuning)   |
         |  - Event log                |
         |  - System story             |
+        |  - Schedules (v5.2)         |
         +-----------------------------+
                        |
         +--------------v--------------+
@@ -702,6 +732,7 @@ src/
 │   ├── intervention.ts     # Intervention Engine (remediation plans)
 │   ├── metacognition.ts    # Metacognitive Self-Tuning Engine
 │   └── event-router.ts     # Event-Driven Dreaming (reactive cognition)
+│   └── scheduler.ts        # Dream Scheduler — policy-driven orchestration (v5.2)
 ├── tools/                  # MCP tools (senses)
 │   ├── code-senses.ts      # list_directory, read_source_code, create_file
 │   ├── git-senses.ts       # git_log, git_blame
@@ -741,15 +772,17 @@ data/
 ├── adr_log.json            # [runtime] Architecture Decision Records
 ├── ui_registry.json        # [runtime] Semantic UI element registry
 ├── threat_log.json         # [runtime] Adversarial scan results (NIGHTMARE)
-└── dream_archetypes.json   # [runtime] Federated dream archetypes├── meta_log.json           # [runtime] Metacognitive analysis audit trail
+└── dream_archetypes.json   # [runtime] Federated dream archetypes
+├── meta_log.json           # [runtime] Metacognitive analysis audit trail
 ├── event_log.json          # [runtime] Cognitive event dispatch log
-└── system_story.json       # [runtime] Persistent system autobiography```
+├── system_story.json       # [runtime] Persistent system autobiography
+└── schedules.json          # [runtime] Dream scheduler persistence (v5.2)```
 
 ---
 
-## MCP Tools (37 total)
+## MCP Tools (43 total)
 
-### Cognitive Tools (17)
+### Cognitive Tools (23)
 
 | Tool | Description |
 |---|---|
@@ -770,6 +803,12 @@ data/
 | `metacognitive_analysis` | Analyze DreamGraph's own performance: strategy precision/recall, promotion calibration, domain decay profiles. Optional auto-apply |
 | `dispatch_cognitive_event` | Dispatch a cognitive event (git push, CI/CD signal, runtime anomaly, manual trigger) that classifies, scopes, and recommends a cognitive response |
 | `get_system_story` | Read the persistent system autobiography — auto-accumulated diff chapters, weekly digests, health trends |
+| `schedule_dream` | Create a scheduled cognitive action with trigger policy (interval, cron_like, after_cycles, on_idle) |
+| `list_schedules` | List all schedules with status and execution summary |
+| `update_schedule` | Modify an existing schedule’s trigger, action, or enabled state |
+| `run_schedule_now` | Immediately execute a schedule, bypassing its trigger condition |
+| `delete_schedule` | Permanently remove a schedule |
+| `get_schedule_history` | Retrieve execution history for a schedule or all schedules |
 
 ### Sense Tools (12)
 
@@ -801,7 +840,7 @@ data/
 | `generate_ui_migration_plan` | Gap analysis between source and target platforms with data contract summaries and complexity estimates |
 | `export_living_docs` | Export the knowledge graph as structured Markdown for Docusaurus, Nextra, MkDocs, or plain GitHub. Stateless and idempotent |
 
-### MCP Resources (13)
+### MCP Resources (15)
 
 Read-only views the agent can inspect at any time:
 
@@ -820,6 +859,8 @@ Read-only views the agent can inspect at any time:
 | Metacognition | `dream://metacognition` | Self-tuning audit trail — strategy metrics, calibration buckets, threshold recommendations |
 | Events | `dream://events` | Cognitive event dispatch log — event classification, entity scoping, action outcomes |
 | Story | `dream://story` | Persistent system autobiography — diff chapters, weekly digests, health trends |
+| Schedules | `dream://schedules` | Active dream schedules with status and next run time (v5.2) |
+| Schedule History | `dream://schedule-history` | Schedule execution history with outcomes (v5.2) |
 
 ---
 
@@ -1026,6 +1067,7 @@ This project introduces a cognitive model with the following primitives:
 | **Cognitive Event** | An external or internal signal that triggers reactive cognition |
 | **System Story** | The persistent, auto-accumulated autobiography (diff chapters + weekly digests) |
 | **Calibration Bucket** | A confidence range used to measure actual validation rates vs. thresholds |
+| **Dream Schedule** | A policy-driven rule that triggers cognitive actions automatically (interval, cron, cycle-based, or idle-based) |
 
 You can think of DreamGraph as:
 
@@ -1038,6 +1080,7 @@ You can think of DreamGraph as:
 - Metacognition = self-improvement
 - Events = reflexes
 - System story = autobiography
+- Scheduling = planning
 
 ---
 

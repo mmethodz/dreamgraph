@@ -328,3 +328,73 @@ Archetypes are abstracted beyond system-specific names to enable cross-project l
 5. **Stderr-only logging** — all logs go to stderr, never corrupting STDIO transport
 6. **Decay prevents accumulation** — stale dreams expire automatically
 7. **Confirmation required for destructive ops** — `clear_dreams` requires `confirm: true`
+8. **Scheduler safety guards** — rate limits, cooldowns, error-streak auto-pause (v5.2)
+
+---
+
+## v5.2: Dream Scheduling
+
+The Dream Scheduler (`scheduler.ts`) adds **policy-driven temporal orchestration** — DreamGraph can now schedule its own cognitive work to run automatically at defined intervals and conditions.
+
+### Architecture
+
+The scheduler runs **in-process** within the MCP server. It does not spawn external processes — when a scheduled action fires, it calls the same internal engine functions the MCP tools use. This design is intentional: the MCP server needs the AI agent on the other end to interpret dream results, so scheduled work accumulates results that the agent processes on its next interaction.
+
+### Trigger Types
+
+| Trigger | Description | Example |
+|---------|-------------|---------|
+| `interval` | Fixed-interval timer (seconds) | Dream every 60 minutes |
+| `cron_like` | Hour/minute/day-of-week pattern | Dream at 03:00 on weekdays |
+| `after_cycles` | Fire after N dream cycles complete | Nightmare scan every 10 cycles |
+| `on_idle` | Fire after N seconds of inactivity | Dream when agent is idle 5 min |
+
+### Schedulable Actions
+
+| Action | What It Does |
+|--------|-------------|
+| `dream_cycle` | Run a standard dream cycle (strategy configurable) |
+| `nightmare_cycle` | Run an adversarial security scan |
+| `normalize_dreams` | Trigger normalization of pending dreams |
+| `metacognitive_analysis` | Run self-tuning analysis |
+| `get_causal_insights` | Discover cause→effect chains |
+| `get_temporal_insights` | Analyze temporal patterns |
+| `export_dream_archetypes` | Export patterns for federation |
+
+### Safety Guards
+
+The scheduler enforces strict safety limits to prevent runaway cognitive activity:
+
+| Guard | Default | Purpose |
+|-------|---------|---------|
+| Max runs per hour | 30 | Rate-limit across all schedules |
+| Cooldown between runs | 10 seconds | Prevent burst-firing |
+| Nightmare cooldown | 5 minutes | Extra cooldown after adversarial scans |
+| Error streak pause | 3 consecutive | Auto-pause schedule after 3 failures |
+| Max concurrent | 1 | Only one action executes at a time |
+
+### Schedule Lifecycle
+
+```
+Created (enabled=true)
+  │
+  ├── Tick loop checks every 30s (configurable)
+  │     ├── Trigger condition met? → Execute action → Record result
+  │     ├── Max runs reached? → Auto-disable
+  │     └── Error streak? → Auto-pause
+  │
+  ├── Manual: run_schedule_now → Immediate execution
+  ├── Manual: update_schedule → Modify trigger/action/limits
+  └── Manual: delete_schedule → Remove permanently
+```
+
+### Persistence
+
+All schedules and their execution history are persisted to `data/schedules.json`. The scheduler state survives server restarts — active schedules resume automatically on startup.
+
+### Hooks
+
+The scheduler integrates with the cognitive engine through two hooks:
+
+1. **`notifyCycleComplete(cycle)`** — called after every `dream_cycle`, enables `after_cycles` triggers
+2. **`recordActivity()`** — called on any MCP tool invocation, resets the idle timer for `on_idle` triggers

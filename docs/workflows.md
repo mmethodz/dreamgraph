@@ -1,6 +1,6 @@
 # DreamGraph Workflows
 
-> Step-by-step operational flows for every cognitive process.
+> Step-by-step flows for all 10 operational processes.
 
 ---
 
@@ -176,3 +176,23 @@ candidate → [normalization] → validated (promoted)
 | 2 | Brief REM entry | AWAKE → REM (state guard compliance). |
 | 3 | Create | EDGE: strategy=reflective, TTL=12, specified confidence. TENSION: via `engine.recordTension()`. ENTITY: node with hypothetical=true. |
 | 4 | Return to AWAKE | REM → AWAKE. No normalization triggered (pre-validated by agent). |
+
+---
+
+## 10. Schedule Execution Flow (`schedule_execution_flow`)
+
+**Policy-driven temporal orchestration of cognitive actions.**
+
+**Trigger:** Scheduler tick loop (every 30s), `run_schedule_now` tool, or hook (`notifyCycleComplete`, `recordActivity`)  
+**Source:** [src/cognitive/scheduler.ts](../src/cognitive/scheduler.ts)
+
+| Step | Name | Description |
+|------|------|-------------|
+| 1 | Tick | Scheduler wakes every `tick_interval_ms` (default 30s). Checks each enabled schedule. |
+| 2 | Trigger evaluation | For each schedule, check trigger condition: `interval` (elapsed time), `cron_like` (hour/minute/day-of-week match), `after_cycles` (cycle count since last run), `on_idle` (time since last activity). |
+| 3 | Safety check | Verify: (a) not already executing, (b) cooldown elapsed since last run, (c) hourly rate limit not exceeded, (d) error streak < pause limit. |
+| 4 | Execute action | Call internal engine function: `dream_cycle`, `nightmare_cycle`, `normalize_dreams`, `metacognitive_analysis`, `get_causal_insights`, `get_temporal_insights`, or `export_dream_archetypes`. |
+| 5 | Record result | Append execution record: timestamp, success/failure, duration_ms, result summary. Update `run_count`, `last_run_at`, `next_run_at`. |
+| 6 | Error handling | On failure: increment `error_streak`. If streak ≥ 3, auto-pause schedule (status: `paused`). On success: reset `error_streak` to 0. |
+| 7 | Completion check | If `run_count` ≥ `max_runs`, set status to `completed` and disable schedule. |
+| 8 | Persist | Write updated schedule state to `data/schedules.json`. |

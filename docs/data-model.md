@@ -1,6 +1,6 @@
 # DreamGraph Data Model
 
-> All 12 data stores that make up DreamGraph's persistent state.
+> All 13 data stores that make up DreamGraph's persistent state.
 
 ---
 
@@ -20,6 +20,7 @@ graph TB
     UI[("UI Registry<br/>(elements)")]
     ST[("System Story<br/>(narrative)")]
     CAP[("Capabilities<br/>(registry)")]
+    SCH[("Schedules<br/>(v5.2 scheduler)")]
 
     FG -.->|validates against| DG
     DG -->|feeds into| CE
@@ -30,6 +31,9 @@ graph TB
     TL -->|directs| DG
     TH -->|may create| TL
     ADR -.->|guard rails consulted by| TL
+    SCH -->|triggers| DG
+    SCH -->|triggers| TH
+    DH -->|after_cycles trigger| SCH
 ```
 
 ---
@@ -252,3 +256,50 @@ Persistent, auto-accumulated narrative. Survives restarts.
 | `chapters[].stats` | object | Validated, rejected, tensions |
 | `weekly_digests[]` | Digest[] | Aggregate summaries |
 | `weekly_digests[].health_trend` | string | Overall trend analysis |
+
+---
+
+## v5.2: Schedules (`schedules.json`)
+
+Persistent store for the Dream Scheduler. All active and completed schedules with full execution history. Survives restarts — active schedules resume automatically on startup.
+
+### Schedule Object
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Unique ID (e.g. `sched_1775322785274_jcs3zm`) |
+| `label` | string | Human-readable name |
+| `action` | string | `dream_cycle` \| `nightmare_cycle` \| `normalize_dreams` \| `metacognitive_analysis` \| `get_causal_insights` \| `get_temporal_insights` \| `export_dream_archetypes` |
+| `trigger_type` | string | `interval` \| `cron_like` \| `after_cycles` \| `on_idle` |
+| `trigger_config` | object | Trigger-specific parameters (see below) |
+| `action_params` | object | `{ strategy?, max_dreams? }` |
+| `enabled` | boolean | Whether the schedule is active |
+| `status` | string | `active` \| `paused` \| `completed` \| `error` |
+| `max_runs` | number \| null | Total executions before auto-disable (null = unlimited) |
+| `run_count` | number | Executions completed so far |
+| `error_streak` | number | Consecutive failures (auto-pauses at 3) |
+| `last_run_at` | string \| null | ISO timestamp of last execution |
+| `next_run_at` | string \| null | Projected next execution time |
+| `created_at` | string | ISO timestamp |
+
+### Trigger Config Variants
+
+| Trigger Type | Config Fields |
+|-------------|--------------|
+| `interval` | `{ interval_seconds: number }` |
+| `cron_like` | `{ hour: number, minute: number, days_of_week: number[] }` |
+| `after_cycles` | `{ every_n_cycles: number, cycles_since_last: number }` |
+| `on_idle` | `{ idle_seconds: number }` |
+
+### Execution Record
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `schedule_id` | string | Parent schedule ID |
+| `executed_at` | string | ISO timestamp |
+| `trigger_type` | string | Trigger that fired |
+| `action` | string | Action executed |
+| `success` | boolean | Whether it completed without error |
+| `result_summary` | string | Brief outcome description |
+| `duration_ms` | number | Execution time |
+| `error` | string \| null | Error message if failed |

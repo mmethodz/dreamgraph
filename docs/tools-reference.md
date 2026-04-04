@@ -1,10 +1,10 @@
 # DreamGraph Tools Reference
 
-> Complete catalog of all 37 MCP tools (17 cognitive + 20 general).
+> Complete catalog of all 43 MCP tools (23 cognitive + 20 general).
 
 ---
 
-## Cognitive Tools (17)
+## Cognitive Tools (23)
 
 Registered in [src/cognitive/register.ts](../src/cognitive/register.ts). These operate the dream engine itself.
 
@@ -173,6 +173,73 @@ Reset cognitive data. Requires confirmation.
 |-----------|------|----------|-------------|
 | `target` | enum | yes | `dream_graph`, `candidates`, `validated`, `tensions`, `history`, `all` |
 | `confirm` | boolean | yes | Must be `true` |
+
+---
+
+### v5.2 Dream Scheduling
+
+#### `schedule_dream`
+
+Create a scheduled cognitive action with a trigger policy.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `action` | enum | yes | — | `dream_cycle`, `nightmare_cycle`, `normalize_dreams`, `metacognitive_analysis`, `get_causal_insights`, `get_temporal_insights`, `export_dream_archetypes` |
+| `trigger_type` | enum | yes | — | `interval`, `cron_like`, `after_cycles`, `on_idle` |
+| `label` | string | no | auto-generated | Human-readable schedule name |
+| `strategy` | string | no | `"all"` | Dream strategy (for `dream_cycle` action) |
+| `max_dreams` | number | no | 15 | Max edges per cycle (for `dream_cycle` action) |
+| `interval_seconds` | number | no | — | Seconds between runs (for `interval` trigger) |
+| `cron_hour` | number | no | — | Hour (0–23) for `cron_like` trigger |
+| `cron_minute` | number | no | 0 | Minute (0–59) for `cron_like` trigger |
+| `cron_days` | number[] | no | [0–6] | Days of week (0=Sun) for `cron_like` trigger |
+| `after_every_n_cycles` | number | no | — | Fire after N cycles (for `after_cycles` trigger) |
+| `idle_seconds` | number | no | — | Seconds of inactivity (for `on_idle` trigger) |
+| `max_runs` | number | no | unlimited | Total executions before auto-disable |
+| `enabled` | boolean | no | true | Whether the schedule is active |
+
+#### `list_schedules`
+
+List all schedules with status and execution summary. No parameters.
+
+#### `update_schedule`
+
+Modify an existing schedule's trigger, action parameters, or enabled state.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `schedule_id` | string | yes | Schedule ID to update |
+| `enabled` | boolean | no | Enable/disable |
+| `label` | string | no | New label |
+| `strategy` | string | no | New dream strategy |
+| `max_dreams` | number | no | New max dreams |
+| `interval_seconds` | number | no | New interval |
+| `max_runs` | number | no | New max runs |
+
+#### `run_schedule_now`
+
+Immediately execute a schedule, bypassing its trigger condition.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `schedule_id` | string | yes | Schedule ID to execute |
+
+#### `delete_schedule`
+
+Permanently remove a schedule.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `schedule_id` | string | yes | Schedule ID to delete |
+
+#### `get_schedule_history`
+
+Retrieve execution history for a schedule or all schedules.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `schedule_id` | string | no | — | Filter by schedule ID |
+| `last_n` | number | no | 20 | Most recent N executions |
 
 ---
 
@@ -456,7 +523,7 @@ Export knowledge graph as structured Markdown for documentation sites.
 
 ---
 
-## MCP Resources (13)
+## MCP Resources (15)
 
 | URI | Description |
 |-----|-------------|
@@ -473,6 +540,8 @@ Export knowledge graph as structured Markdown for documentation sites.
 | `dream://metacognition` | Self-tuning audit log (v5.1) |
 | `dream://events` | Cognitive event log (v5.1) |
 | `dream://story` | Persistent system autobiography (v5.1) |
+| `dream://schedules` | Active dream schedules with status (v5.2) |
+| `dream://schedule-history` | Schedule execution history (v5.2) |
 
 System resources (read via `query_resource`):
 
