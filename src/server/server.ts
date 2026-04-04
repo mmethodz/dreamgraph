@@ -2,7 +2,8 @@
  * DreamGraph MCP Server — Server setup and orchestration.
  *
  * Creates the McpServer instance and registers all resources and tools.
- * Connects via StdioServerTransport (NO Express, NO HTTP).
+ * Transport-agnostic: callers provide the transport (Stdio, SSE, etc.)
+ * and call `server.connect(transport)` themselves.
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";

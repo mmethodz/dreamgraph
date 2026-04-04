@@ -533,6 +533,15 @@ npm run build
 
 ### 2. Connect to your IDE
 
+DreamGraph supports two transport modes:
+
+| Mode | Flag | Best for |
+|------|------|----------|
+| **STDIO** (default) | `--transport stdio` | IDE integrations (Claude Desktop, VS Code, Cursor) |
+| **Streamable HTTP** | `--transport http --port 8100` | Web clients, CLI tools, remote agents |
+
+#### A. STDIO mode (default)
+
 Add a single JSON block to your MCP client configuration.
 
 **Claude Desktop** (`claude_desktop_config.json`):
@@ -582,6 +591,32 @@ openclaw mcp set dreamgraph '{"command":"node","args":["/absolute/path/dreamgrap
 ```
 
 Once registered, OpenClaw can talk to DreamGraph directly — every tool, resource, and dream cycle is available through the OpenClaw CLI and agent runtime. See the [OpenClaw MCP docs](https://docs.openclaw.ai/cli/mcp) for more details.
+
+#### B. Streamable HTTP mode
+
+Start DreamGraph as an HTTP server and connect any MCP-compatible client:
+
+```bash
+# Default port 8100
+dreamgraph --transport http
+
+# Custom port
+dreamgraph --transport http --port 9000
+
+# Or via npm
+npm run start:sse
+```
+
+Clients connect to `http://localhost:<port>/mcp`:
+
+| Method | Purpose |
+|--------|---------|
+| `POST /mcp` | Send JSON-RPC messages |
+| `GET /mcp` | Open SSE stream for server-initiated notifications |
+| `DELETE /mcp` | Close session |
+| `GET /health` | Liveness probe (returns `{status, transport, sessions}`) |
+
+Sessions are isolated — each connecting client gets its own `mcp-session-id` header.
 
 ### 3. Introduce your project
 

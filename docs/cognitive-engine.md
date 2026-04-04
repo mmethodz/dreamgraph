@@ -325,7 +325,7 @@ Archetypes are abstracted beyond system-specific names to enable cross-project l
 2. **REM output is quarantined** — dream artifacts live only in `dream_graph.json`
 3. **Strict promotion gate** — only edges passing all five thresholds reach validated status
 4. **Interruption protocol** — any state can safely return to AWAKE; in-progress data is quarantined
-5. **Stderr-only logging** — all logs go to stderr, never corrupting STDIO transport
+5. **Stderr-only logging** — all logs go to stderr, never corrupting the STDIO stream
 6. **Decay prevents accumulation** — stale dreams expire automatically
 7. **Confirmation required for destructive ops** — `clear_dreams` requires `confirm: true`
 8. **Scheduler safety guards** — rate limits, cooldowns, error-streak auto-pause (v5.2)

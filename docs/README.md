@@ -45,7 +45,14 @@ npm run build
 
 ### MCP Configuration
 
-Add to your MCP client configuration:
+DreamGraph supports two transport modes:
+
+| Mode | Flag | Description |
+|------|------|-------------|
+| **STDIO** (default) | `--transport stdio` | JSON-RPC over stdin/stdout — used by Claude Desktop, VS Code, Cursor |
+| **Streamable HTTP** | `--transport http` | HTTP server on a configurable port — used by web clients, CLI tools, remote agents |
+
+#### STDIO mode (default)
 
 ```json
 {
@@ -60,6 +67,21 @@ Add to your MCP client configuration:
   }
 }
 ```
+
+#### Streamable HTTP mode
+
+```bash
+# Default port 8100
+node dist/index.js --transport http
+
+# Custom port
+node dist/index.js --transport http --port 9000
+
+# Or via npm script
+npm run start:sse
+```
+
+Clients connect to `http://localhost:<port>/mcp` (POST for JSON-RPC, GET for server-sent events, DELETE to close session).
 
 ### First Dream Cycle
 

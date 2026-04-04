@@ -9,7 +9,7 @@ DreamGraph is a **cognitive dreaming engine** for MCP (Model Context Protocol) k
 **Version:** 5.2.0  
 **License:** MIT  
 **Runtime:** Node.js (TypeScript, ES2022, Node16 modules)  
-**Transport:** STDIO (JSON-RPC via stdin/stdout)
+**Transport:** STDIO (default) or Streamable HTTP (`--transport http`)
 
 ## Core Concepts
 
@@ -59,7 +59,7 @@ Speculative Edge → Normalization → Promotion Gate → Validated Edge
 ```mermaid
 graph TB
     subgraph "MCP Protocol Layer"
-        Server["MCP Server<br/>STDIO Transport"]
+        Server["MCP Server<br/>STDIO / Streamable HTTP"]
         Tools["43 Tools"]
         Resources["15 Resources"]
     end
@@ -167,7 +167,7 @@ graph LR
 
 ```
 src/
-├── index.ts                 # Entry point — creates STDIO transport
+├── index.ts                 # Entry point — CLI arg parser + transport launcher
 ├── server/
 │   └── server.ts            # McpServer factory
 ├── config/
@@ -209,7 +209,7 @@ src/
 └── utils/
     ├── cache.ts             # In-memory JSON cache
     ├── errors.ts            # Error handling + response factories
-    └── logger.ts            # Stderr logger (protects STDIO)
+    └── logger.ts            # Stderr logger (protects STDIO stream)
 ```
 
 ## Data Directory

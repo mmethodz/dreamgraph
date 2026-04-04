@@ -1738,7 +1738,12 @@ export function registerCognitiveTools(server: McpServer): void {
         .number()
         .min(60_000)
         .optional()
-        .describe("For 'interval' trigger: milliseconds between runs (min 60s)."),
+        .describe("For 'interval' trigger: milliseconds between runs (min 60000). Prefer interval_seconds."),
+      interval_seconds: z
+        .number()
+        .min(60)
+        .optional()
+        .describe("For 'interval' trigger: seconds between runs (min 60). Preferred over interval_ms."),
       cron: z
         .string()
         .optional()
@@ -1755,7 +1760,12 @@ export function registerCognitiveTools(server: McpServer): void {
         .number()
         .min(60_000)
         .optional()
-        .describe("For 'on_idle' trigger: milliseconds of inactivity before triggering (min 60s)."),
+        .describe("For 'on_idle' trigger: milliseconds of inactivity before triggering (min 60000). Prefer idle_seconds."),
+      idle_seconds: z
+        .number()
+        .min(60)
+        .optional()
+        .describe("For 'on_idle' trigger: seconds of inactivity before triggering (min 60). Preferred over idle_ms."),
       enabled: z
         .boolean()
         .optional()
@@ -1766,8 +1776,26 @@ export function registerCognitiveTools(server: McpServer): void {
         .optional()
         .describe("Optional max execution count. Schedule pauses when reached. Default: unlimited."),
     },
-    async ({ name, action, parameters, trigger_type, interval_ms, cron, cycle_interval, idle_ms, enabled, max_runs }) => {
+    async ({ name, action, parameters, trigger_type, interval_ms, interval_seconds, cron, cycle_interval, idle_ms, idle_seconds, enabled, max_runs }) => {
       logger.info(`schedule_dream tool called: name="${name}", action=${action}, trigger=${trigger_type}`);
+
+      // Convert seconds to ms if provided
+      const resolvedIntervalMs = interval_seconds ? interval_seconds * 1000 : interval_ms;
+      const resolvedIdleMs = idle_seconds ? idle_seconds * 1000 : idle_ms;
+
+      // Validate trigger-specific required fields
+      if (trigger_type === "interval" && !resolvedIntervalMs) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ success: false, error: "interval trigger requires interval_seconds or interval_ms" }) }] };
+      }
+      if (trigger_type === "cron_like" && !cron) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ success: false, error: "cron_like trigger requires cron expression" }) }] };
+      }
+      if (trigger_type === "after_cycles" && !cycle_interval) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ success: false, error: "after_cycles trigger requires cycle_interval" }) }] };
+      }
+      if (trigger_type === "on_idle" && !resolvedIdleMs) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ success: false, error: "on_idle trigger requires idle_seconds or idle_ms" }) }] };
+      }
 
       const result = await safeExecute<DreamSchedule>(
         async (): Promise<ToolResponse<DreamSchedule>> => {
@@ -1776,10 +1804,10 @@ export function registerCognitiveTools(server: McpServer): void {
             action,
             parameters: parameters ?? {},
             trigger_type,
-            interval_ms,
+            interval_ms: resolvedIntervalMs,
             cron,
             cycle_interval,
-            idle_ms,
+            idle_ms: resolvedIdleMs,
             enabled,
             max_runs: max_runs ?? null,
           });
@@ -1868,14 +1896,20 @@ export function registerCognitiveTools(server: McpServer): void {
         .record(z.string(), z.unknown())
         .optional()
         .describe("New action parameters."),
-      interval_ms: z.number().min(60_000).optional().describe("New interval in ms."),
+      interval_ms: z.number().min(60_000).optional().describe("New interval in ms. Prefer interval_seconds."),
+      interval_seconds: z.number().min(60).optional().describe("New interval in seconds. Preferred over interval_ms."),
       cron: z.string().optional().describe("New cron expression."),
       cycle_interval: z.number().min(1).optional().describe("New cycle interval."),
-      idle_ms: z.number().min(60_000).optional().describe("New idle threshold in ms."),
+      idle_ms: z.number().min(60_000).optional().describe("New idle threshold in ms. Prefer idle_seconds."),
+      idle_seconds: z.number().min(60).optional().describe("New idle threshold in seconds. Preferred over idle_ms."),
       max_runs: z.number().min(1).optional().describe("New max run count."),
     },
-    async ({ schedule_id, name, enabled, parameters, interval_ms, cron, cycle_interval, idle_ms, max_runs }) => {
+    async ({ schedule_id, name, enabled, parameters, interval_ms, interval_seconds, cron, cycle_interval, idle_ms, idle_seconds, max_runs }) => {
       logger.info(`update_schedule tool called: id=${schedule_id}`);
+
+      // Convert seconds to ms if provided
+      const resolvedIntervalMs = interval_seconds ? interval_seconds * 1000 : interval_ms;
+      const resolvedIdleMs = idle_seconds ? idle_seconds * 1000 : idle_ms;
 
       const result = await safeExecute<DreamSchedule>(
         async (): Promise<ToolResponse<DreamSchedule>> => {
@@ -1883,10 +1917,10 @@ export function registerCognitiveTools(server: McpServer): void {
             name,
             enabled,
             parameters,
-            interval_ms,
+            interval_ms: resolvedIntervalMs,
             cron,
             cycle_interval,
-            idle_ms,
+            idle_ms: resolvedIdleMs,
             max_runs,
           });
           if (!updated) {
