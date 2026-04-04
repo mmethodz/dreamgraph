@@ -16,8 +16,8 @@ import { z } from "zod";
 import { readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { config } from "../config/config.js";
 import { success, error, safeExecute } from "../utils/errors.js";
 import { logger } from "../utils/logger.js";
 import type {
@@ -34,8 +34,7 @@ import type {
 // Path resolution
 // ---------------------------------------------------------------------------
 
-const projectRoot = resolve(fileURLToPath(import.meta.url), "..", "..", "..");
-const ADR_PATH = resolve(projectRoot, "data", "adr_log.json");
+const ADR_PATH = resolve(config.dataDir, "adr_log.json");
 
 // ---------------------------------------------------------------------------
 // File I/O

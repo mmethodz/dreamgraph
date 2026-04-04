@@ -20,6 +20,7 @@ import { existsSync } from "node:fs";
 import { resolve, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { config } from "../config/config.js";
 import { loadJsonData } from "../utils/cache.js";
 import { success, safeExecute } from "../utils/errors.js";
 import { logger } from "../utils/logger.js";
@@ -132,7 +133,7 @@ async function loadCapabilities(): Promise<Record<string, unknown>> {
 
 async function loadADRLog(): Promise<ADRLogFile> {
   try {
-    const p = resolve(projectRoot, "data", "adr_log.json");
+    const p = resolve(config.dataDir, "adr_log.json");
     if (!existsSync(p))
       return {
         metadata: {
@@ -159,7 +160,7 @@ async function loadADRLog(): Promise<ADRLogFile> {
 
 async function loadUIRegistry(): Promise<UIRegistryFile> {
   try {
-    const p = resolve(projectRoot, "data", "ui_registry.json");
+    const p = resolve(config.dataDir, "ui_registry.json");
     if (!existsSync(p))
       return {
         metadata: {

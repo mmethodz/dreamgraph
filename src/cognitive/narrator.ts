@@ -26,7 +26,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { engine } from "./engine.js";
 import { logger } from "../utils/logger.js";
 import { DEFAULT_NARRATIVE_CONFIG } from "./types.js";
@@ -363,9 +362,8 @@ export async function generateNarrative(
 // v5.1 — Continuous Narrative Intelligence
 // ===========================================================================
 
-const projectRoot = resolve(fileURLToPath(import.meta.url), "..", "..", "..");
-const dataDir = resolve(projectRoot, "data");
-const STORY_PATH = resolve(dataDir, "system_story.json");
+import { config as appConfig } from "../config/config.js";
+const STORY_PATH = resolve(appConfig.dataDir, "system_story.json");
 
 let narrativeConfig: NarrativeConfig = { ...DEFAULT_NARRATIVE_CONFIG };
 let cyclesSinceLastChapter = 0;

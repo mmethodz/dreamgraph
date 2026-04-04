@@ -8,13 +8,10 @@
 
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { config } from "../config/config.js";
 import { logger } from "./logger.js";
 
 const cache = new Map<string, unknown>();
-
-/** Resolve path relative to project root (two levels up from src/utils/) */
-const projectRoot = resolve(fileURLToPath(import.meta.url), "..", "..", "..");
 
 /**
  * Load a JSON file from the data directory.
@@ -26,7 +23,7 @@ export async function loadJsonData<T = unknown>(filename: string): Promise<T> {
     return cache.get(filename) as T;
   }
 
-  const filePath = resolve(projectRoot, "data", filename);
+  const filePath = resolve(config.dataDir, filename);
   logger.debug(`Loading from disk: ${filePath}`);
 
   const raw = await readFile(filePath, "utf-8");

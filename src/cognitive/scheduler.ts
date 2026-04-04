@@ -21,7 +21,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { config as appConfig } from "../config/config.js";
 import { engine } from "./engine.js";
 import { dream } from "./dreamer.js";
 import { normalize } from "./normalizer.js";
@@ -47,9 +47,7 @@ import type {
 // Paths
 // ---------------------------------------------------------------------------
 
-const projectRoot = resolve(fileURLToPath(import.meta.url), "..", "..", "..");
-const dataDir = resolve(projectRoot, "data");
-const SCHEDULES_PATH = resolve(dataDir, "schedules.json");
+const SCHEDULES_PATH = resolve(appConfig.dataDir, "schedules.json");
 
 // ---------------------------------------------------------------------------
 // State

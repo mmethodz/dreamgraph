@@ -21,7 +21,7 @@
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { config as appConfig } from "../config/config.js";
 import { engine } from "./engine.js";
 import { logger } from "../utils/logger.js";
 import type {
@@ -32,8 +32,6 @@ import type {
   FileChange,
 } from "./types.js";
 
-const projectRoot = resolve(fileURLToPath(import.meta.url), "..", "..", "..");
-
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
@@ -43,7 +41,7 @@ const projectRoot = resolve(fileURLToPath(import.meta.url), "..", "..", "..");
  */
 async function loadAdrLog(): Promise<Array<{ id: string; title: string; status: string; decision: string }>> {
   try {
-    const p = resolve(projectRoot, "data", "adr_log.json");
+    const p = resolve(appConfig.dataDir, "adr_log.json");
     if (!existsSync(p)) return [];
     const raw = await readFile(p, "utf-8");
     const data = JSON.parse(raw);

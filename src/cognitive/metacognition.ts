@@ -21,7 +21,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { config as appConfig } from "../config/config.js";
 import { engine } from "./engine.js";
 import { logger } from "../utils/logger.js";
 import {
@@ -49,9 +49,7 @@ import type {
 // Paths
 // ---------------------------------------------------------------------------
 
-const projectRoot = resolve(fileURLToPath(import.meta.url), "..", "..", "..");
-const dataDir = resolve(projectRoot, "data");
-const META_LOG_PATH = resolve(dataDir, "meta_log.json");
+const META_LOG_PATH = resolve(appConfig.dataDir, "meta_log.json");
 
 // ---------------------------------------------------------------------------
 // Safety Guards

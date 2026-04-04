@@ -25,7 +25,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { config as appConfig } from "../config/config.js";
 import { logger } from "../utils/logger.js";
 import type {
   CognitiveStateName,
@@ -54,8 +54,7 @@ import { DEFAULT_DECAY, DEFAULT_PROMOTION, DEFAULT_TENSION_CONFIG } from "./type
 // Path resolution
 // ---------------------------------------------------------------------------
 
-const projectRoot = resolve(fileURLToPath(import.meta.url), "..", "..", "..");
-const dataDir = resolve(projectRoot, "data");
+const dataDir = appConfig.dataDir;
 
 const DREAM_GRAPH_PATH = resolve(dataDir, "dream_graph.json");
 const CANDIDATE_EDGES_PATH = resolve(dataDir, "candidate_edges.json");

@@ -119,14 +119,15 @@ export function registerCodeSensesTools(server: McpServer): void {
           let safePath: string;
 
           if (repo) {
-            const repoRoot = config.repos[repo];
-            if (!repoRoot) {
+            const repoRootRaw = config.repos[repo];
+            if (!repoRootRaw) {
               const available = Object.keys(config.repos).join(", ");
               return error(
                 "INVALID_REPO",
                 `Repo "${repo}" not found. Available repos: ${available}`
               );
             }
+            const repoRoot = path.resolve(repoRootRaw);
             const abs = path.resolve(repoRoot, dirPath || ".");
             if (
               !abs
@@ -226,14 +227,15 @@ export function registerCodeSensesTools(server: McpServer): void {
           let safePath: string;
 
           if (repo) {
-            const repoRoot = config.repos[repo];
-            if (!repoRoot) {
+            const repoRootRaw = config.repos[repo];
+            if (!repoRootRaw) {
               const available = Object.keys(config.repos).join(", ");
               return error(
                 "INVALID_REPO",
                 `Repo "${repo}" not found. Available repos: ${available}`
               );
             }
+            const repoRoot = path.resolve(repoRootRaw);
             const abs = path.resolve(repoRoot, filePath);
             if (
               !abs
@@ -350,14 +352,15 @@ export function registerCodeSensesTools(server: McpServer): void {
           let safePath: string;
 
           if (repo) {
-            const repoRoot = config.repos[repo];
-            if (!repoRoot) {
+            const repoRootRaw = config.repos[repo];
+            if (!repoRootRaw) {
               const available = Object.keys(config.repos).join(", ");
               return error(
                 "INVALID_REPO",
                 `Repo "${repo}" not found. Available repos: ${available}`
               );
             }
+            const repoRoot = path.resolve(repoRootRaw);
             const abs = path.resolve(repoRoot, reqPath);
             if (
               !abs

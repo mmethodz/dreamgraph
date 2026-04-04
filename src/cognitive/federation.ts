@@ -20,7 +20,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { config as appConfig } from "../config/config.js";
 import { engine } from "./engine.js";
 import { logger } from "../utils/logger.js";
 import type {
@@ -38,9 +38,7 @@ import { DEFAULT_FEDERATION_CONFIG } from "./types.js";
 // Path resolution
 // ---------------------------------------------------------------------------
 
-const projectRoot = resolve(fileURLToPath(import.meta.url), "..", "..", "..");
-const dataDir = resolve(projectRoot, "data");
-const ARCHETYPES_PATH = resolve(dataDir, "dream_archetypes.json");
+const ARCHETYPES_PATH = resolve(appConfig.dataDir, "dream_archetypes.json");
 
 // ---------------------------------------------------------------------------
 // Configuration

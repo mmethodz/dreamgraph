@@ -473,10 +473,9 @@ async function generateUICompositionDiagram(
 ): Promise<GenerateVisualFlowOutput> {
   const { readFile } = await import("node:fs/promises");
   const { resolve } = await import("node:path");
-  const { fileURLToPath } = await import("node:url");
+  const { config } = await import("../config/config.js");
 
-  const projectRoot = resolve(fileURLToPath(import.meta.url), "..", "..", "..");
-  const registryPath = resolve(projectRoot, "data", "ui_registry.json");
+  const registryPath = resolve(config.dataDir, "ui_registry.json");
 
   let registry: UIRegistryFile;
   try {

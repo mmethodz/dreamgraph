@@ -5,12 +5,27 @@
  * See README.md for the full list of supported env vars.
  */
 
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { EventRouterConfig, NarrativeConfig, SchedulerConfig } from "../cognitive/types.js";
 import {
   DEFAULT_EVENT_ROUTER_CONFIG,
   DEFAULT_NARRATIVE_CONFIG,
   DEFAULT_SCHEDULER_CONFIG,
 } from "../cognitive/types.js";
+
+/** Project root — two levels up from dist/config/config.js */
+const PROJECT_ROOT = resolve(fileURLToPath(import.meta.url), "..", "..", "..");
+
+/**
+ * Resolve the data directory.
+ * If DREAMGRAPH_DATA_DIR is an absolute path, use it as-is.
+ * If relative (or unset, defaulting to "data"), resolve against project root.
+ */
+function resolveDataDir(): string {
+  const raw = process.env.DREAMGRAPH_DATA_DIR ?? "data";
+  return resolve(PROJECT_ROOT, raw);     // resolve() treats absolute paths as absolute
+}
 
 function parseRepos(): Record<string, string> {
   const raw = process.env.DREAMGRAPH_REPOS ?? "{}";
@@ -88,8 +103,8 @@ export const config = {
     operationTimeoutMs: 10_000,
   },
 
-  /** Data directory (relative to project root) */
-  dataDir: process.env.DREAMGRAPH_DATA_DIR ?? "data",
+  /** Resolved absolute path to the data directory */
+  dataDir: resolveDataDir(),
 
   /** Environment flags */
   env: {
