@@ -31,6 +31,7 @@ import { dispatchEvent } from "./event-router.js";
 import { exportArchetypes } from "./federation.js";
 import { maybeAutoNarrate, generateDiffChapter } from "./narrator.js";
 import { logger } from "../utils/logger.js";
+import { withFileLock } from "../utils/mutex.js";
 import { DEFAULT_SCHEDULER_CONFIG } from "./types.js";
 import type {
   DreamSchedule,
@@ -352,78 +353,80 @@ async function executeAction(schedule: DreamSchedule): Promise<string> {
 // ---------------------------------------------------------------------------
 
 async function tick(): Promise<void> {
-  const now = Date.now();
-  const file = await loadScheduleFile();
+  await withFileLock("schedules.json", async () => {
+    const now = Date.now();
+    const file = await loadScheduleFile();
 
-  const dueSchedules = file.schedules.filter((s) => isDue(s, now));
+    const dueSchedules = file.schedules.filter((s) => isDue(s, now));
 
-  for (const schedule of dueSchedules) {
-    if (!canRunSchedule(schedule)) continue;
+    for (const schedule of dueSchedules) {
+      if (!canRunSchedule(schedule)) continue;
 
-    const startTime = Date.now();
-    let resultSummary = "";
-    let success = true;
-    let errorMsg: string | undefined;
+      const startTime = Date.now();
+      let resultSummary = "";
+      let success = true;
+      let errorMsg: string | undefined;
 
-    try {
-      logger.info(`Scheduler executing: ${schedule.name} (${schedule.action})`);
-      resultSummary = await executeAction(schedule);
-      schedule.error_count = 0;
-      schedule.last_error = null;
-    } catch (err) {
-      success = false;
-      errorMsg = err instanceof Error ? err.message : String(err);
-      resultSummary = `Error: ${errorMsg}`;
-      schedule.error_count++;
-      schedule.last_error = errorMsg;
-      logger.error(`Scheduler error for ${schedule.name}: ${errorMsg}`);
+      try {
+        logger.info(`Scheduler executing: ${schedule.name} (${schedule.action})`);
+        resultSummary = await executeAction(schedule);
+        schedule.error_count = 0;
+        schedule.last_error = null;
+      } catch (err) {
+        success = false;
+        errorMsg = err instanceof Error ? err.message : String(err);
+        resultSummary = `Error: ${errorMsg}`;
+        schedule.error_count++;
+        schedule.last_error = errorMsg;
+        logger.error(`Scheduler error for ${schedule.name}: ${errorMsg}`);
 
-      // Pause on error streak
-      if (schedule.error_count >= config.max_error_streak) {
-        schedule.status = "error";
-        schedule.enabled = false;
-        logger.warn(`Schedule "${schedule.name}" paused after ${schedule.error_count} consecutive errors`);
+        // Pause on error streak
+        if (schedule.error_count >= config.max_error_streak) {
+          schedule.status = "error";
+          schedule.enabled = false;
+          logger.warn(`Schedule "${schedule.name}" paused after ${schedule.error_count} consecutive errors`);
+        }
       }
+
+      const duration = Date.now() - startTime;
+      const execution: ScheduleExecution = {
+        id: `exec_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        schedule_id: schedule.id,
+        schedule_name: schedule.name,
+        action: schedule.action,
+        triggered_at: new Date(startTime).toISOString(),
+        completed_at: new Date().toISOString(),
+        duration_ms: duration,
+        success,
+        result_summary: resultSummary,
+        error: errorMsg,
+      };
+
+      // Update schedule metadata
+      schedule.last_run_at = new Date().toISOString();
+      schedule.run_count++;
+      schedule.updated_at = new Date().toISOString();
+      computeNextRun(schedule);
+
+      // Check max_runs exhaustion
+      if (schedule.max_runs !== null && schedule.run_count >= schedule.max_runs) {
+        schedule.status = "exhausted";
+        schedule.enabled = false;
+      }
+
+      file.executions.push(execution);
+      runsThisHour++;
+      lastRunTimestamp = Date.now();
     }
 
-    const duration = Date.now() - startTime;
-    const execution: ScheduleExecution = {
-      id: `exec_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-      schedule_id: schedule.id,
-      schedule_name: schedule.name,
-      action: schedule.action,
-      triggered_at: new Date(startTime).toISOString(),
-      completed_at: new Date().toISOString(),
-      duration_ms: duration,
-      success,
-      result_summary: resultSummary,
-      error: errorMsg,
-    };
-
-    // Update schedule metadata
-    schedule.last_run_at = new Date().toISOString();
-    schedule.run_count++;
-    schedule.updated_at = new Date().toISOString();
-    computeNextRun(schedule);
-
-    // Check max_runs exhaustion
-    if (schedule.max_runs !== null && schedule.run_count >= schedule.max_runs) {
-      schedule.status = "exhausted";
-      schedule.enabled = false;
+    // Trim execution history
+    if (file.executions.length > config.max_history) {
+      file.executions = file.executions.slice(-config.max_history);
     }
 
-    file.executions.push(execution);
-    runsThisHour++;
-    lastRunTimestamp = Date.now();
-  }
-
-  // Trim execution history
-  if (file.executions.length > config.max_history) {
-    file.executions = file.executions.slice(-config.max_history);
-  }
-
-  file.metadata.last_tick = new Date().toISOString();
-  await saveScheduleFile(file);
+    file.metadata.last_tick = new Date().toISOString();
+    await saveScheduleFile(file);
+  });
 }
 
 function computeNextRun(schedule: DreamSchedule): void {
@@ -465,77 +468,79 @@ function computeNextRun(schedule: DreamSchedule): void {
  * Evaluates "after_cycles" schedules.
  */
 export async function notifyCycleComplete(cycleNumber: number): Promise<void> {
-  const file = await loadScheduleFile();
-  let ran = false;
+  await withFileLock("schedules.json", async () => {
+    const file = await loadScheduleFile();
+    let ran = false;
 
-  for (const schedule of file.schedules) {
-    if (!schedule.enabled || schedule.status !== "active") continue;
-    if (schedule.trigger_type !== "after_cycles") continue;
-    if (!schedule.cycle_interval) continue;
-    if (!canRunSchedule(schedule)) continue;
+    for (const schedule of file.schedules) {
+      if (!schedule.enabled || schedule.status !== "active") continue;
+      if (schedule.trigger_type !== "after_cycles") continue;
+      if (!schedule.cycle_interval) continue;
+      if (!canRunSchedule(schedule)) continue;
 
-    const cyclesSinceLast = cycleNumber - schedule.last_cycle_checked;
-    if (cyclesSinceLast < schedule.cycle_interval) continue;
+      const cyclesSinceLast = cycleNumber - schedule.last_cycle_checked;
+      if (cyclesSinceLast < schedule.cycle_interval) continue;
 
-    schedule.last_cycle_checked = cycleNumber;
+      schedule.last_cycle_checked = cycleNumber;
 
-    const startTime = Date.now();
-    let resultSummary = "";
-    let success = true;
-    let errorMsg: string | undefined;
+      const startTime = Date.now();
+      let resultSummary = "";
+      let success = true;
+      let errorMsg: string | undefined;
 
-    try {
-      logger.info(`Scheduler (cycle-triggered): ${schedule.name} at cycle ${cycleNumber}`);
-      resultSummary = await executeAction(schedule);
-      schedule.error_count = 0;
-      schedule.last_error = null;
-    } catch (err) {
-      success = false;
-      errorMsg = err instanceof Error ? err.message : String(err);
-      resultSummary = `Error: ${errorMsg}`;
-      schedule.error_count++;
-      schedule.last_error = errorMsg;
+      try {
+        logger.info(`Scheduler (cycle-triggered): ${schedule.name} at cycle ${cycleNumber}`);
+        resultSummary = await executeAction(schedule);
+        schedule.error_count = 0;
+        schedule.last_error = null;
+      } catch (err) {
+        success = false;
+        errorMsg = err instanceof Error ? err.message : String(err);
+        resultSummary = `Error: ${errorMsg}`;
+        schedule.error_count++;
+        schedule.last_error = errorMsg;
 
-      if (schedule.error_count >= config.max_error_streak) {
-        schedule.status = "error";
+        if (schedule.error_count >= config.max_error_streak) {
+          schedule.status = "error";
+          schedule.enabled = false;
+        }
+      }
+
+      const execution: ScheduleExecution = {
+        id: `exec_cycle_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        schedule_id: schedule.id,
+        schedule_name: schedule.name,
+        action: schedule.action,
+        triggered_at: new Date(startTime).toISOString(),
+        completed_at: new Date().toISOString(),
+        duration_ms: Date.now() - startTime,
+        success,
+        result_summary: resultSummary,
+        error: errorMsg,
+      };
+
+      schedule.last_run_at = new Date().toISOString();
+      schedule.run_count++;
+      schedule.updated_at = new Date().toISOString();
+
+      if (schedule.max_runs !== null && schedule.run_count >= schedule.max_runs) {
+        schedule.status = "exhausted";
         schedule.enabled = false;
       }
+
+      file.executions.push(execution);
+      runsThisHour++;
+      lastRunTimestamp = Date.now();
+      ran = true;
     }
 
-    const execution: ScheduleExecution = {
-      id: `exec_cycle_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-      schedule_id: schedule.id,
-      schedule_name: schedule.name,
-      action: schedule.action,
-      triggered_at: new Date(startTime).toISOString(),
-      completed_at: new Date().toISOString(),
-      duration_ms: Date.now() - startTime,
-      success,
-      result_summary: resultSummary,
-      error: errorMsg,
-    };
-
-    schedule.last_run_at = new Date().toISOString();
-    schedule.run_count++;
-    schedule.updated_at = new Date().toISOString();
-
-    if (schedule.max_runs !== null && schedule.run_count >= schedule.max_runs) {
-      schedule.status = "exhausted";
-      schedule.enabled = false;
+    if (ran) {
+      if (file.executions.length > config.max_history) {
+        file.executions = file.executions.slice(-config.max_history);
+      }
+      await saveScheduleFile(file);
     }
-
-    file.executions.push(execution);
-    runsThisHour++;
-    lastRunTimestamp = Date.now();
-    ran = true;
-  }
-
-  if (ran) {
-    if (file.executions.length > config.max_history) {
-      file.executions = file.executions.slice(-config.max_history);
-    }
-    await saveScheduleFile(file);
-  }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -563,38 +568,40 @@ export async function createSchedule(opts: {
   enabled?: boolean;
   max_runs?: number | null;
 }): Promise<DreamSchedule> {
-  const file = await loadScheduleFile();
-  const now = new Date().toISOString();
+  return withFileLock("schedules.json", async () => {
+    const file = await loadScheduleFile();
+    const now = new Date().toISOString();
 
-  const schedule: DreamSchedule = {
-    id: `sched_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-    name: opts.name,
-    action: opts.action,
-    parameters: opts.parameters ?? {},
-    trigger_type: opts.trigger_type,
-    interval_ms: opts.interval_ms,
-    cron: opts.cron,
-    cycle_interval: opts.cycle_interval,
-    idle_ms: opts.idle_ms,
-    enabled: opts.enabled ?? true,
-    status: "active",
-    last_run_at: null,
-    next_run_at: null,
-    run_count: 0,
-    max_runs: opts.max_runs ?? null,
-    last_cycle_checked: engine.getCurrentDreamCycle(),
-    error_count: 0,
-    last_error: null,
-    created_at: now,
-    updated_at: now,
-  };
+    const schedule: DreamSchedule = {
+      id: `sched_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      name: opts.name,
+      action: opts.action,
+      parameters: opts.parameters ?? {},
+      trigger_type: opts.trigger_type,
+      interval_ms: opts.interval_ms,
+      cron: opts.cron,
+      cycle_interval: opts.cycle_interval,
+      idle_ms: opts.idle_ms,
+      enabled: opts.enabled ?? true,
+      status: "active",
+      last_run_at: null,
+      next_run_at: null,
+      run_count: 0,
+      max_runs: opts.max_runs ?? null,
+      last_cycle_checked: engine.getCurrentDreamCycle(),
+      error_count: 0,
+      last_error: null,
+      created_at: now,
+      updated_at: now,
+    };
 
-  computeNextRun(schedule);
-  file.schedules.push(schedule);
-  await saveScheduleFile(file);
+    computeNextRun(schedule);
+    file.schedules.push(schedule);
+    await saveScheduleFile(file);
 
-  logger.info(`Schedule created: "${schedule.name}" (${schedule.action}, ${schedule.trigger_type})`);
-  return schedule;
+    logger.info(`Schedule created: "${schedule.name}" (${schedule.action}, ${schedule.trigger_type})`);
+    return schedule;
+  });
 }
 
 export async function updateSchedule(
@@ -604,104 +611,110 @@ export async function updateSchedule(
     "cycle_interval" | "idle_ms" | "max_runs"
   >>
 ): Promise<DreamSchedule | null> {
-  const file = await loadScheduleFile();
-  const schedule = file.schedules.find((s) => s.id === scheduleId);
-  if (!schedule) return null;
+  return withFileLock("schedules.json", async () => {
+    const file = await loadScheduleFile();
+    const schedule = file.schedules.find((s) => s.id === scheduleId);
+    if (!schedule) return null;
 
-  if (updates.name !== undefined) schedule.name = updates.name;
-  if (updates.enabled !== undefined) {
-    schedule.enabled = updates.enabled;
-    // Re-enable resets error state
-    if (updates.enabled && schedule.status === "error") {
-      schedule.status = "active";
-      schedule.error_count = 0;
-      schedule.last_error = null;
+    if (updates.name !== undefined) schedule.name = updates.name;
+    if (updates.enabled !== undefined) {
+      schedule.enabled = updates.enabled;
+      // Re-enable resets error state
+      if (updates.enabled && schedule.status === "error") {
+        schedule.status = "active";
+        schedule.error_count = 0;
+        schedule.last_error = null;
+      }
+      if (!updates.enabled && schedule.status === "active") {
+        schedule.status = "paused";
+      }
+      if (updates.enabled && schedule.status === "paused") {
+        schedule.status = "active";
+      }
     }
-    if (!updates.enabled && schedule.status === "active") {
-      schedule.status = "paused";
-    }
-    if (updates.enabled && schedule.status === "paused") {
-      schedule.status = "active";
-    }
-  }
-  if (updates.parameters !== undefined) schedule.parameters = updates.parameters;
-  if (updates.interval_ms !== undefined) schedule.interval_ms = updates.interval_ms;
-  if (updates.cron !== undefined) schedule.cron = updates.cron;
-  if (updates.cycle_interval !== undefined) schedule.cycle_interval = updates.cycle_interval;
-  if (updates.idle_ms !== undefined) schedule.idle_ms = updates.idle_ms;
-  if (updates.max_runs !== undefined) schedule.max_runs = updates.max_runs;
+    if (updates.parameters !== undefined) schedule.parameters = updates.parameters;
+    if (updates.interval_ms !== undefined) schedule.interval_ms = updates.interval_ms;
+    if (updates.cron !== undefined) schedule.cron = updates.cron;
+    if (updates.cycle_interval !== undefined) schedule.cycle_interval = updates.cycle_interval;
+    if (updates.idle_ms !== undefined) schedule.idle_ms = updates.idle_ms;
+    if (updates.max_runs !== undefined) schedule.max_runs = updates.max_runs;
 
-  schedule.updated_at = new Date().toISOString();
-  computeNextRun(schedule);
-  await saveScheduleFile(file);
+    schedule.updated_at = new Date().toISOString();
+    computeNextRun(schedule);
+    await saveScheduleFile(file);
 
-  logger.info(`Schedule updated: "${schedule.name}" (${schedule.id})`);
-  return schedule;
+    logger.info(`Schedule updated: "${schedule.name}" (${schedule.id})`);
+    return schedule;
+  });
 }
 
 export async function deleteSchedule(scheduleId: string): Promise<boolean> {
-  const file = await loadScheduleFile();
-  const idx = file.schedules.findIndex((s) => s.id === scheduleId);
-  if (idx === -1) return false;
+  return withFileLock("schedules.json", async () => {
+    const file = await loadScheduleFile();
+    const idx = file.schedules.findIndex((s) => s.id === scheduleId);
+    if (idx === -1) return false;
 
-  const removed = file.schedules.splice(idx, 1)[0];
-  await saveScheduleFile(file);
+    const removed = file.schedules.splice(idx, 1)[0];
+    await saveScheduleFile(file);
 
-  logger.info(`Schedule deleted: "${removed.name}" (${removed.id})`);
-  return true;
+    logger.info(`Schedule deleted: "${removed.name}" (${removed.id})`);
+    return true;
+  });
 }
 
 export async function runScheduleNow(scheduleId: string): Promise<ScheduleExecution> {
-  const file = await loadScheduleFile();
-  const schedule = file.schedules.find((s) => s.id === scheduleId);
-  if (!schedule) {
-    throw new Error(`Schedule not found: ${scheduleId}`);
-  }
+  return withFileLock("schedules.json", async () => {
+    const file = await loadScheduleFile();
+    const schedule = file.schedules.find((s) => s.id === scheduleId);
+    if (!schedule) {
+      throw new Error(`Schedule not found: ${scheduleId}`);
+    }
 
-  const startTime = Date.now();
-  let resultSummary = "";
-  let success = true;
-  let errorMsg: string | undefined;
+    const startTime = Date.now();
+    let resultSummary = "";
+    let success = true;
+    let errorMsg: string | undefined;
 
-  try {
-    logger.info(`Scheduler (forced): ${schedule.name} (${schedule.action})`);
-    resultSummary = await executeAction(schedule);
-    schedule.error_count = 0;
-    schedule.last_error = null;
-  } catch (err) {
-    success = false;
-    errorMsg = err instanceof Error ? err.message : String(err);
-    resultSummary = `Error: ${errorMsg}`;
-    schedule.error_count++;
-    schedule.last_error = errorMsg;
-  }
+    try {
+      logger.info(`Scheduler (forced): ${schedule.name} (${schedule.action})`);
+      resultSummary = await executeAction(schedule);
+      schedule.error_count = 0;
+      schedule.last_error = null;
+    } catch (err) {
+      success = false;
+      errorMsg = err instanceof Error ? err.message : String(err);
+      resultSummary = `Error: ${errorMsg}`;
+      schedule.error_count++;
+      schedule.last_error = errorMsg;
+    }
 
-  const execution: ScheduleExecution = {
-    id: `exec_manual_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-    schedule_id: schedule.id,
-    schedule_name: schedule.name,
-    action: schedule.action,
-    triggered_at: new Date(startTime).toISOString(),
-    completed_at: new Date().toISOString(),
-    duration_ms: Date.now() - startTime,
-    success,
-    result_summary: resultSummary,
-    error: errorMsg,
-  };
+    const execution: ScheduleExecution = {
+      id: `exec_manual_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      schedule_id: schedule.id,
+      schedule_name: schedule.name,
+      action: schedule.action,
+      triggered_at: new Date(startTime).toISOString(),
+      completed_at: new Date().toISOString(),
+      duration_ms: Date.now() - startTime,
+      success,
+      result_summary: resultSummary,
+      error: errorMsg,
+    };
 
-  schedule.last_run_at = new Date().toISOString();
-  schedule.run_count++;
-  schedule.updated_at = new Date().toISOString();
-  computeNextRun(schedule);
+    schedule.last_run_at = new Date().toISOString();
+    schedule.run_count++;
+    schedule.updated_at = new Date().toISOString();
+    computeNextRun(schedule);
 
-  file.executions.push(execution);
+    file.executions.push(execution);
 
-  if (file.executions.length > config.max_history) {
-    file.executions = file.executions.slice(-config.max_history);
-  }
-  await saveScheduleFile(file);
+    if (file.executions.length > config.max_history) {
+      file.executions = file.executions.slice(-config.max_history);
+    }
+    await saveScheduleFile(file);
 
-  return execution;
+    return execution;
+  });
 }
 
 // ---------------------------------------------------------------------------

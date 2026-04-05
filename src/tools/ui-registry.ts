@@ -20,6 +20,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { config } from "../config/config.js";
 import { success, error, safeExecute } from "../utils/errors.js";
 import { logger } from "../utils/logger.js";
+import { withFileLock } from "../utils/mutex.js";
 import type {
   UIRegistryFile,
   SemanticElement,
@@ -256,8 +257,9 @@ export function registerUIRegistryTools(server: McpServer): void {
       logger.debug(`register_ui_element called: "${params.id}"`);
 
       const result = await safeExecute<RegisterUIElementOutput>(
-        async (): Promise<ToolResponse<RegisterUIElementOutput>> => {
-          const registry = await loadRegistry();
+        async (): Promise<ToolResponse<RegisterUIElementOutput>> =>
+          withFileLock("ui_registry.json", async () => {
+            const registry = await loadRegistry();
           const existing = registry.elements.find((e) => e.id === params.id);
           let merged = false;
 
@@ -347,20 +349,20 @@ export function registerUIRegistryTools(server: McpServer): void {
             registry.elements.push(element);
           }
 
-          await saveRegistry(registry);
+            await saveRegistry(registry);
 
-          return success({
-            element_id: params.id,
-            name: params.name,
-            category: params.category,
-            inputs_count: params.inputs.length,
-            outputs_count: params.outputs.length,
-            merged,
-            message: merged
-              ? `Updated existing semantic element "${params.id}". Implementations merged.`
-              : `Registered new semantic element "${params.id}" (${params.category}).`,
-          });
-        }
+            return success({
+              element_id: params.id,
+              name: params.name,
+              category: params.category,
+              inputs_count: params.inputs.length,
+              outputs_count: params.outputs.length,
+              merged,
+              message: merged
+                ? `Updated existing semantic element "${params.id}". Implementations merged.`
+                : `Registered new semantic element "${params.id}" (${params.category}).`,
+            });
+          })
       );
 
       return {

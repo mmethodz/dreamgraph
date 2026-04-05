@@ -20,6 +20,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { config } from "../config/config.js";
 import { success, error, safeExecute } from "../utils/errors.js";
 import { logger } from "../utils/logger.js";
+import { withFileLock } from "../utils/mutex.js";
 import type {
   ADRLogFile,
   ArchitectureDecisionRecord,
@@ -146,47 +147,48 @@ export function registerADRTools(server: McpServer): void {
       logger.debug(`record_architecture_decision called: "${params.title}"`);
 
       const result = await safeExecute<RecordADROutput>(
-        async (): Promise<ToolResponse<RecordADROutput>> => {
-          const log = await loadADRLog();
-          const id = nextADRId(log.decisions);
-          const now = new Date().toISOString();
+        async (): Promise<ToolResponse<RecordADROutput>> =>
+          withFileLock("adr_log.json", async () => {
+            const log = await loadADRLog();
+            const id = nextADRId(log.decisions);
+            const now = new Date().toISOString();
 
-          const adr: ArchitectureDecisionRecord = {
-            id,
-            title: params.title,
-            date: now,
-            decided_by: params.decided_by,
-            status: "accepted",
-            context: {
-              problem: params.problem,
-              constraints: params.constraints,
+            const adr: ArchitectureDecisionRecord = {
+              id,
+              title: params.title,
+              date: now,
+              decided_by: params.decided_by,
+              status: "accepted",
+              context: {
+                problem: params.problem,
+                constraints: params.constraints,
+                affected_entities: params.affected_entities,
+                related_tensions: params.related_tensions,
+              },
+              decision: {
+                chosen: params.chosen,
+                alternatives: params.alternatives ?? [],
+              },
+              consequences: {
+                expected: params.expected_consequences,
+                risks: params.risks,
+              },
+              guard_rails: params.guard_rails,
+              tags: params.tags ?? [],
+            };
+
+            log.decisions.push(adr);
+            await saveADRLog(log);
+
+            return success({
+              adr_id: id,
+              title: params.title,
+              status: "accepted" as const,
               affected_entities: params.affected_entities,
-              related_tensions: params.related_tensions,
-            },
-            decision: {
-              chosen: params.chosen,
-              alternatives: params.alternatives ?? [],
-            },
-            consequences: {
-              expected: params.expected_consequences,
-              risks: params.risks,
-            },
-            guard_rails: params.guard_rails,
-            tags: params.tags ?? [],
-          };
-
-          log.decisions.push(adr);
-          await saveADRLog(log);
-
-          return success({
-            adr_id: id,
-            title: params.title,
-            status: "accepted" as const,
-            affected_entities: params.affected_entities,
-            guard_rails: params.guard_rails,
-            message: `Architecture decision ${id} recorded: "${params.title}". ${params.guard_rails.length} guard rail(s) active.`,
-          });
-        }
+              guard_rails: params.guard_rails,
+              message: `Architecture decision ${id} recorded: "${params.title}". ${params.guard_rails.length} guard rail(s) active.`,
+            });
+          })
       );
 
       return {
@@ -327,42 +329,43 @@ export function registerADRTools(server: McpServer): void {
       logger.debug(`deprecate_architecture_decision called: ${params.adr_id}`);
 
       const result = await safeExecute<DeprecateADROutput>(
-        async (): Promise<ToolResponse<DeprecateADROutput>> => {
-          const log = await loadADRLog();
-          const adr = log.decisions.find((d) => d.id === params.adr_id);
+        async (): Promise<ToolResponse<DeprecateADROutput>> =>
+          withFileLock("adr_log.json", async () => {
+            const log = await loadADRLog();
+            const adr = log.decisions.find((d) => d.id === params.adr_id);
 
-          if (!adr) {
-            return error(
-              "NOT_FOUND",
-              `ADR "${params.adr_id}" not found. Available: ${log.decisions.map((d) => d.id).join(", ") || "none"}`
-            );
-          }
+            if (!adr) {
+              return error(
+                "NOT_FOUND",
+                `ADR "${params.adr_id}" not found. Available: ${log.decisions.map((d) => d.id).join(", ") || "none"}`
+              );
+            }
 
-          if (adr.status !== "accepted") {
-            return error(
-              "INVALID_STATE",
-              `ADR "${params.adr_id}" is already ${adr.status}. Only accepted ADRs can be deprecated.`
-            );
-          }
+            if (adr.status !== "accepted") {
+              return error(
+                "INVALID_STATE",
+                `ADR "${params.adr_id}" is already ${adr.status}. Only accepted ADRs can be deprecated.`
+              );
+            }
 
-          if (params.new_status === "superseded" && !params.superseded_by) {
-            return error(
-              "MISSING_FIELD",
-              'When superseding an ADR, "superseded_by" must specify the replacement ADR ID.'
-            );
-          }
+            if (params.new_status === "superseded" && !params.superseded_by) {
+              return error(
+                "MISSING_FIELD",
+                'When superseding an ADR, "superseded_by" must specify the replacement ADR ID.'
+              );
+            }
 
-          adr.status = params.new_status;
-          if (params.superseded_by) adr.superseded_by = params.superseded_by;
+            adr.status = params.new_status;
+            if (params.superseded_by) adr.superseded_by = params.superseded_by;
 
-          await saveADRLog(log);
+            await saveADRLog(log);
 
-          return success({
-            adr_id: params.adr_id,
-            new_status: params.new_status,
-            message: `ADR ${params.adr_id} is now ${params.new_status}. Guard rails from this ADR are no longer active. Reason: ${params.reason}`,
-          });
-        }
+            return success({
+              adr_id: params.adr_id,
+              new_status: params.new_status,
+              message: `ADR ${params.adr_id} is now ${params.new_status}. Guard rails from this ADR are no longer active. Reason: ${params.reason}`,
+            });
+          })
       );
 
       return {

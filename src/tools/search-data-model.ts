@@ -39,11 +39,15 @@ export function registerSearchDataModelTool(server: McpServer): void {
           const entities = await loadJsonArray<DataModelEntity>("data_model.json");
 
           const found = entities.find(
-            (e) => e.id.toLowerCase() === entity.toLowerCase()
+            (e) => e.id?.toLowerCase() === entity.toLowerCase() ||
+                   e.name?.toLowerCase() === entity.toLowerCase()
           );
 
           if (!found) {
-            const available = entities.map((e) => e.id).join(", ");
+            const available = entities
+              .filter((e) => e.id || e.name)
+              .map((e) => e.id ?? e.name)
+              .join(", ");
             return error(
               "NOT_FOUND",
               `Entity "${entity}" not found. Available entities: ${available}`
