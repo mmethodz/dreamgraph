@@ -1,21 +1,75 @@
-MIT License
+DreamGraph License v1.0
 
-Copyright (c) 2025 Mika Jussila
+Copyright (c) 2026 Mika Jussila
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+This license is based on the Business Source License (BSL) model.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+1. Definitions
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+“Software”: The DreamGraph source code and all included components.
+“Licensed Work”: The Software and any modifications made to it.
+“Production Use”: Any use of the Software in a commercial, revenue-generating, or internal business environment.
+“Competitive Offering”: Any product or service whose primary purpose is to provide DreamGraph functionality (e.g., cognition engine, graph-based reasoning, system abstraction, or application reconstruction) as a hosted, managed, or monetized service.
+
+2. Usage Grant
+
+You are granted a non-exclusive, worldwide, royalty-free license to:
+
+- Use the Software for:
+
+personal use
+research and experimentation
+internal business use
+integration into your own products
+
+- Modify the Software for:
+
+internal use
+non-competitive applications
+
+3. Restrictions
+
+You may NOT:
+
+- Offer the Software (or a modified version) as a hosted or managed service
+- Build or sell a Competitive Offering based on the Software
+- Provide DreamGraph functionality as a standalone commercial platform
+- Resell, sublicense, or distribute the Software as a primary product
+
+4. Distribution
+
+You may distribute modified or unmodified versions of the Software:
+
+- For non-commercial use
+- As part of a larger product where DreamGraph is not the primary value
+
+But you must:
+
+- Include this license
+- Clearly state modifications
+
+5. Change License (Future Open Source Conversion)
+
+On January 1, 2030, this Software will automatically convert to:
+
+Apache License 2.0
+
+At that point, all restrictions in Section 3 are lifted.
+
+6. Commercial Licensing
+
+If you wish to:
+
+- Build a Competitive Offering
+- Offer DreamGraph as a service
+- Integrate into a commercial platform as a core feature
+
+You must obtain a commercial license from:
+
+mika.jussila@siteledger.io
+
+7. Disclaimer
+
+The Software is provided “as is”, without warranty of any kind.
+
+The authors are not liable for any damages arising from use of the Software.
