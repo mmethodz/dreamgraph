@@ -1,10 +1,16 @@
 {
   "metadata": {
     "description": "Semantic UI Registry — platform-independent element definitions with purpose, data contract, and interaction model.",
-    "schema_version": "1.0.0",
+    "schema_version": "1.1.0",
     "total_elements": 0,
     "total_categories": 0,
     "last_updated": null
+  },
+  "_schema_notes": {
+    "core_fields": "id, name, purpose, category, data_contract, interactions, children, implementations, used_by, tags — these are the hard structural fields required for correctness.",
+    "category_1_optional_enrichment": "state (observable state flags, Record<string, 'boolean'|'string'|'number'>), flows (ordered workflow descriptions), error_states (known error/edge-case states with condition, behavior, severity), rendering_capabilities (input modalities like touch, mouse, keyboard, voice).",
+    "category_2_derivable_metadata": "is_async (boolean, whether async operations are involved), default_action (primary action when invoked), visibility_conditions (conditions controlling when element is shown).",
+    "design_principle": "New fields enrich interpretation but never become mandatory for correctness. All Category 1 and 2 fields are optional."
   },
   "elements": []
 }

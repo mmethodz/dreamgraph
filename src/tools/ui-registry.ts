@@ -184,6 +184,55 @@ export function registerUIRegistryTools(server: McpServer): void {
         .optional()
         .describe("Feature IDs that use this element"),
       tags: z.array(z.string()).optional().describe("Tags for searchability"),
+
+      // Optional enrichment (Category 1)
+      state: z
+        .record(z.string(), z.enum(["boolean", "string", "number"]))
+        .optional()
+        .describe(
+          'Observable state flags, e.g. { "is_generating": "boolean", "has_image": "boolean" }'
+        ),
+      flows: z
+        .array(z.string())
+        .optional()
+        .describe(
+          'Ordered workflow flows, e.g. ["prompt → generate → display → edit → save"]'
+        ),
+      error_states: z
+        .array(
+          z.object({
+            condition: z.string().describe("When this error occurs"),
+            behavior: z.string().describe("How the element responds"),
+            severity: z
+              .enum(["info", "warning", "error", "fatal"])
+              .optional()
+              .describe("Severity level"),
+          })
+        )
+        .optional()
+        .describe("Known error/edge-case states"),
+      rendering_capabilities: z
+        .array(z.string())
+        .optional()
+        .describe(
+          'Capability-based abstraction, e.g. ["touch", "mouse", "keyboard", "voice"]'
+        ),
+
+      // Derivable metadata (Category 2)
+      is_async: z
+        .boolean()
+        .optional()
+        .describe("Whether the element involves async operations"),
+      default_action: z
+        .string()
+        .optional()
+        .describe("Default/primary action when invoked without specifics"),
+      visibility_conditions: z
+        .array(z.string())
+        .optional()
+        .describe(
+          'Conditions controlling visibility, e.g. ["has_api_key", "has_image"]'
+        ),
     },
     async (params) => {
       logger.debug(`register_ui_element called: "${params.id}"`);
@@ -206,6 +255,21 @@ export function registerUIRegistryTools(server: McpServer): void {
             existing.interactions = params.interactions;
             if (params.children) existing.children = params.children;
             existing.tags = params.tags ?? existing.tags;
+
+            // Category 1 – optional enrichment (overwrite when supplied)
+            if (params.state !== undefined) existing.state = params.state;
+            if (params.flows !== undefined) existing.flows = params.flows;
+            if (params.error_states !== undefined)
+              existing.error_states = params.error_states;
+            if (params.rendering_capabilities !== undefined)
+              existing.rendering_capabilities = params.rendering_capabilities;
+
+            // Category 2 – derivable metadata (overwrite when supplied)
+            if (params.is_async !== undefined) existing.is_async = params.is_async;
+            if (params.default_action !== undefined)
+              existing.default_action = params.default_action;
+            if (params.visibility_conditions !== undefined)
+              existing.visibility_conditions = params.visibility_conditions;
 
             // Merge implementations (no duplicate platforms)
             const newImpls = params.implementations ?? [];
@@ -244,6 +308,23 @@ export function registerUIRegistryTools(server: McpServer): void {
               implementations: params.implementations ?? [],
               used_by: params.used_by ?? [],
               tags: params.tags ?? [],
+              // Category 1 – optional enrichment
+              ...(params.state !== undefined && { state: params.state }),
+              ...(params.flows !== undefined && { flows: params.flows }),
+              ...(params.error_states !== undefined && {
+                error_states: params.error_states,
+              }),
+              ...(params.rendering_capabilities !== undefined && {
+                rendering_capabilities: params.rendering_capabilities,
+              }),
+              // Category 2 – derivable metadata
+              ...(params.is_async !== undefined && { is_async: params.is_async }),
+              ...(params.default_action !== undefined && {
+                default_action: params.default_action,
+              }),
+              ...(params.visibility_conditions !== undefined && {
+                visibility_conditions: params.visibility_conditions,
+              }),
             };
             registry.elements.push(element);
           }

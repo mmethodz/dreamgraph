@@ -833,6 +833,35 @@ export interface SemanticElement {
 
   used_by: string[];
   tags: string[];
+
+  // --- Optional enrichment (Category 1) ---
+
+  /** Observable state flags that drive UI behavior and async flows. */
+  state?: Record<string, "boolean" | "string" | "number">;
+
+  /** Ordered workflow flows this element participates in. */
+  flows?: string[];
+
+  /** Known error/edge-case states and how the element should respond. */
+  error_states?: Array<{
+    condition: string;
+    behavior: string;
+    severity?: "info" | "warning" | "error" | "fatal";
+  }>;
+
+  /** Capability-based abstraction beyond platform names. */
+  rendering_capabilities?: string[];
+
+  // --- Derivable metadata (Category 2) ---
+
+  /** Whether the element involves async operations. Inferred if omitted. */
+  is_async?: boolean;
+
+  /** Default/primary action when the element is invoked without specifics. */
+  default_action?: string;
+
+  /** Conditions that control when this element is visible/enabled. */
+  visibility_conditions?: string[];
 }
 
 /** UI registry file structure */
@@ -845,6 +874,8 @@ export interface UIRegistryFile {
     last_updated: string | null;
   };
   elements: SemanticElement[];
+  /** Schema documentation — ignored by runtime, useful for humans. */
+  _schema_notes?: Record<string, string>;
 }
 
 // ---------------------------------------------------------------------------
