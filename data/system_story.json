@@ -3,31 +3,10 @@
     "description": "DreamGraph System Autobiography — a persistent, evolving narrative of system understanding.",
     "schema_version": "1.0.0",
     "title": "The DreamGraph Chronicle",
-    "started_at": "2026-04-04T18:54:25.882Z",
-    "last_updated": "2026-04-04T18:54:25.882Z",
-    "total_chapters": 1,
-    "total_cycles_covered": 30
+    "started_at": null,
+    "last_updated": null,
+    "total_chapters": 0,
+    "total_cycles_covered": 0
   },
-  "chapters": [
-    {
-      "title": "Progress: Cycles 25–30",
-      "cycle_range": [
-        25,
-        30
-      ],
-      "key_discoveries": [],
-      "tensions_addressed": [],
-      "narrative_text": "Since cycle 0, 6 new dream cycle(s) were performed (25–30). No unresolved tensions remain — the system is in a healthy state.",
-      "chapter_number": 1,
-      "generated_at": "2026-04-04T18:54:25.881Z",
-      "diff": {
-        "new_validated_edges": 0,
-        "tensions_created": 0,
-        "tensions_resolved": 0,
-        "threats_discovered": 0,
-        "archetypes_exchanged": 0
-      }
-    }
-  ],
-  "digests": []
+  "chapters": []
 }

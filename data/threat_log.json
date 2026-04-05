@@ -1,0 +1,10 @@
+{
+  "metadata": {
+    "description": "Threat Log — adversarial findings from NIGHTMARE dream cycles.",
+    "schema_version": "1.0.0",
+    "total_threats": 0,
+    "last_nightmare_cycle": null,
+    "total_nightmare_cycles": 0
+  },
+  "threats": []
+}

@@ -4,7 +4,7 @@
     "schema_version": "1.0.0",
     "total_schedules": 0,
     "total_executions": 0,
-    "last_tick": "2026-04-04T20:26:50.840Z"
+    "last_tick": null
   },
   "schedules": [],
   "executions": []

@@ -1,0 +1,9 @@
+{
+  "metadata": {
+    "description": "Event-Driven Dreaming — cognitive event audit trail.",
+    "schema_version": "1.0.0",
+    "total_events": 0,
+    "last_event": null
+  },
+  "events": []
+}
