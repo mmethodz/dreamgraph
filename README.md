@@ -1142,7 +1142,12 @@ This is an experimental system. Contributions welcome in:
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+DreamGraph is source-available under the DreamGraph License (BSL-based)  — see [LICENSE](LICENSE).
+
+- Free for personal, research, and internal commercial use  
+- Not allowed to offer as a competing service or platform  
+
+Commercial licensing available — contact: mika.jussila@siteledger.io
 
 ---
 
