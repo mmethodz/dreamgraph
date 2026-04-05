@@ -6,7 +6,9 @@
 
 Traditional AI systems answer questions. DreamGraph reduces uncertainty over time — it finds, verifies, and resolves problems in your system autonomously.
 
-A self-regulating AI cognitive layer that discovers, verifies, and resolves system-level insights through structured "dream cycles" — and now dreams adversarially, reasons causally, thinks temporally, narrates its own understanding, proposes concrete fixes, tunes its own thresholds, reacts to events, and writes its own autobiography.
+A self-regulating AI cognitive layer that discovers, abstracts, verifies, and resolves system-level insights through structured "dream cycles" — and now dreams adversarially, reasons causally, thinks temporally, narrates its own understanding, proposes concrete fixes, tunes its own thresholds, reacts to events, and writes its own autobiography. 
+
+DreamGraph builds an abstract representation of system intent—acting as a universal architect capable of autonomous reasoning, system abstraction, and cross-ecosystem transcompilation.
 
 ---
 
