@@ -20,10 +20,9 @@
 
 import { readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
-import { config as appConfig } from "../config/config.js";
 import { engine } from "./engine.js";
 import { logger } from "../utils/logger.js";
+import { dataPath } from "../utils/paths.js";
 import {
   DEFAULT_PROMOTION,
   DEFAULT_TENSION_CONFIG,
@@ -49,7 +48,7 @@ import type {
 // Paths
 // ---------------------------------------------------------------------------
 
-const META_LOG_PATH = resolve(appConfig.dataDir, "meta_log.json");
+const metaLogPath = () => dataPath("meta_log.json");
 
 // ---------------------------------------------------------------------------
 // Safety Guards
@@ -372,8 +371,8 @@ function emptyMetaLog(): MetaLogFile {
 
 async function loadMetaLog(): Promise<MetaLogFile> {
   try {
-    if (!existsSync(META_LOG_PATH)) return emptyMetaLog();
-    const raw = await readFile(META_LOG_PATH, "utf-8");
+    if (!existsSync(metaLogPath())) return emptyMetaLog();
+    const raw = await readFile(metaLogPath(), "utf-8");
     const p = JSON.parse(raw);
     const e = emptyMetaLog();
     return {
@@ -390,7 +389,7 @@ async function saveMetaLog(log: MetaLogFile): Promise<void> {
   log.metadata.last_analysis = log.entries.length > 0
     ? log.entries[log.entries.length - 1].timestamp
     : null;
-  await writeFile(META_LOG_PATH, JSON.stringify(log, null, 2), "utf-8");
+  await writeFile(metaLogPath(), JSON.stringify(log, null, 2), "utf-8");
 }
 
 // ---------------------------------------------------------------------------

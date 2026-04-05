@@ -14,6 +14,7 @@ import {
   registerCognitiveResources,
   registerCognitiveTools,
 } from "../cognitive/register.js";
+import { registerDisciplineResource } from "../discipline/register.js";
 import { startScheduler, stopScheduler } from "../cognitive/scheduler.js";
 import { logger } from "../utils/logger.js";
 
@@ -36,6 +37,9 @@ export function createServer(): McpServer {
   // Register cognitive dreaming system (resources + tools)
   registerCognitiveResources(server);
   registerCognitiveTools(server);
+
+  // v6.0 — Register discipline execution system (ADR-001)
+  registerDisciplineResource(server);
 
   // v5.2 — Start the dream scheduler
   startScheduler(config.scheduler);

@@ -1,10 +1,11 @@
 {
   "name": "dreamgraph",
-  "version": "5.2.0",
+  "version": "6.0.0",
   "description": "DreamGraph — A cognitive dreaming engine for MCP servers. Builds, explores, and self-heals knowledge graphs through speculative reasoning.",
   "type": "module",
   "bin": {
-    "dreamgraph": "./dist/index.js"
+    "dreamgraph": "./dist/index.js",
+    "dg": "./dist/cli/dg.js"
   },
   "scripts": {
     "build": "tsc",
@@ -12,7 +13,9 @@
     "start": "node dist/index.js",
     "start:sse": "node dist/index.js --transport http",
     "prepare": "npm run build",
-    "seed": "node scripts/seed-example.mjs"
+    "seed": "node scripts/seed-example.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "keywords": [
     "mcp",
@@ -40,6 +43,7 @@
     "@types/node": "^25.5.0",
     "@types/pg": "^8.20.0",
     "@types/turndown": "^5.0.6",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.2"
   }
 }

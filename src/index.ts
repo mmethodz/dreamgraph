@@ -17,6 +17,7 @@
  */
 
 import { createServer } from "./server/server.js";
+import { resolveInstanceAtStartup } from "./instance/index.js";
 import { logger } from "./utils/logger.js";
 
 /* ------------------------------------------------------------------ */
@@ -216,9 +217,15 @@ async function startHTTP(port: number): Promise<void> {
 
 const opts = parseArgs();
 
-(opts.transport === "http" ? startHTTP(opts.port) : startStdio()).catch(
-  (err) => {
+// Resolve instance scope before starting any transport.
+// In instance mode this sets the active InstanceScope and wires
+// all three resolvers (dataDir, paths, mutex).  In legacy mode
+// (no DREAMGRAPH_INSTANCE_UUID env var) this is a harmless no-op.
+resolveInstanceAtStartup()
+  .then(() =>
+    opts.transport === "http" ? startHTTP(opts.port) : startStdio(),
+  )
+  .catch((err) => {
     logger.error("Fatal error:", err);
     process.exit(1);
-  },
-);
+  });

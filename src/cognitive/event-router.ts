@@ -20,10 +20,9 @@
 
 import { readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
-import { config as appConfig } from "../config/config.js";
 import { engine } from "./engine.js";
 import { logger } from "../utils/logger.js";
+import { dataPath } from "../utils/paths.js";
 import { DEFAULT_EVENT_ROUTER_CONFIG } from "./types.js";
 import type {
   EventSource,
@@ -40,7 +39,7 @@ import type {
 // Paths
 // ---------------------------------------------------------------------------
 
-const EVENT_LOG_PATH = resolve(appConfig.dataDir, "event_log.json");
+const eventLogPath = () => dataPath("event_log.json");
 
 // ---------------------------------------------------------------------------
 // State
@@ -69,8 +68,8 @@ function emptyEventLog(): EventLogFile {
 
 async function loadEventLog(): Promise<EventLogFile> {
   try {
-    if (!existsSync(EVENT_LOG_PATH)) return emptyEventLog();
-    const raw = await readFile(EVENT_LOG_PATH, "utf-8");
+    if (!existsSync(eventLogPath())) return emptyEventLog();
+    const raw = await readFile(eventLogPath(), "utf-8");
     const p = JSON.parse(raw);
     const e = emptyEventLog();
     return {
@@ -88,7 +87,7 @@ async function saveEventLog(log: EventLogFile): Promise<void> {
     log.events.length > 0
       ? log.events[log.events.length - 1].timestamp
       : null;
-  await writeFile(EVENT_LOG_PATH, JSON.stringify(log, null, 2), "utf-8");
+  await writeFile(eventLogPath(), JSON.stringify(log, null, 2), "utf-8");
 }
 
 // ---------------------------------------------------------------------------

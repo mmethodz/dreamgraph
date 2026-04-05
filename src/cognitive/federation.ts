@@ -19,10 +19,9 @@
 
 import { readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
-import { config as appConfig } from "../config/config.js";
 import { engine } from "./engine.js";
 import { logger } from "../utils/logger.js";
+import { dataPath } from "../utils/paths.js";
 import type {
   DreamArchetype,
   FederationConfig,
@@ -38,7 +37,7 @@ import { DEFAULT_FEDERATION_CONFIG } from "./types.js";
 // Path resolution
 // ---------------------------------------------------------------------------
 
-const ARCHETYPES_PATH = resolve(appConfig.dataDir, "dream_archetypes.json");
+const archetypesPath = () => dataPath("dream_archetypes.json");
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -130,8 +129,8 @@ function abstractEntityName(entityId: string): string {
 
 async function loadArchetypes(): Promise<FederatedExchangeFile> {
   try {
-    if (!existsSync(ARCHETYPES_PATH)) return emptyExchangeFile();
-    const raw = await readFile(ARCHETYPES_PATH, "utf-8");
+    if (!existsSync(archetypesPath())) return emptyExchangeFile();
+    const raw = await readFile(archetypesPath(), "utf-8");
     const p = JSON.parse(raw);
     const e = emptyExchangeFile();
     return {
@@ -144,7 +143,7 @@ async function loadArchetypes(): Promise<FederatedExchangeFile> {
 }
 
 async function saveArchetypes(data: FederatedExchangeFile): Promise<void> {
-  await writeFile(ARCHETYPES_PATH, JSON.stringify(data, null, 2), "utf-8");
+  await writeFile(archetypesPath(), JSON.stringify(data, null, 2), "utf-8");
 }
 
 function emptyExchangeFile(): FederatedExchangeFile {
@@ -211,7 +210,7 @@ export async function exportArchetypes(): Promise<ExportArchetypesOutput> {
 
   return {
     archetypes_exported: unique.length,
-    file_path: ARCHETYPES_PATH,
+    file_path: archetypesPath(),
     instance_id: config.instance_id,
     timestamp: new Date().toISOString(),
   };

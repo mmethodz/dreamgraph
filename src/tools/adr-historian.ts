@@ -15,9 +15,8 @@
 import { z } from "zod";
 import { readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { config } from "../config/config.js";
+import { dataPath } from "../utils/paths.js";
 import { success, error, safeExecute } from "../utils/errors.js";
 import { logger } from "../utils/logger.js";
 import { withFileLock } from "../utils/mutex.js";
@@ -35,7 +34,7 @@ import type {
 // Path resolution
 // ---------------------------------------------------------------------------
 
-const ADR_PATH = resolve(config.dataDir, "adr_log.json");
+const adrPath = () => dataPath("adr_log.json");
 
 // ---------------------------------------------------------------------------
 // File I/O
@@ -43,8 +42,8 @@ const ADR_PATH = resolve(config.dataDir, "adr_log.json");
 
 async function loadADRLog(): Promise<ADRLogFile> {
   try {
-    if (!existsSync(ADR_PATH)) return emptyADRLog();
-    const raw = await readFile(ADR_PATH, "utf-8");
+    if (!existsSync(adrPath())) return emptyADRLog();
+    const raw = await readFile(adrPath(), "utf-8");
     const parsed = JSON.parse(raw);
 
     // Defensive: guarantee expected shape regardless of what is on disk.
@@ -66,7 +65,7 @@ async function loadADRLog(): Promise<ADRLogFile> {
 async function saveADRLog(data: ADRLogFile): Promise<void> {
   data.metadata.total_decisions = data.decisions.length;
   data.metadata.last_updated = new Date().toISOString();
-  await writeFile(ADR_PATH, JSON.stringify(data, null, 2), "utf-8");
+  await writeFile(adrPath(), JSON.stringify(data, null, 2), "utf-8");
   logger.debug("ADR log saved to disk");
 }
 

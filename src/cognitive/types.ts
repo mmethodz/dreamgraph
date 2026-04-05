@@ -1745,6 +1745,8 @@ export interface ScheduleExecution {
   success: boolean;
   result_summary: string;
   error?: string;
+  /** Instance UUID that produced this execution (null in legacy mode). */
+  instance_uuid?: string;
 }
 
 /** Persistent schedule file */
@@ -1755,6 +1757,8 @@ export interface ScheduleFile {
     total_schedules: number;
     total_executions: number;
     last_tick: string | null;
+    /** Instance UUID that owns this schedule file (null in legacy mode). */
+    instance_uuid?: string;
   };
   schedules: DreamSchedule[];
   executions: ScheduleExecution[];

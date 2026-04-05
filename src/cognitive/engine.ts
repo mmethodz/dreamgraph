@@ -27,6 +27,7 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { config as appConfig } from "../config/config.js";
 import { logger } from "../utils/logger.js";
+import { dataPath } from "../utils/paths.js";
 import type {
   CognitiveStateName,
   CognitiveState,
@@ -51,16 +52,14 @@ import type {
 import { DEFAULT_DECAY, DEFAULT_PROMOTION, DEFAULT_TENSION_CONFIG } from "./types.js";
 
 // ---------------------------------------------------------------------------
-// Path resolution
+// Path resolution (lazy — resolved at call time for instance mode support)
 // ---------------------------------------------------------------------------
 
-const dataDir = appConfig.dataDir;
-
-const DREAM_GRAPH_PATH = resolve(dataDir, "dream_graph.json");
-const CANDIDATE_EDGES_PATH = resolve(dataDir, "candidate_edges.json");
-const VALIDATED_EDGES_PATH = resolve(dataDir, "validated_edges.json");
-const TENSION_PATH = resolve(dataDir, "tension_log.json");
-const HISTORY_PATH = resolve(dataDir, "dream_history.json");
+const dreamGraphPath     = () => dataPath("dream_graph.json");
+const candidateEdgesPath = () => dataPath("candidate_edges.json");
+const validatedEdgesPath = () => dataPath("validated_edges.json");
+const tensionPath        = () => dataPath("tension_log.json");
+const historyPath        = () => dataPath("dream_history.json");
 
 // ---------------------------------------------------------------------------
 // Cognitive Engine (Singleton)
@@ -259,8 +258,8 @@ class CognitiveEngine {
 
   async loadDreamGraph(): Promise<DreamGraphFile> {
     try {
-      if (!existsSync(DREAM_GRAPH_PATH)) return this.emptyDreamGraphFile();
-      const raw = await readFile(DREAM_GRAPH_PATH, "utf-8");
+      if (!existsSync(dreamGraphPath())) return this.emptyDreamGraphFile();
+      const raw = await readFile(dreamGraphPath(), "utf-8");
       const p = JSON.parse(raw);
       const e = this.emptyDreamGraphFile();
       return {
@@ -288,7 +287,7 @@ class CognitiveEngine {
   }
 
   async saveDreamGraph(data: DreamGraphFile): Promise<void> {
-    await writeFile(DREAM_GRAPH_PATH, JSON.stringify(data, null, 2), "utf-8");
+    await writeFile(dreamGraphPath(), JSON.stringify(data, null, 2), "utf-8");
     logger.debug("Dream graph saved to disk");
   }
 
@@ -556,8 +555,8 @@ class CognitiveEngine {
 
   async loadCandidateEdges(): Promise<CandidateEdgesFile> {
     try {
-      if (!existsSync(CANDIDATE_EDGES_PATH)) return this.emptyCandidateEdgesFile();
-      const raw = await readFile(CANDIDATE_EDGES_PATH, "utf-8");
+      if (!existsSync(candidateEdgesPath())) return this.emptyCandidateEdgesFile();
+      const raw = await readFile(candidateEdgesPath(), "utf-8");
       const p = JSON.parse(raw);
       const e = this.emptyCandidateEdgesFile();
       return {
@@ -584,7 +583,7 @@ class CognitiveEngine {
 
   async saveCandidateEdges(data: CandidateEdgesFile): Promise<void> {
     await writeFile(
-      CANDIDATE_EDGES_PATH,
+      candidateEdgesPath(),
       JSON.stringify(data, null, 2),
       "utf-8"
     );
@@ -606,8 +605,8 @@ class CognitiveEngine {
 
   async loadValidatedEdges(): Promise<ValidatedEdgesFile> {
     try {
-      if (!existsSync(VALIDATED_EDGES_PATH)) return this.emptyValidatedEdgesFile();
-      const raw = await readFile(VALIDATED_EDGES_PATH, "utf-8");
+      if (!existsSync(validatedEdgesPath())) return this.emptyValidatedEdgesFile();
+      const raw = await readFile(validatedEdgesPath(), "utf-8");
       const p = JSON.parse(raw);
       const e = this.emptyValidatedEdgesFile();
       return {
@@ -634,7 +633,7 @@ class CognitiveEngine {
 
   async saveValidatedEdges(data: ValidatedEdgesFile): Promise<void> {
     await writeFile(
-      VALIDATED_EDGES_PATH,
+      validatedEdgesPath(),
       JSON.stringify(data, null, 2),
       "utf-8"
     );
@@ -657,10 +656,10 @@ class CognitiveEngine {
 
   async loadTensions(): Promise<TensionFile> {
     try {
-      if (!existsSync(TENSION_PATH)) {
+      if (!existsSync(tensionPath())) {
         return this.emptyTensionFile();
       }
-      const raw = await readFile(TENSION_PATH, "utf-8");
+      const raw = await readFile(tensionPath(), "utf-8");
       const p = JSON.parse(raw);
       const e = this.emptyTensionFile();
       return {
@@ -677,7 +676,7 @@ class CognitiveEngine {
     data.metadata.total_signals = data.signals.length;
     data.metadata.total_resolved = data.resolved_tensions?.length ?? 0;
     data.metadata.last_updated = new Date().toISOString();
-    await writeFile(TENSION_PATH, JSON.stringify(data, null, 2), "utf-8");
+    await writeFile(tensionPath(), JSON.stringify(data, null, 2), "utf-8");
     logger.debug("Tension log saved to disk");
   }
 
@@ -966,10 +965,10 @@ class CognitiveEngine {
 
   async loadDreamHistory(): Promise<DreamHistoryFile> {
     try {
-      if (!existsSync(HISTORY_PATH)) {
+      if (!existsSync(historyPath())) {
         return this.emptyHistoryFile();
       }
-      const raw = await readFile(HISTORY_PATH, "utf-8");
+      const raw = await readFile(historyPath(), "utf-8");
       const p = JSON.parse(raw);
       const e = this.emptyHistoryFile();
       return {
@@ -985,7 +984,7 @@ class CognitiveEngine {
     const history = await this.loadDreamHistory();
     history.sessions.push(entry);
     history.metadata.total_sessions = history.sessions.length;
-    await writeFile(HISTORY_PATH, JSON.stringify(history, null, 2), "utf-8");
+    await writeFile(historyPath(), JSON.stringify(history, null, 2), "utf-8");
     logger.debug(`Dream history entry recorded: session ${entry.session_id}`);
   }
 
@@ -1027,7 +1026,7 @@ class CognitiveEngine {
 
   async clearHistory(): Promise<void> {
     await writeFile(
-      HISTORY_PATH,
+      historyPath(),
       JSON.stringify(this.emptyHistoryFile(), null, 2),
       "utf-8"
     );

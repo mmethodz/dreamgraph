@@ -1,6 +1,6 @@
 # DreamGraph Tools Reference
 
-> Complete catalog of all 43 MCP tools (23 cognitive + 20 general).
+> Complete catalog of all 43 MCP tools (23 cognitive + 20 general) and 16 MCP resources.
 
 ---
 
@@ -523,7 +523,7 @@ Export knowledge graph as structured Markdown for documentation sites.
 
 ---
 
-## MCP Resources (15)
+## MCP Resources (16)
 
 | URI | Description |
 |-----|-------------|
@@ -542,6 +542,7 @@ Export knowledge graph as structured Markdown for documentation sites.
 | `dream://story` | Persistent system autobiography (v5.1) |
 | `dream://schedules` | Active dream schedules with status (v5.2) |
 | `dream://schedule-history` | Schedule execution history (v5.2) |
+| `discipline://manifest` | Tool classifications, phase permissions, data protection rules (v6.0 La Catedral) |
 
 System resources (read via `query_resource`):
 

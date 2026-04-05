@@ -1,9 +1,1 @@
-{
-  "metadata": {
-    "description": "Architecture Decision Records — why things were built this way.",
-    "schema_version": "1.0.0",
-    "total_decisions": 0,
-    "last_updated": null
-  },
-  "decisions": []
-}
+﻿{"decisions": []}

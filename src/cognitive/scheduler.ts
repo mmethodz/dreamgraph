@@ -20,9 +20,9 @@
 
 import { readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
-import { config as appConfig } from "../config/config.js";
 import { engine } from "./engine.js";
+import { dataPath } from "../utils/paths.js";
+import { getActiveScope } from "../instance/lifecycle.js";
 import { dream } from "./dreamer.js";
 import { normalize } from "./normalizer.js";
 import { nightmare } from "./adversarial.js";
@@ -48,7 +48,7 @@ import type {
 // Paths
 // ---------------------------------------------------------------------------
 
-const SCHEDULES_PATH = resolve(appConfig.dataDir, "schedules.json");
+const schedulesPath = () => dataPath("schedules.json");
 
 // ---------------------------------------------------------------------------
 // State
@@ -81,8 +81,8 @@ function emptyScheduleFile(): ScheduleFile {
 
 async function loadScheduleFile(): Promise<ScheduleFile> {
   try {
-    if (!existsSync(SCHEDULES_PATH)) return emptyScheduleFile();
-    const raw = await readFile(SCHEDULES_PATH, "utf-8");
+    if (!existsSync(schedulesPath())) return emptyScheduleFile();
+    const raw = await readFile(schedulesPath(), "utf-8");
     const p = JSON.parse(raw);
     const e = emptyScheduleFile();
     return {
@@ -98,7 +98,10 @@ async function loadScheduleFile(): Promise<ScheduleFile> {
 async function saveScheduleFile(file: ScheduleFile): Promise<void> {
   file.metadata.total_schedules = file.schedules.length;
   file.metadata.total_executions = file.executions.length;
-  await writeFile(SCHEDULES_PATH, JSON.stringify(file, null, 2), "utf-8");
+  // Stamp instance UUID when running in instance mode
+  const scope = getActiveScope();
+  if (scope) file.metadata.instance_uuid = scope.uuid;
+  await writeFile(schedulesPath(), JSON.stringify(file, null, 2), "utf-8");
 }
 
 // ---------------------------------------------------------------------------
@@ -400,6 +403,7 @@ async function tick(): Promise<void> {
         success,
         result_summary: resultSummary,
         error: errorMsg,
+        ...(getActiveScope() && { instance_uuid: getActiveScope()!.uuid }),
       };
 
       // Update schedule metadata
@@ -517,6 +521,7 @@ export async function notifyCycleComplete(cycleNumber: number): Promise<void> {
         success,
         result_summary: resultSummary,
         error: errorMsg,
+        ...(getActiveScope() && { instance_uuid: getActiveScope()!.uuid }),
       };
 
       schedule.last_run_at = new Date().toISOString();
@@ -699,6 +704,7 @@ export async function runScheduleNow(scheduleId: string): Promise<ScheduleExecut
       success,
       result_summary: resultSummary,
       error: errorMsg,
+      ...(getActiveScope() && { instance_uuid: getActiveScope()!.uuid }),
     };
 
     schedule.last_run_at = new Date().toISOString();
@@ -779,8 +785,9 @@ export function startScheduler(cfg?: Partial<SchedulerConfig>): void {
     tickTimer.unref();
   }
 
+  const instanceTag = getActiveScope() ? ` [${getActiveScope()!.uuid.slice(0, 8)}]` : "";
   logger.info(
-    `Dream Scheduler started: tick=${config.tick_interval_ms}ms, ` +
+    `Dream Scheduler started${instanceTag}: tick=${config.tick_interval_ms}ms, ` +
     `max_runs/hr=${config.max_runs_per_hour}, cooldown=${config.global_cooldown_ms}ms`
   );
 }

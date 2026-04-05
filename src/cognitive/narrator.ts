@@ -25,9 +25,9 @@
 
 import { readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
 import { engine } from "./engine.js";
 import { logger } from "../utils/logger.js";
+import { dataPath } from "../utils/paths.js";
 import { DEFAULT_NARRATIVE_CONFIG } from "./types.js";
 import type {
   NarrativeDepth,
@@ -362,8 +362,7 @@ export async function generateNarrative(
 // v5.1 — Continuous Narrative Intelligence
 // ===========================================================================
 
-import { config as appConfig } from "../config/config.js";
-const STORY_PATH = resolve(appConfig.dataDir, "system_story.json");
+const storyPath = () => dataPath("system_story.json");
 
 let narrativeConfig: NarrativeConfig = { ...DEFAULT_NARRATIVE_CONFIG };
 let cyclesSinceLastChapter = 0;
@@ -391,8 +390,8 @@ function emptyStory(): SystemStoryFile {
 
 async function loadStory(): Promise<SystemStoryFile> {
   try {
-    if (!existsSync(STORY_PATH)) return emptyStory();
-    const raw = await readFile(STORY_PATH, "utf-8");
+    if (!existsSync(storyPath())) return emptyStory();
+    const raw = await readFile(storyPath(), "utf-8");
     const p = JSON.parse(raw);
     const e = emptyStory();
     return {
@@ -408,7 +407,7 @@ async function loadStory(): Promise<SystemStoryFile> {
 async function saveStory(story: SystemStoryFile): Promise<void> {
   story.metadata.total_chapters = story.chapters.length;
   story.metadata.last_updated = new Date().toISOString();
-  await writeFile(STORY_PATH, JSON.stringify(story, null, 2), "utf-8");
+  await writeFile(storyPath(), JSON.stringify(story, null, 2), "utf-8");
 }
 
 // ---------------------------------------------------------------------------

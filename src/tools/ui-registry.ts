@@ -15,9 +15,8 @@
 import { z } from "zod";
 import { readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { config } from "../config/config.js";
+import { dataPath } from "../utils/paths.js";
 import { success, error, safeExecute } from "../utils/errors.js";
 import { logger } from "../utils/logger.js";
 import { withFileLock } from "../utils/mutex.js";
@@ -36,7 +35,7 @@ import type {
 // Path resolution
 // ---------------------------------------------------------------------------
 
-const REGISTRY_PATH = resolve(config.dataDir, "ui_registry.json");
+const registryPath = () => dataPath("ui_registry.json");
 
 // ---------------------------------------------------------------------------
 // File I/O
@@ -44,8 +43,8 @@ const REGISTRY_PATH = resolve(config.dataDir, "ui_registry.json");
 
 async function loadRegistry(): Promise<UIRegistryFile> {
   try {
-    if (!existsSync(REGISTRY_PATH)) return emptyRegistry();
-    const raw = await readFile(REGISTRY_PATH, "utf-8");
+    if (!existsSync(registryPath())) return emptyRegistry();
+    const raw = await readFile(registryPath(), "utf-8");
     const parsed = JSON.parse(raw);
 
     // Defensive: guarantee the expected shape regardless of what is on disk.
@@ -75,7 +74,7 @@ async function saveRegistry(data: UIRegistryFile): Promise<void> {
   const categories = new Set(data.elements.map((e) => e.category));
   data.metadata.total_categories = categories.size;
   data.metadata.last_updated = new Date().toISOString();
-  await writeFile(REGISTRY_PATH, JSON.stringify(data, null, 2), "utf-8");
+  await writeFile(registryPath(), JSON.stringify(data, null, 2), "utf-8");
   logger.debug("UI registry saved to disk");
 }
 

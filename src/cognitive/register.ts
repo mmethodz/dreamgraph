@@ -35,9 +35,8 @@
 import { z } from "zod";
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { dataPath } from "../utils/paths.js";
 import { engine } from "./engine.js";
 import { dream } from "./dreamer.js";
 import { normalize } from "./normalizer.js";
@@ -466,22 +465,20 @@ export function registerCognitiveResources(server: McpServer): void {
 // Helpers — load ADR / UI registry files for resources
 // ---------------------------------------------------------------------------
 
-const cogProjectRoot = resolve(fileURLToPath(import.meta.url), "..", "..", "..");
-
 async function loadADRLogForResource(): Promise<unknown> {
-  const p = resolve(cogProjectRoot, "data", "adr_log.json");
+  const p = dataPath("adr_log.json");
   if (!existsSync(p)) return { metadata: { total_decisions: 0 }, decisions: [] };
   return JSON.parse(await readFile(p, "utf-8"));
 }
 
 async function loadUIRegistryForResource(): Promise<unknown> {
-  const p = resolve(cogProjectRoot, "data", "ui_registry.json");
+  const p = dataPath("ui_registry.json");
   if (!existsSync(p)) return { metadata: { total_elements: 0 }, elements: [] };
   return JSON.parse(await readFile(p, "utf-8"));
 }
 
 async function loadThreatLogForResource(): Promise<unknown> {
-  const p = resolve(cogProjectRoot, "data", "threat_log.json");
+  const p = dataPath("threat_log.json");
   if (!existsSync(p)) return { metadata: { total_threats: 0 }, threats: [] };
   return JSON.parse(await readFile(p, "utf-8"));
 }

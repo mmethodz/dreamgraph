@@ -2,7 +2,7 @@
   <img src="dreamgraph.jpeg" alt="DreamGraph - Autonomous Cognitive Layer" width="400" />
 </p>
 
-# DreamGraph v5.2 — Autonomous Cognitive Layer for Software Systems
+# DreamGraph v6.0 "La Catedral" — Autonomous Cognitive Layer for Software Systems
 
 Traditional AI systems answer questions. DreamGraph reduces uncertainty over time — it finds, verifies, and resolves problems in your system autonomously.
 
@@ -32,6 +32,7 @@ DreamGraph is a cognitive layer for software systems that continuously discovers
 - **Event-driven dreaming** — reactive cognition triggered by system changes
 - **Continuous narrative** — persistent, auto-accumulated system autobiography
 - **Dream scheduling** — policy-driven temporal orchestration for autonomous cognitive work
+- **Disciplinary execution** — self-imposed tool/data governance across five cognitive phases (v6.0 La Catedral)
 
 It is not a chatbot.
 
@@ -679,6 +680,50 @@ That's it. The cognitive engine takes over from there.
 
 ---
 
+## Instance Management CLI (`dg`)
+
+DreamGraph v6.0 ships a standalone `dg` binary for managing UUID-scoped instances from the terminal — no MCP server required.
+
+```bash
+# Create a new instance
+dg init --name my-project --policy balanced --project /path/to/repo
+
+# List all instances
+dg instances list
+
+# Switch the active instance in your shell
+eval $(dg instances switch my-project)           # POSIX
+Invoke-Expression (dg instances switch my-project) # PowerShell
+
+# Show cognitive state
+dg status
+
+# Attach/detach a project
+dg attach /path/to/repo --instance my-project
+dg detach --instance my-project
+
+# Fork an instance (full data copy)
+dg fork my-project --name experiment-1
+
+# Export data
+dg export my-project --format snapshot
+dg export my-project --format docs
+dg export my-project --format archetypes
+
+# Archive (preserve data, mark inactive)
+dg archive my-project
+
+# Destroy (permanent, interactive confirmation)
+dg destroy my-project
+
+# Migrate legacy flat data/ to UUID instance
+dg migrate --source ./data --name legacy-import
+```
+
+Run `dg --help` or `dg <command> --help` for full option details.
+
+---
+
 ## Feeding Your Own Knowledge Graph
 
 DreamGraph ships with a **bookstore example** so you can see it work immediately out of the box. To use it with your own system, you describe your system as structured JSON in the `data/` directory.
@@ -730,7 +775,9 @@ You can also skip the manual data step entirely and just point the agent at your
 | `DATABASE_URL` | No | PostgreSQL connection string for live DB schema queries via `query_db_schema`. Example: `postgresql://user:pass@host:5432/dbname` |
 | `DATABASE_SSL` | No | Set to `"false"` to disable SSL for local PostgreSQL. Default: SSL enabled |
 | `DREAMGRAPH_DEBUG` | No | Set to `"true"` for verbose stderr logging |
-| `DREAMGRAPH_DATA_DIR` | No | Custom data directory path (default: `data`) |
+| `DREAMGRAPH_DATA_DIR` | No | Custom data directory path (default: `data`). Legacy mode only. |
+| `DREAMGRAPH_INSTANCE_UUID` | No | UUID of the instance to load. Enables UUID-scoped instance mode (v6.0). |
+| `DREAMGRAPH_MASTER_DIR` | No | Master directory for all instances (default: `~/.dreamgraph`). |
 | `DREAMGRAPH_FEDERATION` | No | JSON config for multi-system federation: `{"instance_id": "my-project", "allow_export": true, "allow_import": true, "anonymize": true}` |
 | `DREAMGRAPH_RUNTIME_ENDPOINT` | No | URL of a runtime metrics endpoint (OpenTelemetry, Prometheus, or custom JSON). Example: `http://localhost:9090/api/v1/query` |
 | `DREAMGRAPH_RUNTIME_TYPE` | No | Metrics endpoint format: `"opentelemetry"`, `"prometheus"`, or `"custom_json"` (default: `"prometheus"`) |
@@ -767,6 +814,7 @@ None are required. Without `DREAMGRAPH_REPOS`, code/git tools will be unavailabl
         |  - Metacognitive tuning     |
         |  - Event-driven dreaming    |
         |  - Dream scheduling         |
+        |  - Discipline system (v6.0) |
         +--------------+--------------+
                        |
         +--------------v--------------+
@@ -811,8 +859,32 @@ src/
 │   ├── narrator.ts         # Dream Narratives (system autobiography + continuous story)
 │   ├── intervention.ts     # Intervention Engine (remediation plans)
 │   ├── metacognition.ts    # Metacognitive Self-Tuning Engine
-│   └── event-router.ts     # Event-Driven Dreaming (reactive cognition)
-│   └── scheduler.ts        # Dream Scheduler — policy-driven orchestration (v5.2)
+│   ├── event-router.ts     # Event-Driven Dreaming (reactive cognition)
+│   └── scheduler.ts        # Dream Scheduler — instance-aware orchestration (v5.2→v6.0)
+├── discipline/             # Self-imposed execution governance (v6.0 La Catedral)
+│   ├── types.ts            # Phase, tool class, protection types
+│   ├── state-machine.ts    # Five-phase state machine with transition rules
+│   ├── protection.ts       # Three-tier data file protection
+│   ├── manifest.ts         # 43-tool classification + phase permissions
+│   └── register.ts         # discipline://manifest resource + barrel exports
+├── instance/               # UUID-scoped instance architecture (v6.0 La Catedral)
+│   ├── types.ts            # Instance identity, registry, policy, config types
+│   ├── scope.ts            # InstanceScope — file-system isolation enforcement
+│   ├── registry.ts         # Master registry CRUD (~/.dreamgraph/instances.json)
+│   ├── lifecycle.ts        # Create, load, resolve, migrate instances
+│   ├── policies.ts         # policies.json parser, validator, runtime queries
+│   └── index.ts            # Barrel re-exports
+├── cli/                    # CLI instance manager — `dg` binary (v6.0 La Catedral)
+│   ├── dg.ts               # Entry point — arg tokenizer + command router
+│   └── commands/
+│       ├── init.ts         # dg init — create new instance
+│       ├── attach.ts       # dg attach / dg detach — project binding
+│       ├── instances.ts    # dg instances list / switch
+│       ├── status.ts       # dg status — cognitive state overview
+│       ├── lifecycle-ops.ts # dg archive / dg destroy
+│       ├── export.ts       # dg export — snapshot / docs / archetypes
+│       ├── fork.ts         # dg fork — copy instance with new UUID
+│       └── migrate.ts      # dg migrate — legacy data/ → UUID instance
 ├── tools/                  # MCP tools (senses)
 │   ├── code-senses.ts      # list_directory, read_source_code, create_file
 │   ├── git-senses.ts       # git_log, git_blame
@@ -829,15 +901,22 @@ src/
 │   └── query-resource.ts   # query_resource
 ├── resources/              # MCP resources (read-only context)
 ├── config/                 # Environment-driven configuration
-├── server/                 # MCP server bootstrap (stdio transport)
+├── server/                 # MCP server bootstrap (stdio + HTTP transport)
 ├── types/                  # Shared TypeScript type definitions
-└── utils/                  # Logger, cache, error helpers
+└── utils/                  # Logger, cache, mutex, paths, error helpers
+templates/
+└── default/                # Instance initialization seed data
+    ├── config/
+    │   └── policies.json   # Default discipline policies (strict/balanced/creative)
+    └── *.json              # 19 empty data stubs for new instances
+tests/
+└── instance-isolation.test.ts  # Instance boundary + policy validation tests (vitest)
 ```
 
 ### Data Directory
 
 ```
-data/
+data/                                   # Legacy mode (flat) or <instance>/data/ (UUID mode)
 ├── features.json           # Your system's features       (you populate)
 ├── data_model.json         # Your data entities            (you populate)
 ├── workflows.json          # Your workflows                (you populate)
@@ -852,11 +931,12 @@ data/
 ├── adr_log.json            # [runtime] Architecture Decision Records
 ├── ui_registry.json        # [runtime] Semantic UI element registry
 ├── threat_log.json         # [runtime] Adversarial scan results (NIGHTMARE)
-└── dream_archetypes.json   # [runtime] Federated dream archetypes
+├── dream_archetypes.json   # [runtime] Federated dream archetypes
 ├── meta_log.json           # [runtime] Metacognitive analysis audit trail
 ├── event_log.json          # [runtime] Cognitive event dispatch log
 ├── system_story.json       # [runtime] Persistent system autobiography
-└── schedules.json          # [runtime] Dream scheduler persistence (v5.2)```
+└── schedules.json          # [runtime] Dream scheduler persistence (v5.2)
+```
 
 ---
 
@@ -920,7 +1000,7 @@ data/
 | `generate_ui_migration_plan` | Gap analysis between source and target platforms with data contract summaries and complexity estimates |
 | `export_living_docs` | Export the knowledge graph as structured Markdown for Docusaurus, Nextra, MkDocs, or plain GitHub. Stateless and idempotent |
 
-### MCP Resources (15)
+### MCP Resources (16)
 
 Read-only views the agent can inspect at any time:
 
@@ -941,6 +1021,7 @@ Read-only views the agent can inspect at any time:
 | Story | `dream://story` | Persistent system autobiography — diff chapters, weekly digests, health trends |
 | Schedules | `dream://schedules` | Active dream schedules with status and next run time (v5.2) |
 | Schedule History | `dream://schedule-history` | Schedule execution history with outcomes (v5.2) |
+| Discipline Manifest | `discipline://manifest` | Tool classifications, phase permissions, data protection rules (v6.0 La Catedral) |
 
 ---
 
@@ -1148,6 +1229,8 @@ This project introduces a cognitive model with the following primitives:
 | **System Story** | The persistent, auto-accumulated autobiography (diff chapters + weekly digests) |
 | **Calibration Bucket** | A confidence range used to measure actual validation rates vs. thresholds |
 | **Dream Schedule** | A policy-driven rule that triggers cognitive actions automatically (interval, cron, cycle-based, or idle-based) |
+| **Discipline Manifest** | The self-imposed governance contract: tool classifications, phase permissions, and data protection tiers (v6.0 La Catedral) |
+| **La Catedral** | v6.0 release name — like Escobar's self-built prison, the system constructs its own confinement rules |
 
 You can think of DreamGraph as:
 

@@ -339,3 +339,22 @@ export {
   DEFAULT_SCHEDULER_CONFIG,
 } from "../cognitive/types.js";
 
+// ---------------------------------------------------------------------------
+// v6.0 — Discipline Execution System  (ADR-001 through ADR-005)
+// ---------------------------------------------------------------------------
+
+export type {
+  DisciplinePhase,
+  ToolClass,
+  ProtectionLevel,
+  ToolClassification,
+  PhasePermissions,
+  DataProtectionTier,
+  DataProtectionRule,
+  DisciplineManifest,
+  PhaseTransitionRule,
+  MandatoryToolRule,
+} from "../discipline/types.js";
+
+export { PHASE_ORDER } from "../discipline/types.js";
+

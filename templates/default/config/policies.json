@@ -1,0 +1,45 @@
+{
+  "schema_version": "1.0.0",
+  "profile": "balanced",
+  "profiles": {
+    "strict": {
+      "description": "Full disciplinary enforcement. No structural claims without tool evidence. All phases mandatory.",
+      "require_tool_evidence": true,
+      "require_plan_approval": true,
+      "block_unbacked_claims": true,
+      "allow_phase_skip": false,
+      "max_verify_loops": 3,
+      "allow_creative_mode": false,
+      "mandatory_ingest_tools": [
+        "read_source_code",
+        "query_ui_elements|search_data_model|get_workflow"
+      ],
+      "mandatory_verify_tools": ["read_source_code"],
+      "protected_file_tiers": ["forbidden", "tool_mediated", "seed_data"]
+    },
+    "balanced": {
+      "description": "Moderate enforcement. Tool evidence required for structural claims. Plan recommended but not blocked.",
+      "require_tool_evidence": true,
+      "require_plan_approval": false,
+      "block_unbacked_claims": false,
+      "allow_phase_skip": false,
+      "max_verify_loops": 5,
+      "allow_creative_mode": true,
+      "mandatory_ingest_tools": ["read_source_code"],
+      "mandatory_verify_tools": [],
+      "protected_file_tiers": ["forbidden", "tool_mediated"]
+    },
+    "creative": {
+      "description": "Minimal enforcement. Used for brainstorming, exploration, and dream cycles. Tools available but not mandatory.",
+      "require_tool_evidence": false,
+      "require_plan_approval": false,
+      "block_unbacked_claims": false,
+      "allow_phase_skip": true,
+      "max_verify_loops": 10,
+      "allow_creative_mode": true,
+      "mandatory_ingest_tools": [],
+      "mandatory_verify_tools": [],
+      "protected_file_tiers": ["forbidden"]
+    }
+  }
+}

@@ -6,7 +6,7 @@
 
 DreamGraph is a **cognitive dreaming engine** for MCP (Model Context Protocol) knowledge graphs. It speculatively discovers hidden connections, validates them against a fact graph, and builds a persistent, evolving understanding of the systems it observes.
 
-**Version:** 5.2.0  
+**Version:** 6.0.0 "La Catedral"  
 **License:** MIT  
 **Runtime:** Node.js (TypeScript, ES2022, Node16 modules)  
 **Transport:** STDIO (default) or Streamable HTTP (`--transport http`)
@@ -61,7 +61,7 @@ graph TB
     subgraph "MCP Protocol Layer"
         Server["MCP Server<br/>STDIO / Streamable HTTP"]
         Tools["43 Tools"]
-        Resources["15 Resources"]
+        Resources["16 Resources"]
     end
 
     subgraph "Cognitive Core"
@@ -184,9 +184,33 @@ src/
 │   ├── federation.ts        # Cross-project archetype exchange
 │   ├── metacognition.ts     # Metacognitive self-tuning (v5.1)
 │   ├── event-router.ts      # Event-driven dreaming (v5.1)
-│   ├── scheduler.ts         # Dream Scheduler — policy-driven orchestration (v5.2)
+│   ├── scheduler.ts         # Dream Scheduler — instance-aware orchestration (v5.2→v6.0)
 │   ├── types.ts             # All cognitive type definitions
 │   └── register.ts          # Tool/resource registration + post-cycle hooks
+├── discipline/              # Self-imposed execution governance (v6.0 La Catedral)
+│   ├── types.ts             # Phase, tool class, protection types
+│   ├── state-machine.ts     # Five-phase state machine with transition rules
+│   ├── protection.ts        # Three-tier data file protection
+│   ├── manifest.ts          # 43-tool classification + phase permissions
+│   └── register.ts          # discipline://manifest resource + barrel exports
+├── instance/                # UUID-scoped instance architecture (v6.0 La Catedral)
+│   ├── types.ts             # Instance identity, registry, policy, config types
+│   ├── scope.ts             # InstanceScope — file-system isolation enforcement
+│   ├── registry.ts          # Master registry CRUD (~/.dreamgraph/instances.json)
+│   ├── lifecycle.ts         # Create, load, resolve, migrate instances
+│   ├── policies.ts          # policies.json parser, validator, runtime queries
+│   └── index.ts             # Barrel re-exports
+├── cli/                     # CLI instance manager — `dg` binary (v6.0 La Catedral)
+│   ├── dg.ts                # Entry point — arg tokenizer + command router
+│   └── commands/
+│       ├── init.ts          # dg init — create new instance
+│       ├── attach.ts        # dg attach / dg detach — project binding
+│       ├── instances.ts     # dg instances list / switch
+│       ├── status.ts        # dg status — cognitive state overview
+│       ├── lifecycle-ops.ts # dg archive / dg destroy
+│       ├── export.ts        # dg export — snapshot / docs / archetypes
+│       ├── fork.ts          # dg fork — copy instance with new UUID
+│       └── migrate.ts       # dg migrate — legacy data/ → UUID instance
 ├── tools/
 │   ├── register.ts          # General tool registration
 │   ├── code-senses.ts       # File system read/write/list
@@ -207,15 +231,24 @@ src/
 ├── types/
 │   └── index.ts             # Re-exports
 └── utils/
-    ├── cache.ts             # In-memory JSON cache
+    ├── cache.ts             # In-memory JSON cache + pluggable dataDir resolver
     ├── errors.ts            # Error handling + response factories
-    └── logger.ts            # Stderr logger (protects STDIO stream)
+    ├── logger.ts            # Stderr logger (protects STDIO stream)
+    ├── mutex.ts             # Async file mutex with instance-aware key resolver
+    └── paths.ts             # Lazy dataPath() utility for instance-aware paths
+templates/
+└── default/                 # Instance initialization seed data
+    ├── config/
+    │   └── policies.json    # Default discipline policies (strict/balanced/creative)
+    └── *.json               # 19 empty data stubs for new instances
+tests/
+└── instance-isolation.test.ts  # Instance boundary + policy validation tests (vitest)
 ```
 
 ## Data Directory
 
 ```
-data/
+data/                                    # Legacy mode (flat) or <instance>/data/ (UUID mode)
 ├── system_overview.json     # Project description
 ├── features.json            # Feature entities + cross-links
 ├── workflows.json           # Operational workflows
@@ -229,6 +262,10 @@ data/
 ├── dream_history.json       # Full cycle audit trail
 ├── adr_log.json             # Architecture Decision Records
 ├── ui_registry.json         # Semantic UI elements
+├── threat_log.json          # Adversarial scan results (NIGHTMARE)
+├── dream_archetypes.json    # Federated dream archetypes
+├── meta_log.json            # Metacognitive analysis audit trail
+├── event_log.json           # Cognitive event dispatch log
 ├── system_story.json        # Auto-generated narrative (v5.1)
 └── schedules.json           # Dream Scheduler persistence (v5.2)
 ```
@@ -237,7 +274,9 @@ data/
 
 | Env Variable | Default | Description |
 |-------------|---------|-------------|
-| `DREAMGRAPH_DATA_DIR` | `./data` | Path to data directory |
+| `DREAMGRAPH_DATA_DIR` | `./data` | Path to data directory (legacy mode) |
+| `DREAMGRAPH_INSTANCE_UUID` | — | UUID of the instance to load (enables UUID mode) |
+| `DREAMGRAPH_MASTER_DIR` | `~/.dreamgraph` | Master directory for all instances |
 | `DREAMGRAPH_DEBUG` | `false` | Enable debug logging to stderr |
 | `DREAMGRAPH_FEDERATION` | `false` | Enable cross-project federation |
 | `DREAMGRAPH_EVENTS` | `true` | Enable event-driven dreaming (v5.1) |

@@ -6,6 +6,10 @@
  * A short MIN_CHECK_MS interval prevents excessive stat() calls during
  * rapid bursts within a single operation, while guaranteeing fresh data
  * between dream cycles (even back-to-back ones).
+ *
+ * v6.0 La Catedral: The cache resolves data files through a pluggable
+ * `resolveDataPath` function so it works in both legacy (flat data/)
+ * and UUID-scoped instance modes.
  */
 
 import { readFile, stat } from "node:fs/promises";
@@ -15,6 +19,21 @@ import { logger } from "./logger.js";
 
 /** Minimum milliseconds between mtime checks for the same file. */
 const MIN_CHECK_MS = 5_000;
+
+/**
+ * Pluggable data directory resolver.
+ * In legacy mode this returns config.dataDir.
+ * In instance mode, lifecycle.ts overrides it at startup.
+ */
+let dataDirResolver: () => string = () => config.dataDir;
+
+/**
+ * Set the data directory resolver.
+ * Called once at startup by the instance lifecycle module.
+ */
+export function setDataDirResolver(resolver: () => string): void {
+  dataDirResolver = resolver;
+}
 
 interface CacheEntry<T = unknown> {
   data: T;
@@ -30,7 +49,7 @@ const cache = new Map<string, CacheEntry>();
  * underlying file changes (detected via mtime).
  */
 export async function loadJsonData<T = unknown>(filename: string): Promise<T> {
-  const filePath = resolve(config.dataDir, filename);
+  const filePath = resolve(dataDirResolver(), filename);
   const now = Date.now();
   const entry = cache.get(filename) as CacheEntry<T> | undefined;
 

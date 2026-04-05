@@ -25,9 +25,8 @@
 
 import { readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { loadJsonArray } from "../utils/cache.js";
+import { dataPath } from "../utils/paths.js";
 import { engine } from "./engine.js";
 import { logger } from "../utils/logger.js";
 import type { Feature, Workflow, DataModelEntity } from "../types/index.js";
@@ -40,11 +39,10 @@ import type {
 } from "./types.js";
 
 // ---------------------------------------------------------------------------
-// Path resolution
+// Path resolution (lazy — resolved at call time for instance mode support)
 // ---------------------------------------------------------------------------
 
-const projectRoot = resolve(fileURLToPath(import.meta.url), "..", "..", "..");
-const THREAT_LOG_PATH = resolve(projectRoot, "data", "threat_log.json");
+const threatLogPath = () => dataPath("threat_log.json");
 
 // ---------------------------------------------------------------------------
 // Fact Graph Snapshot for Security Analysis
@@ -410,8 +408,8 @@ function scanBrokenAccessControl(
 
 async function loadThreatLog(): Promise<ThreatLogFile> {
   try {
-    if (!existsSync(THREAT_LOG_PATH)) return emptyThreatLog();
-    const raw = await readFile(THREAT_LOG_PATH, "utf-8");
+    if (!existsSync(threatLogPath())) return emptyThreatLog();
+    const raw = await readFile(threatLogPath(), "utf-8");
     const p = JSON.parse(raw);
     const e = emptyThreatLog();
     return {
@@ -425,7 +423,7 @@ async function loadThreatLog(): Promise<ThreatLogFile> {
 
 async function saveThreatLog(data: ThreatLogFile): Promise<void> {
   data.metadata.total_threats = data.threats.length;
-  await writeFile(THREAT_LOG_PATH, JSON.stringify(data, null, 2), "utf-8");
+  await writeFile(threatLogPath(), JSON.stringify(data, null, 2), "utf-8");
 }
 
 function emptyThreatLog(): ThreatLogFile {

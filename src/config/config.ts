@@ -77,7 +77,7 @@ export const config = {
   /** Server metadata */
   server: {
     name: "dreamgraph",
-    version: "5.2.0",
+    version: "6.0.0",
   },
 
   /**
@@ -103,13 +103,27 @@ export const config = {
     operationTimeoutMs: 10_000,
   },
 
-  /** Resolved absolute path to the data directory */
+  /**
+   * Resolved absolute path to the data directory.
+   * In legacy mode (no UUID), this is the primary data dir.
+   * In instance mode, this is overridden by getEffectiveDataDir().
+   */
   dataDir: resolveDataDir(),
 
   /** Environment flags */
   env: {
     /** Enable verbose stderr logging */
     debug: process.env.DREAMGRAPH_DEBUG === "true",
+  },
+
+  /**
+   * v6.0 La Catedral — Instance architecture configuration.
+   */
+  instance: {
+    /** UUID of the active instance (if running in instance mode). */
+    uuid: process.env.DREAMGRAPH_INSTANCE_UUID ?? null,
+    /** Master directory override. Default: ~/.dreamgraph/ */
+    masterDir: process.env.DREAMGRAPH_MASTER_DIR ?? null,
   },
 
   /** v5.1 — Event-driven dreaming configuration */
