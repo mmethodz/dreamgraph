@@ -32,6 +32,12 @@ Step-by-step flows for all **10 operational processes**: dream cycle, nightmare 
 ### [The DreamGraph Chronicle](narrative.md)
 The system's auto-generated autobiography — 6 chapters covering 60 dream cycles, cumulative statistics, weekly digest, and trend analysis. Written by DreamGraph about itself.
 
+### Real-World Case Studies
+The root [README](../README.md) includes three proof-of-concept stories:
+- **Wake-Up Report** — Overnight autonomous bug-hunting on a production B2B SaaS (15 cycles, 8 tensions resolved, 0 critical bugs remaining)
+- **The SiteLedger Story** — 1,243 dream cycles building a validated knowledge graph of a Finnish construction platform (491 connections, 32K edges rejected)
+- **Cross-Platform Transcompilation** — One knowledge graph, four platforms (MAUI mobile → WPF desktop → PySide6 desktop → CLI) with zero guidance and 100% behavioral integrity
+
 ---
 
 ## Quick Start

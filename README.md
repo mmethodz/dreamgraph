@@ -509,6 +509,49 @@ The machine hasn't finished learning. It never will. But it can now answer the q
 
 ---
 
+## Real-World Proof: Cross-Platform Transcompilation
+
+DreamGraph doesn't store code — it stores **intent and relationships**. This abstraction layer sits above any specific framework, which means a knowledge graph built from one platform can generate equivalent applications on entirely different stacks — with zero manual guidance.
+
+Starting from a .NET MAUI mobile app, DreamGraph was given single-sentence prompts: *"make this a desktop app"*, *"make this a Python desktop app"*, *"make this a command line app"*. Each time, it produced a fully working application that preserved 100% of the original's behavior — same 6-model fallback chain, same post-processing pipeline, same dark theme palette, same crop/zoom controls, same API key flow. Just different platform primitives.
+
+### Four platforms from one knowledge graph
+
+|                | MAUI Mobile        | WPF Desktop        | Python Desktop       | CLI                  |
+|----------------|--------------------|--------------------|----------------------|----------------------|
+| Language       | C#                 | C#                 | Python               | Python               |
+| UI Framework   | .NET MAUI          | WPF/XAML           | PySide6/Qt           | argparse             |
+| Image Pipeline | SkiaSharp          | SkiaSharp          | PIL + numpy          | PIL + numpy          |
+| HTTP           | HttpClient         | HttpClient         | requests             | requests             |
+| Settings       | Preferences.Default| JSON file          | JSON file            | JSON file            |
+| Styling        | MAUI Styles        | ResourceDictionary | QSS stylesheet       | N/A                  |
+| Async          | async/await        | async/await        | threading + Qt signals| synchronous          |
+
+### UI-to-CLI mapping
+
+The CLI version maps every UI element to a command-line argument — one file, works on first try:
+
+| UI Element                       | CLI Argument                           |
+|----------------------------------|----------------------------------------|
+| Prompt text box                  | positional `prompt`                    |
+| Enhance button                   | `--enhance`                            |
+| Aspect ratio dropdown            | `-a 16:9`                              |
+| High Resolution checkbox         | `--high-res`                           |
+| Generate button                  | *(just run it)*                        |
+| Brightness/Contrast/... sliders  | `--brightness 1.2` etc.               |
+| Crop button + drag handles       | `--crop file.png --cx --cy --cw --ch` |
+| Edit button                      | `--edit file.png`                      |
+| Save button                      | `-o output.png`                        |
+| Copy button                      | `--clipboard`                          |
+| Settings > API Key               | `--set-key` / `--show-key` / `--api-key` |
+| Prompt history list              | `--list-history` / `--clear-history`   |
+
+**Four platforms, one abstraction.** 10.4 seconds to a dragon on a coffee cup.
+
+The graph knew *what* the app does and *how* its components relate — not *how* it's coded. That's why it ports cleanly: the abstraction layer captures intent, not syntax.
+
+---
+
 ## Safety Model
 
 - **Read-only by default** — no automatic code modification unless you enable write tools
