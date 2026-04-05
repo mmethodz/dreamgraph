@@ -25,7 +25,7 @@
  * 7. Causal Replay — mine dream history for cause→effect chains
  */
 
-import { loadJsonData } from "../utils/cache.js";
+import { loadJsonArray } from "../utils/cache.js";
 import { logger } from "../utils/logger.js";
 import { engine } from "./engine.js";
 import { causalReplayDream } from "./causal.js";
@@ -68,9 +68,9 @@ interface FactSnapshot {
 /** Build a unified snapshot of the entire fact graph */
 async function buildFactSnapshot(): Promise<FactSnapshot> {
   const [features, workflows, dataModel] = await Promise.all([
-    loadJsonData<Feature[]>("features.json"),
-    loadJsonData<Workflow[]>("workflows.json"),
-    loadJsonData<DataModelEntity[]>("data_model.json"),
+    loadJsonArray<Feature>("features.json"),
+    loadJsonArray<Workflow>("workflows.json"),
+    loadJsonArray<DataModelEntity>("data_model.json"),
   ]);
 
   const entities = new Map<string, FactEntity>();

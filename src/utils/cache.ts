@@ -77,3 +77,36 @@ export function invalidateCache(filename?: string): void {
     cache.clear();
   }
 }
+
+/**
+ * Load a JSON file that is expected to be a flat array.
+ *
+ * Defensively coerces: if an agent wrote the file as a wrapper object
+ * (e.g. `{ "entities": [...] }` instead of `[...]`), we extract the
+ * first array-valued property. Returns an empty array on any failure.
+ *
+ * Use this for seed files: features.json, workflows.json, data_model.json.
+ */
+export async function loadJsonArray<T>(filename: string): Promise<T[]> {
+  try {
+    const raw = await loadJsonData<unknown>(filename);
+    if (Array.isArray(raw)) return raw as T[];
+
+    // Object wrapper — find the first array-valued property
+    if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+      for (const val of Object.values(raw as Record<string, unknown>)) {
+        if (Array.isArray(val)) {
+          logger.warn(
+            `${filename}: expected flat array, found wrapper object. Auto-extracting array property.`
+          );
+          return val as T[];
+        }
+      }
+    }
+
+    logger.warn(`${filename}: expected array, got ${typeof raw}. Returning [].`);
+    return [];
+  } catch {
+    return [];
+  }
+}

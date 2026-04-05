@@ -8,7 +8,7 @@
  */
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { loadJsonData } from "../utils/cache.js";
+import { loadJsonArray, loadJsonData } from "../utils/cache.js";
 import { logger } from "../utils/logger.js";
 import type {
   SystemOverview,
@@ -59,7 +59,7 @@ export function registerResources(server: McpServer): void {
     },
     async (uri) => {
       logger.debug(`Resource requested: ${uri.href}`);
-      const data = await loadJsonData<Feature[]>("features.json");
+      const data = await loadJsonArray<Feature>("features.json");
       return {
         contents: [
           {
@@ -85,7 +85,7 @@ export function registerResources(server: McpServer): void {
     },
     async (uri) => {
       logger.debug(`Resource requested: ${uri.href}`);
-      const data = await loadJsonData<Workflow[]>("workflows.json");
+      const data = await loadJsonArray<Workflow>("workflows.json");
       return {
         contents: [
           {
@@ -111,7 +111,7 @@ export function registerResources(server: McpServer): void {
     },
     async (uri) => {
       logger.debug(`Resource requested: ${uri.href}`);
-      const data = await loadJsonData<DataModelEntity[]>("data_model.json");
+      const data = await loadJsonArray<DataModelEntity>("data_model.json");
       return {
         contents: [
           {

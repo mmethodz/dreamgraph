@@ -25,7 +25,7 @@
  * NORMALIZING state is REQUIRED. Engine enforces this.
  */
 
-import { loadJsonData } from "../utils/cache.js";
+import { loadJsonArray } from "../utils/cache.js";
 import { logger } from "../utils/logger.js";
 import { engine } from "./engine.js";
 import type { Feature, Workflow, DataModelEntity } from "../types/index.js";
@@ -63,9 +63,9 @@ interface FactLookup {
 
 async function buildFactLookup(): Promise<FactLookup> {
   const [features, workflows, dataModel] = await Promise.all([
-    loadJsonData<Feature[]>("features.json"),
-    loadJsonData<Workflow[]>("workflows.json"),
-    loadJsonData<DataModelEntity[]>("data_model.json"),
+    loadJsonArray<Feature>("features.json"),
+    loadJsonArray<Workflow>("workflows.json"),
+    loadJsonArray<DataModelEntity>("data_model.json"),
   ]);
 
   const lookup: FactLookup = {

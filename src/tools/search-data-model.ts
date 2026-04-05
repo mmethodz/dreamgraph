@@ -11,7 +11,7 @@
 
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { loadJsonData } from "../utils/cache.js";
+import { loadJsonArray } from "../utils/cache.js";
 import { success, error, safeExecute } from "../utils/errors.js";
 import { logger } from "../utils/logger.js";
 import type { DataModelEntity, ToolResponse } from "../types/index.js";
@@ -36,7 +36,7 @@ export function registerSearchDataModelTool(server: McpServer): void {
       const result = await safeExecute<DataModelEntity>(
         async (): Promise<ToolResponse<DataModelEntity>> => {
           // READ-ONLY: Load data model from cached JSON data
-          const entities = await loadJsonData<DataModelEntity[]>("data_model.json");
+          const entities = await loadJsonArray<DataModelEntity>("data_model.json");
 
           const found = entities.find(
             (e) => e.id.toLowerCase() === entity.toLowerCase()

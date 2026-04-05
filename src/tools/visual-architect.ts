@@ -11,7 +11,7 @@
 
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { loadJsonData } from "../utils/cache.js";
+import { loadJsonArray } from "../utils/cache.js";
 import { engine } from "../cognitive/engine.js";
 import { success, error, safeExecute } from "../utils/errors.js";
 import { logger } from "../utils/logger.js";
@@ -82,7 +82,7 @@ async function generateWorkflowDiagram(
   targetIds: string[],
   direction: string
 ): Promise<GenerateVisualFlowOutput> {
-  const workflows = await loadJsonData<Workflow[]>("workflows.json");
+  const workflows = await loadJsonArray<Workflow>("workflows.json");
   const wf = workflows.find(
     (w) => targetIds.some((t) => w.id.toLowerCase() === t.toLowerCase())
   );
@@ -131,10 +131,9 @@ async function generateFeatureDepsDiagram(
   includeTensions: boolean,
   maxNodes: number
 ): Promise<GenerateVisualFlowOutput> {
-  const features = await loadJsonData<Feature[]>("features.json");
-  const dataModels = await loadJsonData<DataModelEntity[]>("data_model.json");
-  const workflows = await loadJsonData<Workflow[]>("workflows.json");
-
+  const features = await loadJsonArray<Feature>("features.json");
+  const dataModels = await loadJsonArray<DataModelEntity>("data_model.json");
+  const workflows = await loadJsonArray<Workflow>("workflows.json");
   // Build entity lookup
   const allEntities = new Map<string, { name: string; type: string }>();
   for (const f of features) allEntities.set(f.id, { name: f.name, type: "feature" });
@@ -297,8 +296,8 @@ async function generateDataFlowDiagram(
   direction: string,
   maxNodes: number
 ): Promise<GenerateVisualFlowOutput> {
-  const features = await loadJsonData<Feature[]>("features.json");
-  const dataModels = await loadJsonData<DataModelEntity[]>("data_model.json");
+  const features = await loadJsonArray<Feature>("features.json");
+  const dataModels = await loadJsonArray<DataModelEntity>("data_model.json");
 
   const allEntities = new Map<string, { name: string; type: string }>();
   for (const f of features) allEntities.set(f.id, { name: f.name, type: "feature" });
@@ -421,7 +420,7 @@ async function generateDomainOverviewDiagram(
   direction: string,
   maxNodes: number
 ): Promise<GenerateVisualFlowOutput> {
-  const features = await loadJsonData<Feature[]>("features.json");
+  const features = await loadJsonArray<Feature>("features.json");
 
   // Group by domain
   const byDomain = new Map<string, Feature[]>();

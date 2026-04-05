@@ -24,7 +24,7 @@
 
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { loadJsonData } from "../utils/cache.js";
+import { loadJsonArray } from "../utils/cache.js";
 import { success, error, safeExecute } from "../utils/errors.js";
 import { logger } from "../utils/logger.js";
 import type { Feature } from "../types/index.js";
@@ -253,7 +253,7 @@ async function analyzeRuntime(raw: RawMetrics): Promise<{
     .sort((a, b) => b.usage_score - a.usage_score);
 
   // Dead features: known features with zero or near-zero usage
-  const features = await loadJsonData<Feature[]>("features.json");
+  const features = await loadJsonArray<Feature>("features.json");
   const featureIds = new Set(features.map((f) => f.id));
   const activeEntities = new Set(
     Object.entries(raw)

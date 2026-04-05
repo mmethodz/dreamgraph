@@ -11,7 +11,7 @@
 
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { loadJsonData } from "../utils/cache.js";
+import { loadJsonArray } from "../utils/cache.js";
 import { success, error, safeExecute } from "../utils/errors.js";
 import { logger } from "../utils/logger.js";
 import type { Workflow, ToolResponse } from "../types/index.js";
@@ -35,7 +35,7 @@ export function registerGetWorkflowTool(server: McpServer): void {
 
       const result = await safeExecute<Workflow>(async (): Promise<ToolResponse<Workflow>> => {
         // READ-ONLY: Load workflows from cached JSON data
-        const workflows = await loadJsonData<Workflow[]>("workflows.json");
+        const workflows = await loadJsonArray<Workflow>("workflows.json");
 
         const workflow = workflows.find(
           (w) => w.id.toLowerCase() === name.toLowerCase()

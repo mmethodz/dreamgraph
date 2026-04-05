@@ -27,7 +27,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadJsonData } from "../utils/cache.js";
+import { loadJsonArray } from "../utils/cache.js";
 import { engine } from "./engine.js";
 import { logger } from "../utils/logger.js";
 import type { Feature, Workflow, DataModelEntity } from "../types/index.js";
@@ -73,9 +73,9 @@ interface SecurityEntity {
 
 async function buildSecuritySnapshot(): Promise<Map<string, SecurityEntity>> {
   const [features, workflows, dataModel] = await Promise.all([
-    loadJsonData<Feature[]>("features.json"),
-    loadJsonData<Workflow[]>("workflows.json"),
-    loadJsonData<DataModelEntity[]>("data_model.json"),
+    loadJsonArray<Feature>("features.json"),
+    loadJsonArray<Workflow>("workflows.json"),
+    loadJsonArray<DataModelEntity>("data_model.json"),
   ]);
 
   const entities = new Map<string, SecurityEntity>();

@@ -21,7 +21,7 @@ import { resolve, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { config } from "../config/config.js";
-import { loadJsonData } from "../utils/cache.js";
+import { loadJsonArray, loadJsonData } from "../utils/cache.js";
 import { success, safeExecute } from "../utils/errors.js";
 import { logger } from "../utils/logger.js";
 import type {
@@ -93,7 +93,7 @@ function warningCallout(format: LivingDocsFormat, text: string): string {
 
 async function loadFeatures(): Promise<Record<string, unknown>[]> {
   try {
-    return await loadJsonData<Record<string, unknown>[]>("features.json");
+    return await loadJsonArray<Record<string, unknown>>("features.json");
   } catch {
     return [];
   }
@@ -101,7 +101,7 @@ async function loadFeatures(): Promise<Record<string, unknown>[]> {
 
 async function loadDataModel(): Promise<Record<string, unknown>[]> {
   try {
-    return await loadJsonData<Record<string, unknown>[]>("data_model.json");
+    return await loadJsonArray<Record<string, unknown>>("data_model.json");
   } catch {
     return [];
   }
@@ -109,7 +109,7 @@ async function loadDataModel(): Promise<Record<string, unknown>[]> {
 
 async function loadWorkflows(): Promise<Record<string, unknown>[]> {
   try {
-    return await loadJsonData<Record<string, unknown>[]>("workflows.json");
+    return await loadJsonArray<Record<string, unknown>>("workflows.json");
   } catch {
     return [];
   }
