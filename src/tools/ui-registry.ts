@@ -45,7 +45,25 @@ async function loadRegistry(): Promise<UIRegistryFile> {
   try {
     if (!existsSync(REGISTRY_PATH)) return emptyRegistry();
     const raw = await readFile(REGISTRY_PATH, "utf-8");
-    return JSON.parse(raw) as UIRegistryFile;
+    const parsed = JSON.parse(raw);
+
+    // Defensive: guarantee the expected shape regardless of what is on disk.
+    // If an agent wrote a flat array or a differently-keyed object we still
+    // recover gracefully instead of crashing in saveRegistry / find().
+    const empty = emptyRegistry();
+    return {
+      metadata: {
+        ...empty.metadata,
+        ...(parsed.metadata && typeof parsed.metadata === "object"
+          ? parsed.metadata
+          : {}),
+      },
+      elements: Array.isArray(parsed.elements) ? parsed.elements : [],
+      ...(parsed._schema_notes &&
+        typeof parsed._schema_notes === "object" && {
+          _schema_notes: parsed._schema_notes,
+        }),
+    };
   } catch {
     return emptyRegistry();
   }

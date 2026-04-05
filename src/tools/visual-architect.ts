@@ -480,7 +480,22 @@ async function generateUICompositionDiagram(
   let registry: UIRegistryFile;
   try {
     const raw = await readFile(registryPath, "utf-8");
-    registry = JSON.parse(raw) as UIRegistryFile;
+    const parsed = JSON.parse(raw);
+
+    // Defensive: guarantee expected shape regardless of what is on disk.
+    registry = {
+      metadata: {
+        description: "Semantic UI Registry",
+        schema_version: "1.0.0",
+        total_elements: 0,
+        total_categories: 0,
+        last_updated: null,
+        ...(parsed.metadata && typeof parsed.metadata === "object"
+          ? parsed.metadata
+          : {}),
+      },
+      elements: Array.isArray(parsed.elements) ? parsed.elements : [],
+    };
   } catch {
     return {
       mermaid: `graph ${direction}\n    none["UI Registry is empty"]`,

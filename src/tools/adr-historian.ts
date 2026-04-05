@@ -44,7 +44,19 @@ async function loadADRLog(): Promise<ADRLogFile> {
   try {
     if (!existsSync(ADR_PATH)) return emptyADRLog();
     const raw = await readFile(ADR_PATH, "utf-8");
-    return JSON.parse(raw) as ADRLogFile;
+    const parsed = JSON.parse(raw);
+
+    // Defensive: guarantee expected shape regardless of what is on disk.
+    const empty = emptyADRLog();
+    return {
+      metadata: {
+        ...empty.metadata,
+        ...(parsed.metadata && typeof parsed.metadata === "object"
+          ? parsed.metadata
+          : {}),
+      },
+      decisions: Array.isArray(parsed.decisions) ? parsed.decisions : [],
+    };
   } catch {
     return emptyADRLog();
   }

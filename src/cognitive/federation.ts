@@ -132,7 +132,12 @@ async function loadArchetypes(): Promise<FederatedExchangeFile> {
   try {
     if (!existsSync(ARCHETYPES_PATH)) return emptyExchangeFile();
     const raw = await readFile(ARCHETYPES_PATH, "utf-8");
-    return JSON.parse(raw) as FederatedExchangeFile;
+    const p = JSON.parse(raw);
+    const e = emptyExchangeFile();
+    return {
+      metadata: { ...e.metadata, ...(p.metadata && typeof p.metadata === "object" ? p.metadata : {}) },
+      archetypes: Array.isArray(p.archetypes) ? p.archetypes : [],
+    };
   } catch {
     return emptyExchangeFile();
   }
@@ -226,7 +231,12 @@ export async function importArchetypes(
   }
 
   const raw = await readFile(filePath, "utf-8");
-  const incoming = JSON.parse(raw) as FederatedExchangeFile;
+  const p = JSON.parse(raw);
+  const e = emptyExchangeFile();
+  const incoming: FederatedExchangeFile = {
+    metadata: { ...e.metadata, ...(p.metadata && typeof p.metadata === "object" ? p.metadata : {}) },
+    archetypes: Array.isArray(p.archetypes) ? p.archetypes : [],
+  };
 
   // Load existing archetypes to deduplicate
   const existing = await loadArchetypes();

@@ -412,7 +412,12 @@ async function loadThreatLog(): Promise<ThreatLogFile> {
   try {
     if (!existsSync(THREAT_LOG_PATH)) return emptyThreatLog();
     const raw = await readFile(THREAT_LOG_PATH, "utf-8");
-    return JSON.parse(raw) as ThreatLogFile;
+    const p = JSON.parse(raw);
+    const e = emptyThreatLog();
+    return {
+      metadata: { ...e.metadata, ...(p.metadata && typeof p.metadata === "object" ? p.metadata : {}) },
+      threats: Array.isArray(p.threats) ? p.threats : [],
+    };
   } catch {
     return emptyThreatLog();
   }

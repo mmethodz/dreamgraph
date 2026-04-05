@@ -82,7 +82,13 @@ async function loadScheduleFile(): Promise<ScheduleFile> {
   try {
     if (!existsSync(SCHEDULES_PATH)) return emptyScheduleFile();
     const raw = await readFile(SCHEDULES_PATH, "utf-8");
-    return JSON.parse(raw) as ScheduleFile;
+    const p = JSON.parse(raw);
+    const e = emptyScheduleFile();
+    return {
+      metadata: { ...e.metadata, ...(p.metadata && typeof p.metadata === "object" ? p.metadata : {}) },
+      schedules: Array.isArray(p.schedules) ? p.schedules : [],
+      executions: Array.isArray(p.executions) ? p.executions : [],
+    };
   } catch {
     return emptyScheduleFile();
   }

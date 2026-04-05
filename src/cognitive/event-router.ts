@@ -71,7 +71,12 @@ async function loadEventLog(): Promise<EventLogFile> {
   try {
     if (!existsSync(EVENT_LOG_PATH)) return emptyEventLog();
     const raw = await readFile(EVENT_LOG_PATH, "utf-8");
-    return JSON.parse(raw) as EventLogFile;
+    const p = JSON.parse(raw);
+    const e = emptyEventLog();
+    return {
+      metadata: { ...e.metadata, ...(p.metadata && typeof p.metadata === "object" ? p.metadata : {}) },
+      events: Array.isArray(p.events) ? p.events : [],
+    };
   } catch {
     return emptyEventLog();
   }

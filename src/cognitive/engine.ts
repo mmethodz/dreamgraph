@@ -258,8 +258,33 @@ class CognitiveEngine {
   // -------------------------------------------------------------------------
 
   async loadDreamGraph(): Promise<DreamGraphFile> {
-    const raw = await readFile(DREAM_GRAPH_PATH, "utf-8");
-    return JSON.parse(raw) as DreamGraphFile;
+    try {
+      if (!existsSync(DREAM_GRAPH_PATH)) return this.emptyDreamGraphFile();
+      const raw = await readFile(DREAM_GRAPH_PATH, "utf-8");
+      const p = JSON.parse(raw);
+      const e = this.emptyDreamGraphFile();
+      return {
+        metadata: { ...e.metadata, ...(p.metadata && typeof p.metadata === "object" ? p.metadata : {}) },
+        nodes: Array.isArray(p.nodes) ? p.nodes : [],
+        edges: Array.isArray(p.edges) ? p.edges : [],
+      };
+    } catch {
+      return this.emptyDreamGraphFile();
+    }
+  }
+
+  private emptyDreamGraphFile(): DreamGraphFile {
+    return {
+      metadata: {
+        description: "Dream Graph — REM-generated speculative nodes and edges. UNTRUSTED.",
+        schema_version: "1.0.0",
+        last_dream_cycle: null,
+        total_cycles: this.totalDreamCycles,
+        created_at: new Date().toISOString(),
+      },
+      nodes: [],
+      edges: [],
+    };
   }
 
   async saveDreamGraph(data: DreamGraphFile): Promise<void> {
@@ -530,8 +555,31 @@ class CognitiveEngine {
   // -------------------------------------------------------------------------
 
   async loadCandidateEdges(): Promise<CandidateEdgesFile> {
-    const raw = await readFile(CANDIDATE_EDGES_PATH, "utf-8");
-    return JSON.parse(raw) as CandidateEdgesFile;
+    try {
+      if (!existsSync(CANDIDATE_EDGES_PATH)) return this.emptyCandidateEdgesFile();
+      const raw = await readFile(CANDIDATE_EDGES_PATH, "utf-8");
+      const p = JSON.parse(raw);
+      const e = this.emptyCandidateEdgesFile();
+      return {
+        metadata: { ...e.metadata, ...(p.metadata && typeof p.metadata === "object" ? p.metadata : {}) },
+        results: Array.isArray(p.results) ? p.results : [],
+      };
+    } catch {
+      return this.emptyCandidateEdgesFile();
+    }
+  }
+
+  private emptyCandidateEdgesFile(): CandidateEdgesFile {
+    return {
+      metadata: {
+        description: "Normalization results — validation judgments on dream artifacts.",
+        schema_version: "1.0.0",
+        last_normalization: null,
+        total_cycles: this.totalNormalizationCycles,
+        created_at: new Date().toISOString(),
+      },
+      results: [],
+    };
   }
 
   async saveCandidateEdges(data: CandidateEdgesFile): Promise<void> {
@@ -557,8 +605,31 @@ class CognitiveEngine {
   // -------------------------------------------------------------------------
 
   async loadValidatedEdges(): Promise<ValidatedEdgesFile> {
-    const raw = await readFile(VALIDATED_EDGES_PATH, "utf-8");
-    return JSON.parse(raw) as ValidatedEdgesFile;
+    try {
+      if (!existsSync(VALIDATED_EDGES_PATH)) return this.emptyValidatedEdgesFile();
+      const raw = await readFile(VALIDATED_EDGES_PATH, "utf-8");
+      const p = JSON.parse(raw);
+      const e = this.emptyValidatedEdgesFile();
+      return {
+        metadata: { ...e.metadata, ...(p.metadata && typeof p.metadata === "object" ? p.metadata : {}) },
+        edges: Array.isArray(p.edges) ? p.edges : [],
+      };
+    } catch {
+      return this.emptyValidatedEdgesFile();
+    }
+  }
+
+  private emptyValidatedEdgesFile(): ValidatedEdgesFile {
+    return {
+      metadata: {
+        description: "Validated edges — dream-originated connections that passed normalization.",
+        schema_version: "1.0.0",
+        last_validation: null,
+        total_validated: 0,
+        created_at: new Date().toISOString(),
+      },
+      edges: [],
+    };
   }
 
   async saveValidatedEdges(data: ValidatedEdgesFile): Promise<void> {
@@ -590,7 +661,13 @@ class CognitiveEngine {
         return this.emptyTensionFile();
       }
       const raw = await readFile(TENSION_PATH, "utf-8");
-      return JSON.parse(raw) as TensionFile;
+      const p = JSON.parse(raw);
+      const e = this.emptyTensionFile();
+      return {
+        metadata: { ...e.metadata, ...(p.metadata && typeof p.metadata === "object" ? p.metadata : {}) },
+        signals: Array.isArray(p.signals) ? p.signals : [],
+        resolved_tensions: Array.isArray(p.resolved_tensions) ? p.resolved_tensions : [],
+      };
     } catch {
       return this.emptyTensionFile();
     }
@@ -893,7 +970,12 @@ class CognitiveEngine {
         return this.emptyHistoryFile();
       }
       const raw = await readFile(HISTORY_PATH, "utf-8");
-      return JSON.parse(raw) as DreamHistoryFile;
+      const p = JSON.parse(raw);
+      const e = this.emptyHistoryFile();
+      return {
+        metadata: { ...e.metadata, ...(p.metadata && typeof p.metadata === "object" ? p.metadata : {}) },
+        sessions: Array.isArray(p.sessions) ? p.sessions : [],
+      };
     } catch {
       return this.emptyHistoryFile();
     }
@@ -924,51 +1006,17 @@ class CognitiveEngine {
   // -------------------------------------------------------------------------
 
   async clearDreamGraph(): Promise<void> {
-    const empty: DreamGraphFile = {
-      metadata: {
-        description:
-          "Dream Graph — REM-generated speculative nodes and edges. UNTRUSTED.",
-        schema_version: "1.0.0",
-        last_dream_cycle: null,
-        total_cycles: this.totalDreamCycles,
-        created_at: new Date().toISOString(),
-      },
-      nodes: [],
-      edges: [],
-    };
-    await this.saveDreamGraph(empty);
+    await this.saveDreamGraph(this.emptyDreamGraphFile());
     logger.info("Dream graph cleared");
   }
 
   async clearCandidateEdges(): Promise<void> {
-    const empty: CandidateEdgesFile = {
-      metadata: {
-        description:
-          "Normalization results — validation judgments on dream artifacts.",
-        schema_version: "1.0.0",
-        last_normalization: null,
-        total_cycles: this.totalNormalizationCycles,
-        created_at: new Date().toISOString(),
-      },
-      results: [],
-    };
-    await this.saveCandidateEdges(empty);
+    await this.saveCandidateEdges(this.emptyCandidateEdgesFile());
     logger.info("Candidate edges cleared");
   }
 
   async clearValidatedEdges(): Promise<void> {
-    const empty: ValidatedEdgesFile = {
-      metadata: {
-        description:
-          "Validated edges — dream-originated connections that passed normalization.",
-        schema_version: "1.0.0",
-        last_validation: null,
-        total_validated: 0,
-        created_at: new Date().toISOString(),
-      },
-      edges: [],
-    };
-    await this.saveValidatedEdges(empty);
+    await this.saveValidatedEdges(this.emptyValidatedEdgesFile());
     logger.info("Validated edges cleared");
   }
 

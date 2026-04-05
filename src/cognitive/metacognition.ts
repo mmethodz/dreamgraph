@@ -374,7 +374,12 @@ async function loadMetaLog(): Promise<MetaLogFile> {
   try {
     if (!existsSync(META_LOG_PATH)) return emptyMetaLog();
     const raw = await readFile(META_LOG_PATH, "utf-8");
-    return JSON.parse(raw) as MetaLogFile;
+    const p = JSON.parse(raw);
+    const e = emptyMetaLog();
+    return {
+      metadata: { ...e.metadata, ...(p.metadata && typeof p.metadata === "object" ? p.metadata : {}) },
+      entries: Array.isArray(p.entries) ? p.entries : [],
+    };
   } catch {
     return emptyMetaLog();
   }

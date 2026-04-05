@@ -393,7 +393,13 @@ async function loadStory(): Promise<SystemStoryFile> {
   try {
     if (!existsSync(STORY_PATH)) return emptyStory();
     const raw = await readFile(STORY_PATH, "utf-8");
-    return JSON.parse(raw) as SystemStoryFile;
+    const p = JSON.parse(raw);
+    const e = emptyStory();
+    return {
+      metadata: { ...e.metadata, ...(p.metadata && typeof p.metadata === "object" ? p.metadata : {}) },
+      chapters: Array.isArray(p.chapters) ? p.chapters : [],
+      digests: Array.isArray(p.digests) ? p.digests : [],
+    };
   } catch {
     return emptyStory();
   }
