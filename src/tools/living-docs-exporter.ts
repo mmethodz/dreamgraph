@@ -91,9 +91,19 @@ function warningCallout(format: LivingDocsFormat, text: string): string {
 // Data loaders (thin wrappers to handle missing files gracefully)
 // ---------------------------------------------------------------------------
 
+/**
+ * Detect init_graph template/schema stub entries.
+ * These contain `_schema`, `_fields`, or `_note` keys and must never
+ * appear in generated documentation.
+ */
+function isTemplateStub(obj: Record<string, unknown>): boolean {
+  return "_schema" in obj || "_fields" in obj || "_note" in obj;
+}
+
 async function loadFeatures(): Promise<Record<string, unknown>[]> {
   try {
-    return await loadJsonArray<Record<string, unknown>>("features.json");
+    const raw = await loadJsonArray<Record<string, unknown>>("features.json");
+    return raw.filter((e) => !isTemplateStub(e));
   } catch {
     return [];
   }
@@ -101,7 +111,8 @@ async function loadFeatures(): Promise<Record<string, unknown>[]> {
 
 async function loadDataModel(): Promise<Record<string, unknown>[]> {
   try {
-    return await loadJsonArray<Record<string, unknown>>("data_model.json");
+    const raw = await loadJsonArray<Record<string, unknown>>("data_model.json");
+    return raw.filter((e) => !isTemplateStub(e));
   } catch {
     return [];
   }
@@ -109,7 +120,8 @@ async function loadDataModel(): Promise<Record<string, unknown>[]> {
 
 async function loadWorkflows(): Promise<Record<string, unknown>[]> {
   try {
-    return await loadJsonArray<Record<string, unknown>>("workflows.json");
+    const raw = await loadJsonArray<Record<string, unknown>>("workflows.json");
+    return raw.filter((e) => !isTemplateStub(e));
   } catch {
     return [];
   }

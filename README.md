@@ -795,7 +795,7 @@ None are required. Without `DREAMGRAPH_REPOS` (and no instance-mode repos), code
 ```
                 +--------------+
                 |   MCP Layer  |
-                | (52 tools)   |
+                | (53 tools)   |
                 +------+-------+
                        |
         +--------------v--------------+
@@ -865,7 +865,7 @@ src/
 │   ├── types.ts            # Phase, tool class, protection, session types
 │   ├── state-machine.ts    # Five-phase state machine with transition rules
 │   ├── protection.ts       # Three-tier data file protection
-│   ├── manifest.ts         # 52-tool classification + phase permissions
+│   ├── manifest.ts         # 53-tool classification + phase permissions
 │   ├── register.ts         # discipline://manifest resource + tool registration + barrel exports
 │   ├── session.ts          # Task session lifecycle + disk persistence
 │   ├── prompts.ts          # Phase-specific system prompt templates
@@ -897,6 +897,7 @@ src/
 │   ├── db-senses.ts        # query_db_schema (any PostgreSQL database)
 │   ├── runtime-senses.ts   # query_runtime_metrics (OpenTelemetry / Prometheus)
 │   ├── solidify-insight.ts # solidify_cognitive_insight
+│   ├── enrich-seed-data.ts # enrich_seed_data (merge/replace seed data)
 │   ├── visual-architect.ts # generate_visual_flow (Mermaid diagrams)
 │   ├── adr-historian.ts    # record/query/deprecate architecture decisions
 │   ├── ui-registry.ts      # register/query UI elements, migration plans
@@ -946,7 +947,7 @@ data/                                   # Legacy mode (flat) or <instance>/data/
 
 ---
 
-## MCP Tools (52 total)
+## MCP Tools (53 total)
 
 ### Cognitive Tools (23)
 
@@ -976,7 +977,7 @@ data/                                   # Legacy mode (flat) or <instance>/data/
 | `delete_schedule` | Permanently remove a schedule |
 | `get_schedule_history` | Retrieve execution history for a schedule or all schedules |
 
-### Sense Tools (12)
+### Sense Tools (13)
 
 | Tool | Description |
 |---|---|
@@ -988,6 +989,7 @@ data/                                   # Legacy mode (flat) or <instance>/data/
 | `query_db_schema` | Live PostgreSQL schema queries: columns, constraints, indexes, foreign keys, RLS policies |
 | `fetch_web_page` | Fetch and convert web pages to markdown |
 | `solidify_cognitive_insight` | Persist a validated insight to the knowledge graph |
+| `enrich_seed_data` | Feed curated knowledge (features, workflows, data model) into the fact graph with merge or replace mode |
 | `get_workflow` | Retrieve a specific workflow by ID |
 | `search_data_model` | Search for a data entity by name |
 | `query_resource` | Query features, workflows, or data model with filters |

@@ -60,7 +60,7 @@ Speculative Edge → Normalization → Promotion Gate → Validated Edge
 graph TB
     subgraph "MCP Protocol Layer"
         Server["MCP Server<br/>STDIO / Streamable HTTP"]
-        Tools["52 Tools"]
+        Tools["53 Tools"]
         Resources["16 Resources"]
     end
 
@@ -191,7 +191,7 @@ src/
 │   ├── types.ts             # Phase, tool class, protection, session types
 │   ├── state-machine.ts     # Five-phase state machine with transition rules
 │   ├── protection.ts        # Three-tier data file protection
-│   ├── manifest.ts          # 52-tool classification + phase permissions
+│   ├── manifest.ts          # 53-tool classification + phase permissions
 │   ├── register.ts          # discipline://manifest resource + tool registration + barrel exports
 │   ├── session.ts           # Task session lifecycle + disk persistence
 │   ├── prompts.ts           # Phase-specific system prompt templates
@@ -224,6 +224,7 @@ src/
 │   ├── web-senses.ts        # Web page fetcher
 │   ├── runtime-senses.ts    # APM metrics integration
 │   ├── solidify-insight.ts  # Manual insight injection
+│   ├── enrich-seed-data.ts  # Seed data enrichment (merge/replace)
 │   ├── visual-architect.ts  # Mermaid diagram generation
 │   ├── adr-historian.ts     # Architecture Decision Records
 │   ├── ui-registry.ts       # Semantic UI element registry

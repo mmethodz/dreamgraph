@@ -1,6 +1,6 @@
 # DreamGraph Tools Reference
 
-> Complete catalog of all 52 MCP tools (23 cognitive + 20 general + 9 discipline) and 16 MCP resources.
+> Complete catalog of all 53 MCP tools (23 cognitive + 21 general + 9 discipline) and 16 MCP resources.
 
 ---
 
@@ -243,7 +243,7 @@ Retrieve execution history for a schedule or all schedules.
 
 ---
 
-## General Tools (20)
+## General Tools (21)
 
 Registered in [src/tools/register.ts](../src/tools/register.ts). These provide I/O, visualization, and documentation capabilities.
 
@@ -395,6 +395,26 @@ Write a subjective AI insight into cognitive memory. Enters normal decay → nor
 | `tensionLevel` | enum | no | `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` (TENSION only) |
 | `entityName` | string | no | Name (ENTITY only) |
 | `entityDescription` | string | no | Description (ENTITY only) |
+
+---
+
+### Seed Data Enrichment
+
+#### `enrich_seed_data`
+
+Feed curated knowledge into the fact graph. The LLM reads source code (via code senses) and calls this tool to push structured entity data to the server. The server validates structure, merges by ID (upsert) or replaces entirely, strips template stubs, and rebuilds the resource index.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `target` | enum | — | **Required.** `features`, `workflows`, `data_model` |
+| `entries` | array | — | **Required.** Array of entity objects (min 1). Each must have `id` and `name`. Structure depends on target. |
+| `mode` | enum | `merge` | `merge`: upsert by ID — preserves existing, updates matching, appends new. `replace`: wipe existing and write only incoming entries. |
+
+**Merge mode** (default): Existing entries are preserved. Entries with matching IDs are updated. New IDs are appended.
+
+**Replace mode**: All existing data is discarded. Only the validated incoming entries are written. Use when you have a complete, authoritative view and want to clean out stale `init_graph` data.
+
+Both modes auto-strip template stubs (`_schema`, `_fields`, `_note` entries), invalidate cache, and rebuild `index.json`.
 
 ---
 

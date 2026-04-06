@@ -13,10 +13,14 @@
  *   "workflows"    → workflows.json
  *   "data_model"   → data_model.json
  *
- * Merge strategy:
- *   - Upsert by `id` — if an entry with the same id exists, it is
- *     replaced with the new version.
- *   - New entries are appended.
+ * Modes:
+ *   "merge"   (default) — upsert by id; existing entries are preserved,
+ *             matching ids are updated, new ids are appended.
+ *   "replace" — wipe existing data and write only the incoming entries.
+ *             Use this when the LLM has a complete, authoritative view
+ *             and wants to do a clean replacement of stale init_graph data.
+ *
+ * Both modes:
  *   - Template/schema stubs (_schema, _fields, _note) are auto-removed.
  *   - The resource index (index.json) is rebuilt after every write.
  *   - Cache is invalidated so subsequent reads see fresh data.
@@ -218,6 +222,7 @@ async function writeSeed(filename: string, data: unknown): Promise<void> {
 interface EnrichResult {
   target: SeedTarget;
   file: string;
+  mode: "merge" | "replace";
   entries_received: number;
   entries_inserted: number;
   entries_updated: number;
@@ -238,7 +243,8 @@ export function registerEnrichSeedDataTool(server: McpServer): void {
     "to populate features, workflows, and data model entities. The server validates " +
     "structure, merges by ID (upsert), strips template stubs, and rebuilds the " +
     "resource index. Pass structured entity data — the server manages persistence. " +
-    "Call once per target or batch multiple entities in a single call.",
+    "Call once per target or batch multiple entities in a single call. " +
+    "Use mode='replace' to do a clean replacement when you have complete knowledge.",
     {
       target: z
         .enum(["features", "workflows", "data_model"])
@@ -251,9 +257,17 @@ export function registerEnrichSeedDataTool(server: McpServer): void {
           "Structure depends on target: features need category/tags/domain/keywords/links, " +
           "workflows need trigger/steps/domain, data_model needs table_name/storage/key_fields/relationships.",
         ),
+      mode: z
+        .enum(["merge", "replace"])
+        .default("merge")
+        .describe(
+          "merge (default): upsert by id — preserves existing entries, updates matching ids, appends new ones. " +
+          "replace: wipe existing data and write only the incoming entries. " +
+          "Use replace when you have a complete view and want to clean out stale init_graph entries.",
+        ),
     },
-    async ({ target, entries }) => {
-      logger.info(`enrich_seed_data: ${entries.length} entries for '${target}'`);
+    async ({ target, entries, mode }) => {
+      logger.info(`enrich_seed_data: ${entries.length} entries for '${target}' (mode=${mode})`);
 
       const result = await safeExecute<EnrichResult>(
         async (): Promise<ToolResponse<EnrichResult>> => {
@@ -315,16 +329,31 @@ export function registerEnrichSeedDataTool(server: McpServer): void {
             );
           }
 
-          // ----- Load existing, strip stubs, merge -----
+          // ----- Load existing, strip stubs, merge or replace -----
           type SeedEntity = Feature | Workflow | DataModelEntity;
-          const existing = stripTemplateStubs(
-            await loadJsonArray<SeedEntity>(filename),
-          );
 
-          const { merged, inserted, updated } = mergeById<SeedEntity>(
-            existing,
-            validated,
-          );
+          let merged: SeedEntity[];
+          let inserted: number;
+          let updated: number;
+
+          if (mode === "replace") {
+            // Clean replacement — ignore existing, write only validated entries
+            merged = validated;
+            inserted = validated.length;
+            updated = 0;
+            logger.info(
+              `enrich_seed_data: replace mode — discarding existing ${filename} data`,
+            );
+          } else {
+            // Merge mode — upsert by id
+            const existing = stripTemplateStubs(
+              await loadJsonArray<SeedEntity>(filename),
+            );
+            const mergeResult = mergeById<SeedEntity>(existing, validated);
+            merged = mergeResult.merged;
+            inserted = mergeResult.inserted;
+            updated = mergeResult.updated;
+          }
 
           // ----- Write merged data -----
           await writeSeed(filename, merged);
@@ -336,8 +365,9 @@ export function registerEnrichSeedDataTool(server: McpServer): void {
           const indexEntries = await rebuildIndex();
           logger.info(`enrich_seed_data: index rebuilt with ${indexEntries} entries`);
 
+          const modeLabel = mode === "replace" ? "Replaced" : "Enriched";
           const summary =
-            `Enriched ${target}: ${inserted} inserted, ${updated} updated, ${merged.length} total entries. ` +
+            `${modeLabel} ${target}: ${inserted} inserted, ${updated} updated, ${merged.length} total entries. ` +
             `Index: ${indexEntries} entries.` +
             (validationErrors.length > 0
               ? ` ${validationErrors.length} entries skipped (validation errors).`
@@ -346,6 +376,7 @@ export function registerEnrichSeedDataTool(server: McpServer): void {
           return success<EnrichResult>({
             target,
             file: filename,
+            mode,
             entries_received: entries.length,
             entries_inserted: inserted,
             entries_updated: updated,
