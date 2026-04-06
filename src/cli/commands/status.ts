@@ -40,6 +40,7 @@ Usage:
 Options:
   --instance <uuid|name>    Target instance (default: DREAMGRAPH_INSTANCE_UUID env)
   --master-dir <path>       Override master directory
+  --json                    Output structured JSON (for scripting)
 `);
     return;
   }
@@ -88,6 +89,56 @@ Options:
 
   // Gather daemon state (with crash detection per TDD Section 3.3)
   const daemon = await gatherDaemonState(instanceRoot, entry.uuid);
+
+  // --json: structured output for scripting
+  if (flags.json === true) {
+    const json = {
+      identity: {
+        uuid: instance.uuid,
+        name: instance.name,
+        version: instance.version,
+        status: entry.status,
+        mode: instance.mode,
+        policy: instance.policy_profile,
+        created_at: instance.created_at,
+        last_active_at: instance.last_active_at,
+      },
+      project: {
+        root: instance.project_root ?? null,
+        forked_from: instance.forked_from ?? null,
+      },
+      daemon: {
+        running: daemon.running,
+        pid: daemon.pid,
+        transport: daemon.transportRaw,
+        port: daemon.portNum,
+        uptime_ms: daemon.uptimeMs,
+        version: daemon.version === "(N/A)" ? null : daemon.version,
+        bin_path: daemon.binPath === "(N/A)" ? null : daemon.binPath,
+        log_file: daemon.logFile === "(N/A)" ? null : daemon.logFile,
+        log_bytes: daemon.logBytes,
+        crashed: daemon.crashed,
+        crashed_pid: daemon.crashedPid ?? null,
+      },
+      cognitive: {
+        dream_cycles: instance.total_dream_cycles,
+        tool_calls: instance.total_tool_calls,
+        graph_nodes: stats.graphNodes,
+        graph_edges: stats.graphEdges,
+        candidate_edges: stats.candidateEdges,
+        validated_edges: stats.validatedEdges,
+        tensions: stats.tensions,
+        adr_decisions: stats.adrDecisions,
+        ui_elements: stats.uiElements,
+      },
+      paths: {
+        instance_root: instanceRoot,
+        data_dir: dataDir,
+      },
+    };
+    console.log(JSON.stringify(json, null, 2));
+    return;
+  }
 
   console.log(`
 ╔══════════════════════════════════════════════════════════╗
@@ -224,13 +275,19 @@ async function gatherDataStats(dataDir: string): Promise<DataStats> {
 
 interface DaemonState {
   statusLine: string;
+  running: boolean;
+  pid: number | null;
   transport: string;
+  transportRaw: string | null;
   port: string;
+  portNum: number | null;
   uptime: string;
+  uptimeMs: number | null;
   version: string;
   binPath: string;
   logFile: string;
   logSize: string;
+  logBytes: number | null;
   crashed: boolean;
   crashedPid?: number;
   crashLogTail?: string;
@@ -242,13 +299,19 @@ async function gatherDaemonState(
 ): Promise<DaemonState> {
   const defaults: DaemonState = {
     statusLine: "○ No",
+    running: false,
+    pid: null,
     transport: "(N/A)",
+    transportRaw: null,
     port: "(N/A)",
+    portNum: null,
     uptime: "(N/A)",
+    uptimeMs: null,
     version: "(N/A)",
     binPath: "(N/A)",
     logFile: "(N/A)",
     logSize: "(N/A)",
+    logBytes: null,
     crashed: false,
   };
 
@@ -259,6 +322,7 @@ async function gatherDaemonState(
     try {
       const logStat = await stat(logPath);
       defaults.logSize = formatBytes(logStat.size);
+      defaults.logBytes = logStat.size;
     } catch {
       defaults.logSize = "unknown";
     }
@@ -275,8 +339,12 @@ async function gatherDaemonState(
     return {
       ...defaults,
       statusLine: `⚠ Crashed (was PID ${meta.pid})`,
+      running: false,
+      pid: meta.pid,
       transport: meta.transport === "http" ? "Streamable HTTP" : "stdio",
+      transportRaw: meta.transport,
       port: meta.port !== null ? String(meta.port) : "(N/A)",
+      portNum: meta.port,
       version: meta.version,
       binPath: meta.bin_path,
       crashed: true,
@@ -301,9 +369,14 @@ async function gatherDaemonState(
   return {
     ...defaults,
     statusLine: `● Yes (PID ${meta.pid})`,
+    running: true,
+    pid: meta.pid,
     transport: meta.transport === "http" ? "Streamable HTTP" : "stdio",
+    transportRaw: meta.transport,
     port: meta.port !== null ? String(meta.port) : "(N/A)",
+    portNum: meta.port,
     uptime: formatUptime(uptimeMs),
+    uptimeMs,
     version: meta.version,
     binPath: meta.bin_path,
     crashed: false,
