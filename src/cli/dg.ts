@@ -27,6 +27,9 @@ import { cmdArchive, cmdDestroy } from "./commands/lifecycle-ops.js";
 import { cmdExport } from "./commands/export.js";
 import { cmdFork } from "./commands/fork.js";
 import { cmdMigrate } from "./commands/migrate.js";
+import { cmdStart } from "./commands/start.js";
+import { cmdStop } from "./commands/stop.js";
+import { cmdRestart } from "./commands/restart.js";
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                           */
@@ -46,6 +49,9 @@ Commands:
   instances [list]            List all known instances
   instances switch <query>    Set the active instance for the current shell
   status                      Show instance cognitive state
+  start <query> [--http]      Start a daemon server process
+  stop <query> [--force]      Stop a running daemon process
+  restart <query>             Restart a daemon process
   archive <query>             Mark an instance as archived
   destroy <query> [--confirm] Permanently delete an instance
   export <query> --format <f> Export instance data (snapshot|docs|archetypes)
@@ -156,6 +162,18 @@ async function main(): Promise<void> {
 
       case "status":
         await cmdStatus(positional.slice(1), flags);
+        break;
+
+      case "start":
+        await cmdStart(positional.slice(1), flags);
+        break;
+
+      case "stop":
+        await cmdStop(positional.slice(1), flags);
+        break;
+
+      case "restart":
+        await cmdRestart(positional.slice(1), flags);
         break;
 
       case "archive":

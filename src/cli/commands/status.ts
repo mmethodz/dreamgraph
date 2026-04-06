@@ -6,7 +6,7 @@
  */
 
 import { resolve } from "node:path";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import {
   loadRegistry,
@@ -15,6 +15,16 @@ import {
 } from "../../instance/index.js";
 import type { DreamGraphInstance } from "../../instance/index.js";
 import type { ParsedArgs } from "../dg.js";
+import {
+  readServerMeta,
+  cleanRuntimeFiles,
+  isProcessAlive,
+  validateOwnership,
+  readLogTail,
+  serverLogPath,
+  formatUptime,
+  formatBytes,
+} from "../utils/daemon.js";
 
 export async function cmdStatus(
   _positional: string[],
@@ -76,6 +86,9 @@ Options:
   const dataDir = resolve(instanceRoot, "data");
   const stats = await gatherDataStats(dataDir);
 
+  // Gather daemon state (with crash detection per TDD Section 3.3)
+  const daemon = await gatherDaemonState(instanceRoot, entry.uuid);
+
   console.log(`
 ╔══════════════════════════════════════════════════════════╗
 ║  DreamGraph Instance Status                             ║
@@ -97,6 +110,17 @@ Options:
   Root:            ${instance.project_root ?? "(not attached)"}
   Forked From:     ${instance.forked_from ?? "(original)"}
 
+  Daemon
+  ────────────────────────────────────────
+  Running:         ${daemon.statusLine}
+  Transport:       ${daemon.transport}
+  Port:            ${daemon.port}
+  Uptime:          ${daemon.uptime}
+  Version:         ${daemon.version}
+  Bin Path:        ${daemon.binPath}
+  Log File:        ${daemon.logFile}
+  Log Size:        ${daemon.logSize}
+
   Cognitive State
   ────────────────────────────────────────
   Dream Cycles:    ${instance.total_dream_cycles}
@@ -114,6 +138,16 @@ Options:
   Instance Root:   ${instanceRoot}
   Data Dir:        ${dataDir}
 `);
+
+  // Show crash diagnostic if detected
+  if (daemon.crashed) {
+    console.log(`  ⚠ Server process (PID ${daemon.crashedPid}) is no longer running (crashed or killed)`);
+    if (daemon.crashLogTail) {
+      console.log("  Recent log output:");
+      console.log(daemon.crashLogTail.split("\n").map((l: string) => `    ${l}`).join("\n"));
+    }
+    console.log();
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -182,4 +216,96 @@ async function gatherDataStats(dataDir: string): Promise<DataStats> {
   if (ui?.elements) stats.uiElements = ui.elements.length;
 
   return stats;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Daemon state (TDD Section 3.3 with crash detection)               */
+/* ------------------------------------------------------------------ */
+
+interface DaemonState {
+  statusLine: string;
+  transport: string;
+  port: string;
+  uptime: string;
+  version: string;
+  binPath: string;
+  logFile: string;
+  logSize: string;
+  crashed: boolean;
+  crashedPid?: number;
+  crashLogTail?: string;
+}
+
+async function gatherDaemonState(
+  instanceRoot: string,
+  instanceUuid: string,
+): Promise<DaemonState> {
+  const defaults: DaemonState = {
+    statusLine: "○ No",
+    transport: "(N/A)",
+    port: "(N/A)",
+    uptime: "(N/A)",
+    version: "(N/A)",
+    binPath: "(N/A)",
+    logFile: "(N/A)",
+    logSize: "(N/A)",
+    crashed: false,
+  };
+
+  // Log file info (always show if exists)
+  const logPath = serverLogPath(instanceRoot);
+  if (existsSync(logPath)) {
+    defaults.logFile = logPath;
+    try {
+      const logStat = await stat(logPath);
+      defaults.logSize = formatBytes(logStat.size);
+    } catch {
+      defaults.logSize = "unknown";
+    }
+  }
+
+  const meta = await readServerMeta(instanceRoot);
+  if (!meta) return defaults;
+
+  // PID alive check + crash detection
+  if (!isProcessAlive(meta.pid)) {
+    // Crash detected — clean up stale files
+    const tail = await readLogTail(logPath, 10);
+    await cleanRuntimeFiles(instanceRoot);
+    return {
+      ...defaults,
+      statusLine: `⚠ Crashed (was PID ${meta.pid})`,
+      transport: meta.transport === "http" ? "Streamable HTTP" : "stdio",
+      port: meta.port !== null ? String(meta.port) : "(N/A)",
+      version: meta.version,
+      binPath: meta.bin_path,
+      crashed: true,
+      crashedPid: meta.pid,
+      crashLogTail: tail ?? undefined,
+    };
+  }
+
+  // Ownership validation
+  if (!validateOwnership(meta, instanceUuid)) {
+    await cleanRuntimeFiles(instanceRoot);
+    return {
+      ...defaults,
+      statusLine: `⚠ PID ${meta.pid} is not owned by this instance`,
+      crashed: true,
+      crashedPid: meta.pid,
+    };
+  }
+
+  // Running normally
+  const uptimeMs = Date.now() - new Date(meta.started_at).getTime();
+  return {
+    ...defaults,
+    statusLine: `● Yes (PID ${meta.pid})`,
+    transport: meta.transport === "http" ? "Streamable HTTP" : "stdio",
+    port: meta.port !== null ? String(meta.port) : "(N/A)",
+    uptime: formatUptime(uptimeMs),
+    version: meta.version,
+    binPath: meta.bin_path,
+    crashed: false,
+  };
 }
