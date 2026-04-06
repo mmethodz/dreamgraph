@@ -17,11 +17,12 @@
 import { z } from "zod";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { resolve, join, relative } from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolve, join, relative, isAbsolute } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { config } from "../config/config.js";
+import { getActiveScope } from "../instance/lifecycle.js";
 import { loadJsonArray, loadJsonData } from "../utils/cache.js";
+import { dataPath } from "../utils/paths.js";
 import { success, safeExecute } from "../utils/errors.js";
 import { logger } from "../utils/logger.js";
 import type {
@@ -38,7 +39,36 @@ import type {
 // Path resolution
 // ---------------------------------------------------------------------------
 
-const projectRoot = resolve(fileURLToPath(import.meta.url), "..", "..", "..");
+/**
+ * Resolve a user-supplied output directory to an absolute path.
+ *
+ * Resolution order:
+ *   1. If the path is already absolute → use as-is.
+ *   2. Instance mode with attached project → resolve against project root.
+ *   3. config.repos has entries → resolve against the first repo.
+ *   4. Fallback → resolve against CWD.
+ *
+ * This ensures the exporter writes into the *target project*, not
+ * into the MCP server's own installation directory.
+ */
+function resolveOutputDir(userPath: string): string {
+  if (isAbsolute(userPath)) return resolve(userPath);
+
+  // Instance mode — prefer the project root we are attached to
+  const scope = getActiveScope();
+  if (scope?.projectRoot) {
+    return resolve(scope.projectRoot, userPath);
+  }
+
+  // Legacy mode — first configured repo
+  const repoRoots = Object.values(config.repos);
+  if (repoRoots.length > 0) {
+    return resolve(repoRoots[0], userPath);
+  }
+
+  // Ultimate fallback: CWD
+  return resolve(userPath);
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -145,7 +175,7 @@ async function loadCapabilities(): Promise<Record<string, unknown>> {
 
 async function loadADRLog(): Promise<ADRLogFile> {
   try {
-    const p = resolve(config.dataDir, "adr_log.json");
+    const p = dataPath("adr_log.json");
     if (!existsSync(p))
       return {
         metadata: {
@@ -172,7 +202,7 @@ async function loadADRLog(): Promise<ADRLogFile> {
 
 async function loadUIRegistry(): Promise<UIRegistryFile> {
   try {
-    const p = resolve(config.dataDir, "ui_registry.json");
+    const p = dataPath("ui_registry.json");
     if (!existsSync(p))
       return {
         metadata: {
@@ -702,10 +732,38 @@ async function genIndex(
   sectionsExported: string[]
 ): Promise<FileBuffer[]> {
   const overview = await loadSystemOverview();
+
+  // Load actual entity counts — never trust the overview's stale description
+  const [features, dataModel, workflows] = await Promise.all([
+    loadFeatures(),
+    loadDataModel(),
+    loadWorkflows(),
+  ]);
+
   let md = frontmatter(fmt, "Documentation", 0);
   md += `# ${overview.name ?? "System Documentation"}\n\n`;
-  if (overview.description) md += `> ${overview.description}\n\n`;
+
+  // Render the overview description only if it does NOT contain
+  // stale init_graph counts (e.g. "10 features, 3 workflows…").
+  // When stale counts are detected we skip the blurb entirely and
+  // let the live summary table below speak for itself.
+  const desc = String(overview.description ?? "");
+  const looksStale = /\d+\s+(features?|workflows?|data\s*model)/i.test(desc);
+  if (desc && !looksStale) {
+    md += `> ${desc}\n\n`;
+  }
+
   md += `*Auto-generated living documentation. Last updated: ${new Date().toISOString()}*\n\n`;
+
+  // Live summary from actual enriched data
+  md += "## Knowledge Base Summary\n\n";
+  md += "| Category | Count |\n";
+  md += "|----------|-------|\n";
+  md += `| Features | ${features.length} |\n`;
+  md += `| Workflows | ${workflows.length} |\n`;
+  md += `| Data Model Entities | ${dataModel.length} |\n`;
+  md += "\n";
+
   md += "## Sections\n\n";
   const sectionLabels: Record<string, string> = {
     features: "Feature Catalog",
@@ -802,8 +860,9 @@ export function registerLivingDocsTools(server: McpServer): void {
           const diagrams = params.include_diagrams !== false; // default true
           const includeCognitive = params.include_cognitive === true;
 
-          // Resolve output dir
-          const outDir = resolve(projectRoot, params.output_dir);
+          // Resolve output dir against the attached project, not the server source
+          const outDir = resolveOutputDir(params.output_dir);
+          logger.info(`export_living_docs: output dir resolved to ${outDir}`);
 
           // Expand "all"
           let wanted = new Set<LivingDocsSection>(params.sections);

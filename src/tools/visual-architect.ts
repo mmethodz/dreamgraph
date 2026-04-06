@@ -12,6 +12,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { loadJsonArray } from "../utils/cache.js";
+import { dataPath } from "../utils/paths.js";
 import { engine } from "../cognitive/engine.js";
 import { success, error, safeExecute } from "../utils/errors.js";
 import { logger } from "../utils/logger.js";
@@ -471,10 +472,8 @@ async function generateUICompositionDiagram(
   direction: string
 ): Promise<GenerateVisualFlowOutput> {
   const { readFile } = await import("node:fs/promises");
-  const { resolve } = await import("node:path");
-  const { config } = await import("../config/config.js");
 
-  const registryPath = resolve(config.dataDir, "ui_registry.json");
+  const registryPath = dataPath("ui_registry.json");
 
   let registry: UIRegistryFile;
   try {
