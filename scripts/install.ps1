@@ -95,7 +95,10 @@ if ((Test-Path $DistTarget) -and -not $Force) {
 Write-Step "Building DreamGraph..."
 Push-Location $SourceDir
 try {
-    & npm run build
+    $prevPref = $ErrorActionPreference
+    $ErrorActionPreference = "SilentlyContinue"
+    & npm run build 2>&1 | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
+    $ErrorActionPreference = $prevPref
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Build failed with exit code $LASTEXITCODE"
         exit 1
@@ -144,10 +147,20 @@ Write-Ok "package.json created"
 Write-Host "  Installing dependencies..." -ForegroundColor Cyan
 Push-Location $BinDir
 try {
-    & npm install --omit=dev 2>&1 | Select-Object -Last 1
+    $prevPref = $ErrorActionPreference
+    $ErrorActionPreference = "SilentlyContinue"
+    $npmOut = & npm install --omit=dev 2>&1
+    $ErrorActionPreference = $prevPref
     if ($LASTEXITCODE -ne 0) {
-        Write-Error "npm install failed"
+        # Show full output on failure
+        $npmOut | ForEach-Object { Write-Host "    $_" -ForegroundColor Red }
+        Write-Error "npm install failed (exit code $LASTEXITCODE)"
         exit 1
+    }
+    # Show the summary line (last non-empty line from stdout)
+    $summary = ($npmOut | Where-Object { $_ -is [string] -and $_.Trim() }) | Select-Object -Last 1
+    if ($summary) {
+        Write-Host "  $summary" -ForegroundColor DarkGray
     }
     Write-Ok "Dependencies installed"
 } finally {
