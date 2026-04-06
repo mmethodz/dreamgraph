@@ -1,6 +1,6 @@
 # DreamGraph Tools Reference
 
-> Complete catalog of all 53 MCP tools (23 cognitive + 21 general + 9 discipline) and 16 MCP resources.
+> Complete catalog of all 54 MCP tools (23 cognitive + 22 general + 9 discipline) and 22 MCP resources.
 
 ---
 
@@ -243,7 +243,7 @@ Retrieve execution history for a schedule or all schedules.
 
 ---
 
-## General Tools (21)
+## General Tools (22)
 
 Registered in [src/tools/register.ts](../src/tools/register.ts). These provide I/O, visualization, and documentation capabilities.
 
@@ -349,6 +349,15 @@ Live observability metrics. Requires `DREAMGRAPH_RUNTIME_ENDPOINT`.
 ---
 
 ### Knowledge Tools
+
+#### `init_graph`
+
+Bootstrap the fact graph by scanning configured project repositories. Discovers features, workflows, and data model entities from source code and populates the seed data files. Run once for a new project, or when the fact graph is empty.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `repos` | string[] | all configured | Specific repo names to scan (from `DREAMGRAPH_REPOS` config). If omitted, scans all. |
+| `force` | boolean | false | If true, overwrites existing seed data. If false, skips if features.json already has real entries. |
 
 #### `get_workflow`
 
@@ -634,7 +643,7 @@ Complete or abandon the active discipline session.
 
 ---
 
-## MCP Resources (16)
+## MCP Resources (22)
 
 | URI | Description |
 |-----|-------------|
@@ -655,11 +664,13 @@ Complete or abandon the active discipline session.
 | `dream://schedule-history` | Schedule execution history (v5.2) |
 | `discipline://manifest` | Tool classifications, phase permissions, data protection rules (v6.0 La Catedral) |
 
-System resources (read via `query_resource`):
+System resources (registered in [src/resources/register.ts](../src/resources/register.ts)):
 
 | URI | Description |
 |-----|-------------|
+| `system://overview` | High-level system overview (repos, tech stacks, purpose) |
 | `system://features` | All features from fact graph |
-| `system://workflows` | All workflows |
-| `system://data-model` | All data entities |
-| `system://capabilities` | Server capabilities & strategies |
+| `system://workflows` | All operational workflows |
+| `system://data-model` | Entity definitions and relationships |
+| `system://capabilities` | Server capabilities, strategies & available tools |
+| `system://index` | Central entity index for fast lookup and cross-resource linking |

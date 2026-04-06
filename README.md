@@ -577,6 +577,16 @@ npm install
 npm run build
 ```
 
+For a global install with CLI shims on your PATH:
+
+```powershell
+# Windows
+.\scripts\install.ps1
+
+# Linux / macOS
+bash scripts/install.sh
+```
+
 ### 2. Connect to your IDE
 
 DreamGraph supports two transport modes:
@@ -680,9 +690,38 @@ That's it. The cognitive engine takes over from there.
 
 ---
 
+## Installation
+
+DreamGraph ships cross-platform install scripts that build from source, copy the runtime to `~/.dreamgraph/bin/`, and create `dg` / `dreamgraph` shims on your PATH.
+
+### Windows (PowerShell)
+
+```powershell
+.\scripts\install.ps1          # first install
+.\scripts\install.ps1 -Force   # upgrade / reinstall
+```
+
+### Linux / macOS (Bash)
+
+```bash
+bash scripts/install.sh          # first install
+bash scripts/install.sh --force  # upgrade / reinstall
+```
+
+After installation, `dg` and `dreamgraph` are available globally:
+
+```bash
+dg --version          # prints installed version + git hash
+dreamgraph --help     # server entry point
+```
+
+---
+
 ## Instance Management CLI (`dg`)
 
 DreamGraph v6.0 ships a standalone `dg` binary for managing UUID-scoped instances from the terminal — no MCP server required.
+
+### Instance Lifecycle
 
 ```bash
 # Create a new instance
@@ -695,7 +734,7 @@ dg instances list
 eval $(dg instances switch my-project)           # POSIX
 Invoke-Expression (dg instances switch my-project) # PowerShell
 
-# Show cognitive state
+# Show cognitive state (includes daemon status if running)
 dg status
 
 # Attach/detach a project
@@ -719,6 +758,39 @@ dg destroy my-project
 # Migrate legacy flat data/ to UUID instance
 dg migrate --source ./data --name legacy-import
 ```
+
+### Daemon Management (HTTP transport)
+
+Background daemons **require HTTP transport**. STDIO servers must run in `--foreground` mode (your MCP client manages the process).
+
+```bash
+# Start a background HTTP daemon (auto-reads transport/port from instance.json)
+dg start my-project
+
+# Start with explicit port
+dg start my-project --http --port 9000
+
+# Start in foreground (for stdio or debugging)
+dg start my-project --foreground
+
+# Stop gracefully (SIGTERM → wait → SIGKILL escalation)
+dg stop my-project
+
+# Force-kill immediately
+dg stop my-project --force
+
+# Restart (atomic stop → start)
+dg restart my-project
+```
+
+**Daemon features:**
+- PID tracking via `server.json` with ownership validation
+- Advisory start lock prevents double-spawn races
+- Port collision detection with auto-increment
+- Health check polling (GET `/health`, 15s timeout)
+- Log rotation (10 MB, 3 generations)
+- Version mismatch warnings (CLI vs installed runtime)
+- Graceful shutdown verification (checks scheduler stop marker in logs)
 
 Run `dg --help` or `dg <command> --help` for full option details.
 
@@ -795,7 +867,7 @@ None are required. Without `DREAMGRAPH_REPOS` (and no instance-mode repos), code
 ```
                 +--------------+
                 |   MCP Layer  |
-                | (53 tools)   |
+                | (54 tools)   |
                 +------+-------+
                        |
         +--------------v--------------+
@@ -881,23 +953,29 @@ src/
 │   └── index.ts            # Barrel re-exports
 ├── cli/                    # CLI instance manager — `dg` binary (v6.0 La Catedral)
 │   ├── dg.ts               # Entry point — arg tokenizer + command router
+│   ├── utils/
+│   │   └── daemon.ts       # Shared daemon utilities (PID, ports, health, locks, logs)
 │   └── commands/
 │       ├── init.ts         # dg init — create new instance
 │       ├── attach.ts       # dg attach / dg detach — project binding
 │       ├── instances.ts    # dg instances list / switch
-│       ├── status.ts       # dg status — cognitive state overview
+│       ├── status.ts       # dg status — cognitive state overview + daemon info
 │       ├── lifecycle-ops.ts # dg archive / dg destroy
 │       ├── export.ts       # dg export — snapshot / docs / archetypes
 │       ├── fork.ts         # dg fork — copy instance with new UUID
-│       └── migrate.ts      # dg migrate — legacy data/ → UUID instance
+│       ├── migrate.ts      # dg migrate — legacy data/ → UUID instance
+│       ├── start.ts        # dg start — spawn HTTP daemon or foreground server
+│       ├── stop.ts         # dg stop — graceful/forced shutdown
+│       └── restart.ts      # dg restart — atomic stop → start
 ├── tools/                  # MCP tools (senses)
 │   ├── code-senses.ts      # list_directory, read_source_code, create_file
 │   ├── git-senses.ts       # git_log, git_blame
 │   ├── web-senses.ts       # fetch_web_page
-│   ├── db-senses.ts        # query_db_schema (any PostgreSQL database)
+│   ├── db-senses.ts        # query_db_schema (lazy pg import for resilience)
 │   ├── runtime-senses.ts   # query_runtime_metrics (OpenTelemetry / Prometheus)
 │   ├── solidify-insight.ts # solidify_cognitive_insight
 │   ├── enrich-seed-data.ts # enrich_seed_data (merge/replace seed data)
+│   ├── init-graph.ts       # init_graph (bootstrap knowledge graph from source)
 │   ├── visual-architect.ts # generate_visual_flow (Mermaid diagrams)
 │   ├── adr-historian.ts    # record/query/deprecate architecture decisions
 │   ├── ui-registry.ts      # register/query UI elements, migration plans
@@ -905,11 +983,24 @@ src/
 │   ├── get-workflow.ts     # get_workflow
 │   ├── search-data-model.ts # search_data_model
 │   └── query-resource.ts   # query_resource
-├── resources/              # MCP resources (read-only context)
-├── config/                 # Environment-driven configuration
-├── server/                 # MCP server bootstrap (stdio + HTTP transport)
-├── types/                  # Shared TypeScript type definitions
-└── utils/                  # Logger, cache, mutex, paths, error helpers
+├── resources/
+│   └── register.ts          # 6 system:// MCP resources
+├── config/
+│   └── config.ts            # Environment-driven configuration + env var parsing
+├── server/
+│   └── server.ts            # McpServer factory (stdio + HTTP, graceful shutdown)
+├── types/
+│   └── index.ts             # Shared TypeScript type definitions
+└── utils/
+    ├── cache.ts             # In-memory JSON cache + pluggable dataDir resolver
+    ├── errors.ts            # Error handling + response factories
+    ├── logger.ts            # Stderr logger (protects STDIO stream)
+    ├── mutex.ts             # Async file mutex with instance-aware key resolver
+    └── paths.ts             # Lazy dataPath() utility for instance-aware paths
+scripts/
+├── install.ps1              # Windows PowerShell global installer
+├── install.sh               # Linux/macOS Bash global installer
+└── enrich-graph.mjs         # Seed graph enrichment helper
 templates/
 └── default/                # Instance initialization seed data
     ├── config/
@@ -947,7 +1038,7 @@ data/                                   # Legacy mode (flat) or <instance>/data/
 
 ---
 
-## MCP Tools (53 total)
+## MCP Tools (54 total)
 
 ### Cognitive Tools (23)
 
@@ -977,7 +1068,7 @@ data/                                   # Legacy mode (flat) or <instance>/data/
 | `delete_schedule` | Permanently remove a schedule |
 | `get_schedule_history` | Retrieve execution history for a schedule or all schedules |
 
-### Sense Tools (13)
+### Sense & Knowledge Tools (14)
 
 | Tool | Description |
 |---|---|
@@ -986,10 +1077,11 @@ data/                                   # Legacy mode (flat) or <instance>/data/
 | `create_file` | Create or overwrite files inside configured repos (auto-creates parent directories) |
 | `git_log` | Commit history for a file or directory |
 | `git_blame` | Per-line authorship for a file |
-| `query_db_schema` | Live PostgreSQL schema queries: columns, constraints, indexes, foreign keys, RLS policies |
+| `query_db_schema` | Live PostgreSQL schema queries (lazy pg import — server starts even without `pg` module) |
 | `fetch_web_page` | Fetch and convert web pages to markdown |
 | `solidify_cognitive_insight` | Persist a validated insight to the knowledge graph |
 | `enrich_seed_data` | Feed curated knowledge (features, workflows, data model) into the fact graph with merge or replace mode |
+| `init_graph` | Bootstrap a knowledge graph from source code — scans repos and builds seed data |
 | `get_workflow` | Retrieve a specific workflow by ID |
 | `search_data_model` | Search for a data entity by name |
 | `query_resource` | Query features, workflows, or data model with filters |
@@ -1022,7 +1114,7 @@ data/                                   # Legacy mode (flat) or <instance>/data/
 | `discipline_verify` | Generate a verification report with regression detection and compliance scoring |
 | `discipline_complete_session` | Complete or abandon the active session with final status |
 
-### MCP Resources (16)
+### MCP Resources (22)
 
 Read-only views the agent can inspect at any time:
 
@@ -1044,6 +1136,12 @@ Read-only views the agent can inspect at any time:
 | Schedules | `dream://schedules` | Active dream schedules with status and next run time (v5.2) |
 | Schedule History | `dream://schedule-history` | Schedule execution history with outcomes (v5.2) |
 | Discipline Manifest | `discipline://manifest` | Tool classifications, phase permissions, data protection rules (v6.0 La Catedral) |
+| System Overview | `system://overview` | High-level system description, repos, tech stack |
+| System Features | `system://features` | All features from fact graph |
+| System Workflows | `system://workflows` | All workflows |
+| System Data Model | `system://data-model` | All data entities |
+| System Capabilities | `system://capabilities` | Server self-description — available tools, strategies, resources |
+| System Index | `system://index` | Entity ID → URI lookup for cross-resource linking |
 
 ---
 

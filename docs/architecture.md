@@ -60,8 +60,8 @@ Speculative Edge → Normalization → Promotion Gate → Validated Edge
 graph TB
     subgraph "MCP Protocol Layer"
         Server["MCP Server<br/>STDIO / Streamable HTTP"]
-        Tools["53 Tools"]
-        Resources["16 Resources"]
+        Tools["54 Tools"]
+        Resources["22 Resources"]
     end
 
     subgraph "Cognitive Core"
@@ -207,24 +207,30 @@ src/
 │   └── index.ts             # Barrel re-exports
 ├── cli/                     # CLI instance manager — `dg` binary (v6.0 La Catedral)
 │   ├── dg.ts                # Entry point — arg tokenizer + command router
+│   ├── utils/
+│   │   └── daemon.ts        # Shared daemon utilities (PID, ports, health, locks, logs)
 │   └── commands/
 │       ├── init.ts          # dg init — create new instance
 │       ├── attach.ts        # dg attach / dg detach — project binding
 │       ├── instances.ts     # dg instances list / switch
-│       ├── status.ts        # dg status — cognitive state overview
+│       ├── status.ts        # dg status — cognitive state overview + daemon info
 │       ├── lifecycle-ops.ts # dg archive / dg destroy
 │       ├── export.ts        # dg export — snapshot / docs / archetypes
 │       ├── fork.ts          # dg fork — copy instance with new UUID
-│       └── migrate.ts       # dg migrate — legacy data/ → UUID instance
+│       ├── migrate.ts       # dg migrate — legacy data/ → UUID instance
+│       ├── start.ts         # dg start — spawn HTTP daemon or foreground server
+│       ├── stop.ts          # dg stop — graceful/forced shutdown
+│       └── restart.ts       # dg restart — atomic stop → start
 ├── tools/
 │   ├── register.ts          # General tool registration
 │   ├── code-senses.ts       # File system read/write/list
 │   ├── git-senses.ts        # Git log/blame
-│   ├── db-senses.ts         # PostgreSQL schema inspector
+│   ├── db-senses.ts         # PostgreSQL schema inspector (lazy pg import)
 │   ├── web-senses.ts        # Web page fetcher
 │   ├── runtime-senses.ts    # APM metrics integration
 │   ├── solidify-insight.ts  # Manual insight injection
 │   ├── enrich-seed-data.ts  # Seed data enrichment (merge/replace)
+│   ├── init-graph.ts        # Bootstrap knowledge graph from source
 │   ├── visual-architect.ts  # Mermaid diagram generation
 │   ├── adr-historian.ts     # Architecture Decision Records
 │   ├── ui-registry.ts       # Semantic UI element registry
@@ -233,7 +239,7 @@ src/
 │   ├── search-data-model.ts # Data model search tool
 │   └── query-resource.ts    # Generic URI-based query
 ├── resources/
-│   └── register.ts          # MCP resource registration
+│   └── register.ts          # 6 system:// MCP resources
 ├── types/
 │   └── index.ts             # Re-exports
 └── utils/
@@ -242,6 +248,10 @@ src/
     ├── logger.ts            # Stderr logger (protects STDIO stream)
     ├── mutex.ts             # Async file mutex with instance-aware key resolver
     └── paths.ts             # Lazy dataPath() utility for instance-aware paths
+scripts/
+├── install.ps1              # Windows PowerShell global installer
+├── install.sh               # Linux/macOS Bash global installer
+└── enrich-graph.mjs         # Seed graph enrichment helper
 templates/
 └── default/                 # Instance initialization seed data
     ├── config/

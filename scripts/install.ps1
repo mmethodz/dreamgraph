@@ -143,8 +143,12 @@ $binPkgJson = $binPkg | ConvertTo-Json -Depth 10
 Set-Content -Path (Join-Path $BinDir "package.json") -Value $binPkgJson -Encoding UTF8
 Write-Ok "package.json created"
 
-# Install production deps
+# Install production deps (clean first to avoid hoisting artifacts)
 Write-Host "  Installing dependencies..." -ForegroundColor Cyan
+$nodeModulesDir = Join-Path $BinDir "node_modules"
+if (Test-Path $nodeModulesDir) {
+    Remove-Item -Recurse -Force $nodeModulesDir
+}
 Push-Location $BinDir
 try {
     $prevPref = $ErrorActionPreference

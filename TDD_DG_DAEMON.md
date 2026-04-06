@@ -1,6 +1,6 @@
 # TDD: `dg start/stop` Daemon Management & Global Binary Installation
 
-**DreamGraph v6.1.0 "La Catedral"**
+**DreamGraph v6.0.0 "La Catedral"**
 **Status:** Implementation-Ready
 **Date:** 2026-04-06
 
@@ -98,7 +98,7 @@ Source repo (dreamgraph/)
    - Compare against CLI's own version (`config.server.version`)
    - If mismatch → print warning:
      ```
-     ⚠ CLI version (6.2.0) differs from installed runtime (6.1.0)
+     ⚠ CLI version (6.1.0) differs from installed runtime (6.0.0)
        Run install script to update, or use --foreground for local dev.
      ```
    - Continue (warning only, not blocking)
@@ -145,7 +145,7 @@ Source repo (dreamgraph/)
       "transport": "http",
       "port": 8100,
       "started_at": "2026-04-06T10:30:00.000Z",
-      "version": "6.1.0"
+      "version": "6.0.0"
     }
     ```
 11. If HTTP mode, health-check loop:
@@ -166,7 +166,7 @@ Source repo (dreamgraph/)
       "transport": "http",
       "port": 8100,
       "bin_path": "/home/user/.dreamgraph/bin/dist/index.js",
-      "version": "6.1.0"
+      "version": "6.0.0"
     }
     ```
     When `--json` is set, suppress all human-readable output; emit only the JSON object to stdout.
@@ -260,7 +260,7 @@ Source repo (dreamgraph/)
   "transport": "http",
   "port": 8100,
   "started_at": "2026-04-06T10:30:00.000Z",
-  "version": "6.1.0"
+  "version": "6.0.0"
 }
 ```
 
@@ -305,7 +305,7 @@ Extend `dg status` to show daemon state **and auto-detect crashes**:
   Transport:       Streamable HTTP         ← or "stdio"
   Port:            8100                    ← or "(N/A)"
   Uptime:          2h 34m                  ← computed from server.json started_at
-  Version:         6.1.0                   ← from server.json
+  Version:         6.0.0                   ← from server.json
   Bin Path:        ~/.dreamgraph/bin/...   ← from server.json
   Log File:        ~/.dreamgraph/<uuid>/logs/server.log
   Log Size:        2.4 MB                  ← helps monitor rotation needs
@@ -552,7 +552,7 @@ Write `~/.dreamgraph/bin/version.json` during install:
 
 ```json
 {
-  "version": "6.1.0",
+  "version": "6.0.0",
   "installed_at": "2025-07-15T10:30:00.000Z",
   "source": "C:\\Users\\Mika Jussila\\source\\repos\\dreamgraph",
   "node_version": "v22.15.0"
@@ -1142,7 +1142,7 @@ export function resolveInstanceForCommand(
 - Update `README.md` — new commands in tool table, env vars
 - Update `docs/tools-reference.md` — CLI section
 - Update `docs/architecture.md` — global bin layout diagram
-- Version bump to 6.1.0
+- Version matches 6.0.0
 
 ---
 
@@ -1361,8 +1361,8 @@ dg stop my-project --json
 - [ ] `tests/daemon-integration.test.ts` — Integration tests for start/stop/status lifecycle (15 scenarios)
 
 **Phase 6 — Documentation & Versioning:**
-- [ ] `package.json` version → 6.1.0
-- [ ] `src/config/config.ts` version → 6.1.0
+- [ ] `package.json` version verified at 6.0.0
+- [ ] `src/config/config.ts` version verified at 6.0.0
 - [ ] `README.md` — CLI commands, env vars, architecture, `--json` flag
 - [ ] `docs/architecture.md` — Global bin layout, source layout, `server.json` schema
 - [ ] `docs/tools-reference.md` — CLI reference section

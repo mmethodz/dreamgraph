@@ -1,6 +1,6 @@
 # DreamGraph Workflows
 
-> Step-by-step flows for all 10 operational processes.
+> Step-by-step flows for all 13 operational processes.
 
 ---
 
@@ -196,3 +196,62 @@ candidate → [normalization] → validated (promoted)
 | 6 | Error handling | On failure: increment `error_streak`. If streak ≥ 3, auto-pause schedule (status: `paused`). On success: reset `error_streak` to 0. |
 | 7 | Completion check | If `run_count` ≥ `max_runs`, set status to `completed` and disable schedule. |
 | 8 | Persist | Write updated schedule state to `data/schedules.json`. |
+
+---
+
+## 11. Global Install (`global_install_flow`)
+
+**Cross-platform install from source to `~/.dreamgraph/bin/`.**
+
+**Trigger:** `scripts/install.ps1` (Windows) or `scripts/install.sh` (macOS/Linux)  
+**Source:** [scripts/install.ps1](../scripts/install.ps1), [scripts/install.sh](../scripts/install.sh)
+
+| Step | Name | Description |
+|------|------|-------------|
+| 1 | Build | Run `npm run build` to compile TypeScript to `dist/`. |
+| 2 | Create bin dir | Ensure `~/.dreamgraph/bin/` exists. |
+| 3 | Clean node_modules | Remove existing `~/.dreamgraph/bin/node_modules/` to avoid stale deps. |
+| 4 | Copy dist | Mirror `dist/` into `~/.dreamgraph/bin/dist/`. |
+| 5 | Copy package files | Copy `package.json` and `package-lock.json` for npm install. |
+| 6 | Install production deps | Run `npm install --omit=dev` inside `~/.dreamgraph/bin/`. |
+| 7 | Write version.json | Stamp `{ version, builtAt, sourceDir }`. |
+| 8 | Create shims | Platform-specific: `.ps1` shim on Windows, symlink on POSIX, both pointing to `dist/cli/dg.js`. |
+
+---
+
+## 12. Daemon Start (`daemon_start_flow`)
+
+**Start a DreamGraph daemon process for an instance.**
+
+**Trigger:** `dg start [instance]` CLI command  
+**Source:** [src/cli/commands/start.ts](../src/cli/commands/start.ts)
+
+| Step | Name | Description |
+|------|------|-------------|
+| 1 | Resolve instance | Look up instance directory from name/UUID. Load `instance.json`. |
+| 2 | Check already running | Read PID from metadata; verify process alive. Abort if already running. |
+| 3 | Read transport | Read `transport` from `instance.json` (default: `http`). |
+| 4 | Parse flags | Check `--foreground`, `--port`, `--verbose`. |
+| 5 | Guard stdio | If transport is `stdio` and `--foreground` not set, throw error with 3 suggested alternatives. |
+| 6 | Port collision check | If HTTP, verify port is free; auto-increment if occupied. |
+| 7 | Spawn daemon | Fork `node dist/index.js` detached with env vars, stdout/stderr → log files. |
+| 8 | Write metadata | Write PID, port, transport, startedAt to instance metadata. |
+| 9 | Health check | Poll HTTP endpoint (up to 15 s). Confirm server is responsive. |
+
+---
+
+## 13. Daemon Stop (`daemon_stop_flow`)
+
+**Gracefully stop a running DreamGraph daemon.**
+
+**Trigger:** `dg stop [instance]` CLI command  
+**Source:** [src/cli/commands/stop.ts](../src/cli/commands/stop.ts)
+
+| Step | Name | Description |
+|------|------|-------------|
+| 1 | Resolve PID | Load instance metadata, read daemon PID. |
+| 2 | Validate ownership | Confirm PID belongs to a DreamGraph process. |
+| 3 | Send signal | Send SIGTERM (POSIX) or `taskkill` (Windows). |
+| 4 | Wait for exit | Poll process status up to timeout (default 10 s). |
+| 5 | Verify shutdown | Check process is gone. Server logs "Shutdown complete" with 200 ms flush. |
+| 6 | Clean metadata | Remove PID and port from instance metadata files. |

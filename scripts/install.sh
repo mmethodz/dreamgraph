@@ -123,8 +123,9 @@ node -e "
 "
 ok "package.json created"
 
-# Install production deps
+# Install production deps (clean first to avoid hoisting artifacts)
 echo -e "  ${CYAN}Installing dependencies...${NC}"
+[[ -d "$BIN_DIR/node_modules" ]] && rm -rf "$BIN_DIR/node_modules"
 (cd "$BIN_DIR" && npm install --omit=dev --loglevel=warn 2>&1 | tail -1)
 ok "Dependencies installed"
 

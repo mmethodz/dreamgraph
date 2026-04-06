@@ -44,15 +44,15 @@ export function createServer(): McpServer {
   // v5.2 — Start the dream scheduler
   startScheduler(config.scheduler);
 
-  // Clean shutdown
-  process.on("SIGINT", () => {
+  // Clean shutdown — flush logs before exiting so daemon can verify
+  const gracefulExit = () => {
     stopScheduler();
-    process.exit(0);
-  });
-  process.on("SIGTERM", () => {
-    stopScheduler();
-    process.exit(0);
-  });
+    logger.info("Shutdown complete");
+    // Allow stderr to flush to the log file descriptor before exiting
+    setTimeout(() => process.exit(0), 200);
+  };
+  process.on("SIGINT", gracefulExit);
+  process.on("SIGTERM", gracefulExit);
 
   return server;
 }

@@ -23,7 +23,6 @@
  * It does NOT modify any data, tables, or schema.
  */
 
-import pg from "pg";
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { config } from "../config/config.js";
@@ -31,25 +30,34 @@ import { success, error, safeExecute } from "../utils/errors.js";
 import { logger } from "../utils/logger.js";
 import type { ToolResponse } from "../types/index.js";
 
-const { Pool } = pg;
+// Lazy-import pg so the server doesn't crash if the pg module is
+// broken or missing (it's only needed when DATABASE_URL is set).
+let Pool: typeof import("pg").default.Pool;
 
 // ---------------------------------------------------------------------------
 // Connection pool (lazy singleton)
 // ---------------------------------------------------------------------------
 
-let pool: pg.Pool | null = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let pool: any = null;
 
 /** Track consecutive failures for automatic pool recovery. */
 let consecutiveFailures = 0;
 const MAX_CONSECUTIVE_FAILURES = 3;
 
-function createPool(): pg.Pool {
+async function createPool(): Promise<import("pg").default.Pool> {
   if (!config.database.connectionString) {
     throw new Error(
       "DATABASE_URL environment variable is not set. " +
         "Set it to your PostgreSQL connection string " +
         "(e.g. postgresql://user:password@host:5432/dbname)."
     );
+  }
+
+  // Lazy-load pg on first use
+  if (!Pool) {
+    const pg = await import("pg");
+    Pool = pg.default.Pool;
   }
 
   const newPool = new Pool({
@@ -82,9 +90,9 @@ function createPool(): pg.Pool {
   return newPool;
 }
 
-function getPool(): pg.Pool {
+async function getPool(): Promise<InstanceType<typeof Pool>> {
   if (!pool) {
-    pool = createPool();
+    pool = await createPool();
   }
   return pool;
 }
@@ -112,13 +120,13 @@ async function resetPool(): Promise<void> {
  * connection acquisition AND query execution together exceed the budget.
  */
 async function queryWithTimeout(
-  dbPool: pg.Pool,
+  dbPool: InstanceType<typeof Pool>,
   sql: string,
   params: string[]
-): Promise<pg.QueryResult> {
+): Promise<{ rows: Record<string, unknown>[] }> {
   const timeoutMs = config.database.operationTimeoutMs;
 
-  return new Promise<pg.QueryResult>((resolve, reject) => {
+  return new Promise<{ rows: Record<string, unknown>[] }>((resolve, reject) => {
     const timer = setTimeout(() => {
       reject(
         new Error(
@@ -359,9 +367,9 @@ export function registerDbSensesTools(server: McpServer): void {
             );
           }
 
-          let dbPool: pg.Pool;
+          let dbPool: InstanceType<typeof Pool>;
           try {
-            dbPool = getPool();
+            dbPool = await getPool();
           } catch (err) {
             return error(
               "NO_CONNECTION",

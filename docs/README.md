@@ -21,7 +21,7 @@ System overview, cognitive states, state machine, promotion pipeline, feature de
 How the engine thinks: state machine internals, 8 dream strategies, normalization pipeline, speculative memory lifecycle, tension system, adversarial dreaming, causal/temporal analysis, v5.1 capabilities (metacognitive self-tuning, event-driven dreaming, continuous narrative), and v5.2 dream scheduling.
 
 ### [Tools Reference](tools-reference.md)
-Complete catalog of all **53 MCP tools** (23 cognitive + 21 general + 9 discipline) and **16 MCP resources**, with parameters, types, defaults, and descriptions.
+Complete catalog of all **54 MCP tools** (23 cognitive + 22 general + 9 discipline) and **22 MCP resources**, with parameters, types, defaults, and descriptions.
 
 ### [Data Model](data-model.md)
 All **13 data stores**: dream graph, candidate edges, validated edges, tension log, dream history, threat log, archetypes, ADR log, UI registry, fact graph, capabilities, system story, and schedules. Full schemas and relationship map.
@@ -44,10 +44,24 @@ The root [README](../README.md) includes three proof-of-concept stories:
 
 ### Installation
 
+**From source (dev mode):**
+
 ```bash
 npm install
 npm run build
 ```
+
+**Global install (adds `dg` and `dreamgraph` to PATH):**
+
+```powershell
+# Windows PowerShell
+.\scripts\install.ps1
+
+# Linux / macOS
+bash scripts/install.sh
+```
+
+After global install, `dg --version` and `dreamgraph --help` work from any directory.
 
 ### MCP Configuration
 
@@ -120,12 +134,13 @@ get_system_narrative(depth="technical")
 | Metric | Value |
 |--------|-------|
 | Validated connections | 280+ |
-| Dream strategies | 8 |
-| MCP tools | 53 |
-| MCP resources | 16 |
-| Data stores | 13 |
-| Workflows | 10 |
-| Features | 27 |
+| Dream strategies | 7 |
+| MCP tools | 54 |
+| MCP resources | 22 |
+| Data stores | 19 |
+| Workflows | 13 |
+| Features | 36 |
+| CLI commands | 14 |
 | Promotion threshold | 0.62 confidence |
 | Calibrated accuracy | 97.5%+ above threshold |
 
