@@ -28,6 +28,7 @@ import { resolve } from "node:path";
 import { config as appConfig } from "../config/config.js";
 import { logger } from "../utils/logger.js";
 import { dataPath } from "../utils/paths.js";
+import { getActiveCognitiveTuning } from "../instance/index.js";
 import type {
   CognitiveStateName,
   CognitiveState,
@@ -125,6 +126,23 @@ class CognitiveEngine {
     this.state = "rem";
     this.lastStateChange = new Date().toISOString();
     logger.info("Cognitive state: AWAKE → REM (dreaming begins)");
+  }
+
+  /**
+   * Apply cognitive tuning from the active policy profile.
+   * Must be called after state transitions to sync decay/promotion config.
+   * Safe to call multiple times — idempotent.
+   */
+  async applyCognitiveTuning(): Promise<void> {
+    const tuning = await getActiveCognitiveTuning();
+    this.decayConfig = {
+      ttl: tuning.decay_ttl,
+      decay_rate: tuning.decay_rate,
+    };
+    logger.debug(
+      `Cognitive tuning applied: ttl=${tuning.decay_ttl}, decay_rate=${tuning.decay_rate}, ` +
+      `promotion_confidence=${tuning.promotion_confidence}, evidence_count=${tuning.promotion_evidence_count}`
+    );
   }
 
   /** Transition: REM → NORMALIZING */
@@ -1133,7 +1151,21 @@ class CognitiveEngine {
       tension_stats: tensionStats,
       last_dream_cycle: this.lastDreamCycle,
       last_normalization: this.lastNormalization,
-      promotion_config: DEFAULT_PROMOTION,
+      promotion_config: await (async () => {
+        try {
+          const tuning = await getActiveCognitiveTuning();
+          return {
+            promotion_confidence: tuning.promotion_confidence,
+            promotion_plausibility: tuning.promotion_plausibility,
+            promotion_evidence: tuning.promotion_evidence,
+            promotion_evidence_count: tuning.promotion_evidence_count,
+            retention_plausibility: tuning.retention_plausibility,
+            max_contradiction: tuning.max_contradiction,
+          };
+        } catch {
+          return DEFAULT_PROMOTION;
+        }
+      })(),
       decay_config: this.decayConfig,
     };
   }

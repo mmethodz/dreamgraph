@@ -108,6 +108,16 @@ const DEFAULT_POLICIES: PoliciesFile = {
       ],
       mandatory_verify_tools: ["read_source_code"],
       protected_file_tiers: ["forbidden", "tool_mediated", "seed_data"],
+      cognitive_tuning: {
+        promotion_confidence: 0.62,
+        promotion_plausibility: 0.45,
+        promotion_evidence: 0.4,
+        promotion_evidence_count: 2,
+        retention_plausibility: 0.35,
+        max_contradiction: 0.3,
+        decay_ttl: 8,
+        decay_rate: 0.05,
+      },
     },
     balanced: {
       description:
@@ -121,6 +131,16 @@ const DEFAULT_POLICIES: PoliciesFile = {
       mandatory_ingest_tools: ["read_source_code"],
       mandatory_verify_tools: [],
       protected_file_tiers: ["forbidden", "tool_mediated"],
+      cognitive_tuning: {
+        promotion_confidence: 0.55,
+        promotion_plausibility: 0.40,
+        promotion_evidence: 0.35,
+        promotion_evidence_count: 1,
+        retention_plausibility: 0.30,
+        max_contradiction: 0.35,
+        decay_ttl: 10,
+        decay_rate: 0.04,
+      },
     },
     creative: {
       description:
@@ -134,6 +154,16 @@ const DEFAULT_POLICIES: PoliciesFile = {
       mandatory_ingest_tools: [],
       mandatory_verify_tools: [],
       protected_file_tiers: ["forbidden"],
+      cognitive_tuning: {
+        promotion_confidence: 0.45,
+        promotion_plausibility: 0.35,
+        promotion_evidence: 0.25,
+        promotion_evidence_count: 1,
+        retention_plausibility: 0.25,
+        max_contradiction: 0.4,
+        decay_ttl: 12,
+        decay_rate: 0.03,
+      },
     },
   },
 };
@@ -347,7 +377,7 @@ export async function resolveInstanceAtStartup(): Promise<InstanceScope | null> 
   }
 
   try {
-    const { scope } = await loadInstance(uuid);
+    const { instance, scope } = await loadInstance(uuid);
     activeScope = scope;
 
     // Wire the cache, path resolver, and mutex key resolver for instance mode
@@ -355,7 +385,22 @@ export async function resolveInstanceAtStartup(): Promise<InstanceScope | null> 
     setDataDirOverride(scope.dataDir);
     setMutexKeyResolver((key) => scope.mutexKey(key));
 
+    // Merge instance repos into config.repos so all tools can discover them.
+    // mcp.json repos take precedence, then project_root as fallback default.
+    for (const [name, repoPath] of Object.entries(scope.repos)) {
+      config.repos[name] = repoPath;
+    }
+    // If project_root is set but no repos are configured, auto-register it
+    if (instance.project_root && Object.keys(config.repos).length === 0) {
+      const basename = instance.project_root.replace(/\\/g, "/").split("/").pop() ?? "project";
+      config.repos[basename] = instance.project_root;
+      logger.info(`Auto-registered project_root as repo '${basename}': ${instance.project_root}`);
+    }
+
     logger.info(`Instance mode activated: ${scope}`);
+    if (Object.keys(config.repos).length > 0) {
+      logger.info(`Repos available: ${Object.keys(config.repos).join(", ")}`);
+    }
     return scope;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

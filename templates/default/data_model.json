@@ -1,1 +1,41 @@
-[]
+[
+  {
+    "_schema": "DataModelEntity — each entry describes a data store or persistent structure",
+    "_fields": {
+      "id": "snake_case unique identifier (e.g. 'users_table', 'dream_graph_store')",
+      "name": "Human-readable entity name",
+      "description": "What data this entity holds and how it is used",
+      "table_name": "Database table name (or JSON filename for file-based stores)",
+      "storage": "Storage type: 'postgresql' | 'json_file' | 'sqlite' | 'redis' etc.",
+      "source_repo": "Repository name from DREAMGRAPH_REPOS config",
+      "source_files": ["Relative paths to schema/migration/model files"],
+      "domain": "Business/technical domain",
+      "keywords": ["Terms for dreamer discovery"],
+      "status": "active | planned | deprecated",
+      "key_fields": [
+        {
+          "name": "Field/column name",
+          "type": "Data type (e.g. 'uuid', 'text', 'jsonb', 'DreamEdge[]')",
+          "description": "What this field represents"
+        }
+      ],
+      "relationships": [
+        {
+          "type": "has_many | belongs_to | has_one | references",
+          "target": "ID of related entity",
+          "via": "Foreign key or link mechanism"
+        }
+      ],
+      "links": [
+        {
+          "target": "ID of linked entity",
+          "type": "feature | workflow | data_model",
+          "relationship": "Verb (e.g. 'reads_writes', 'persists_for')",
+          "description": "Why these are connected",
+          "strength": "strong | moderate | weak"
+        }
+      ]
+    },
+    "_note": "DELETE this schema entry after init_graph populates real entities."
+  }
+]

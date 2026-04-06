@@ -1,1 +1,17 @@
-﻿{"decisions": []}
+﻿{
+  "_schema": "ADR Log — Architecture Decision Records managed by record_architecture_decision tool",
+  "_fields": {
+    "id": "ADR-NNN sequential identifier",
+    "title": "Short decision title",
+    "status": "accepted | deprecated | superseded",
+    "context": "Why this decision was needed",
+    "decision": "What was decided",
+    "consequences": "Impact of the decision",
+    "date": "ISO 8601 date",
+    "supersedes": "Optional: ID of ADR this replaces",
+    "deprecated_at": "Optional: ISO 8601 date when deprecated",
+    "deprecated_by": "Optional: ID of ADR that replaced this"
+  },
+  "_note": "DELETE _schema/_fields/_note keys once real ADRs are recorded.",
+  "decisions": []
+}

@@ -12,6 +12,7 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname } from "node:path";
 import type {
+  CognitiveTuning,
   PoliciesFile,
   PolicyProfile,
   PolicyProfileDef,
@@ -38,6 +39,16 @@ const STRICT_PROFILE: PolicyProfileDef = {
   ],
   mandatory_verify_tools: ["read_source_code"],
   protected_file_tiers: ["forbidden", "tool_mediated", "seed_data"],
+  cognitive_tuning: {
+    promotion_confidence: 0.62,
+    promotion_plausibility: 0.45,
+    promotion_evidence: 0.4,
+    promotion_evidence_count: 2,
+    retention_plausibility: 0.35,
+    max_contradiction: 0.3,
+    decay_ttl: 8,
+    decay_rate: 0.05,
+  },
 };
 
 const BALANCED_PROFILE: PolicyProfileDef = {
@@ -52,6 +63,16 @@ const BALANCED_PROFILE: PolicyProfileDef = {
   mandatory_ingest_tools: ["read_source_code"],
   mandatory_verify_tools: [],
   protected_file_tiers: ["forbidden", "tool_mediated"],
+  cognitive_tuning: {
+    promotion_confidence: 0.55,
+    promotion_plausibility: 0.40,
+    promotion_evidence: 0.35,
+    promotion_evidence_count: 1,
+    retention_plausibility: 0.30,
+    max_contradiction: 0.35,
+    decay_ttl: 10,
+    decay_rate: 0.04,
+  },
 };
 
 const CREATIVE_PROFILE: PolicyProfileDef = {
@@ -66,6 +87,16 @@ const CREATIVE_PROFILE: PolicyProfileDef = {
   mandatory_ingest_tools: [],
   mandatory_verify_tools: [],
   protected_file_tiers: ["forbidden"],
+  cognitive_tuning: {
+    promotion_confidence: 0.45,
+    promotion_plausibility: 0.35,
+    promotion_evidence: 0.25,
+    promotion_evidence_count: 1,
+    retention_plausibility: 0.25,
+    max_contradiction: 0.4,
+    decay_ttl: 12,
+    decay_rate: 0.03,
+  },
 };
 
 /** Built-in default policies file (used in legacy mode or as seed). */
@@ -226,8 +257,30 @@ function validateProfileDef(
     }
   }
 
+  // Validate cognitive_tuning if present
+  if ("cognitive_tuning" in def && def.cognitive_tuning != null) {
+    const ct = def.cognitive_tuning as Record<string, unknown>;
+    if (typeof ct !== "object" || Array.isArray(ct)) {
+      errors.push(`Profile "${name}".cognitive_tuning must be an object`);
+    } else {
+      const numFields = [
+        "promotion_confidence", "promotion_plausibility", "promotion_evidence",
+        "promotion_evidence_count", "retention_plausibility", "max_contradiction",
+        "decay_ttl", "decay_rate",
+      ] as const;
+      for (const nf of numFields) {
+        if (nf in ct && typeof ct[nf] !== "number") {
+          errors.push(`Profile "${name}".cognitive_tuning.${nf} must be a number`);
+        }
+      }
+    }
+  }
+
   // Warn about unexpected keys
-  const knownKeys = new Set<string>(REQUIRED_DEF_FIELDS as unknown as string[]);
+  const knownKeys = new Set<string>([
+    ...(REQUIRED_DEF_FIELDS as unknown as string[]),
+    "cognitive_tuning",
+  ]);
   for (const key of Object.keys(def)) {
     if (!knownKeys.has(key)) {
       warnings.push(`Profile "${name}" has unknown field "${key}"`);
@@ -400,4 +453,25 @@ export async function isPolicyRequired(
 ): Promise<boolean> {
   const def = await getActivePolicy();
   return def[capability];
+}
+
+/**
+ * Resolve cognitive tuning for the active policy profile.
+ *
+ * Returns a fully-resolved `CognitiveTuning` object — any fields missing
+ * from the profile fall back to the hardcoded defaults.
+ */
+export async function getActiveCognitiveTuning(): Promise<Required<CognitiveTuning>> {
+  const def = await getActivePolicy();
+  const ct = def.cognitive_tuning ?? {};
+  return {
+    promotion_confidence:    ct.promotion_confidence    ?? 0.62,
+    promotion_plausibility:  ct.promotion_plausibility  ?? 0.45,
+    promotion_evidence:      ct.promotion_evidence      ?? 0.4,
+    promotion_evidence_count: ct.promotion_evidence_count ?? 2,
+    retention_plausibility:  ct.retention_plausibility  ?? 0.35,
+    max_contradiction:       ct.max_contradiction       ?? 0.3,
+    decay_ttl:               ct.decay_ttl               ?? 8,
+    decay_rate:              ct.decay_rate              ?? 0.05,
+  };
 }

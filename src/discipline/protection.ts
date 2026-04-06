@@ -102,31 +102,36 @@ export const DATA_PROTECTION_RULES: DataProtectionRule[] = [
     allowed_tools: ["solidify_cognitive_insight"],
   },
 
-  // ---- Tier 3: SEED DATA (5 files) --------------------------------------
+  // ---- Tier 3: SEED DATA (5 files) — writable ONLY by init_graph --------
   {
     filename: "system_overview.json",
     tier: "seed_data",
-    description: "Project overview (read-only reference)",
+    description: "Project overview (read-only except during bootstrap)",
+    allowed_tools: ["init_graph"],
   },
   {
     filename: "features.json",
     tier: "seed_data",
-    description: "Project feature descriptions (read-only reference)",
+    description: "Project feature descriptions (read-only except during bootstrap/enrichment)",
+    allowed_tools: ["init_graph", "enrich_seed_data"],
   },
   {
     filename: "workflows.json",
     tier: "seed_data",
-    description: "Project workflow definitions (read-only reference)",
+    description: "Project workflow definitions (read-only except during bootstrap/enrichment)",
+    allowed_tools: ["init_graph", "enrich_seed_data"],
   },
   {
     filename: "data_model.json",
     tier: "seed_data",
-    description: "Project data model entities (read-only reference)",
+    description: "Project data model entities (read-only except during bootstrap/enrichment)",
+    allowed_tools: ["init_graph", "enrich_seed_data"],
   },
   {
     filename: "index.json",
     tier: "seed_data",
-    description: "Resource index (read-only reference)",
+    description: "Resource index (rebuilt by init_graph and enrich_seed_data)",
+    allowed_tools: ["init_graph", "enrich_seed_data"],
   },
 ];
 
@@ -151,6 +156,13 @@ const SEED_DATA_FILES = new Set(
   DATA_PROTECTION_RULES.filter((r) => r.tier === "seed_data").map(
     (r) => r.filename
   )
+);
+
+/** Seed data files that have bootstrap tool exceptions */
+const SEED_DATA_TOOLS_MAP = new Map<string, string[]>(
+  DATA_PROTECTION_RULES
+    .filter((r) => r.tier === "seed_data" && r.allowed_tools?.length)
+    .map((r) => [r.filename, r.allowed_tools ?? []])
 );
 
 // ---------------------------------------------------------------------------
@@ -212,12 +224,20 @@ export function canWriteFile(
     };
   }
 
-  // Tier 3: seed data — always read-only
+  // Tier 3: seed data — read-only unless bootstrap tool
   if (SEED_DATA_FILES.has(filename)) {
+    const seedTools = SEED_DATA_TOOLS_MAP.get(filename);
+    if (seedTools && tool && seedTools.includes(tool)) {
+      return {
+        allowed: true,
+        tier: "seed_data",
+        reason: `SEED DATA bootstrap write allowed: '${tool}' → '${filename}'`,
+      };
+    }
     return {
       allowed: false,
       tier: "seed_data",
-      reason: `SEED DATA: '${filename}' is a read-only project reference and cannot be modified`,
+      reason: `SEED DATA: '${filename}' is a read-only project reference${seedTools ? ` (writable only by [${seedTools.join(", ")}])` : ""}`,
     };
   }
 

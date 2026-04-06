@@ -1,6 +1,6 @@
 # DreamGraph Tools Reference
 
-> Complete catalog of all 43 MCP tools (23 cognitive + 20 general) and 16 MCP resources.
+> Complete catalog of all 52 MCP tools (23 cognitive + 20 general + 9 discipline) and 16 MCP resources.
 
 ---
 
@@ -256,7 +256,7 @@ Read file contents, optionally by line range.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `filePath` | string | yes | Relative or absolute path |
-| `repo` | string | no | Repo name from `DREAMGRAPH_REPOS` |
+| `repo` | string | no | Repo name from `DREAMGRAPH_REPOS` or instance-mapped repos |
 | `startLine` | number | no | Start line (1-based) |
 | `endLine` | number | no | End line (inclusive) |
 
@@ -520,6 +520,97 @@ Export knowledge graph as structured Markdown for documentation sites.
 | `format` | enum | no | `docusaurus`, `nextra`, `mkdocs`, `plain` (default) |
 | `include_diagrams` | boolean | no | Mermaid inline (default: true) |
 | `include_cognitive` | boolean | no | Cognitive status (default: false) |
+
+---
+
+## Discipline Execution Tools (9)
+
+Registered in [src/discipline/tools.ts](../src/discipline/tools.ts). These enforce the five-phase execution model (ADR-014).
+
+### `discipline_start_session`
+
+Start a new disciplinary task session, entering the INGEST phase.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `type` | enum | yes | `audit`, `port`, `reconstruction`, `modification` |
+| `description` | string | yes | What this task is about |
+| `target_scope` | string[] | yes | File paths or directories in scope |
+| `requires_ground_truth` | boolean | no | All claims need tool evidence (default: true) |
+
+### `discipline_transition`
+
+Transition the active session to a new phase with guard checks.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `target_phase` | enum | yes | `ingest`, `audit`, `plan`, `execute`, `verify` |
+| `justification` | string | no | Why this transition is appropriate (required for loopbacks) |
+
+### `discipline_check_tool`
+
+Check whether a specific tool call is permitted in the current discipline phase.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `tool_name` | string | yes | Name of the MCP tool to check |
+| `target_file` | string | no | Target file path (for write tools — validates data protection) |
+
+### `discipline_get_session`
+
+Get the current discipline session state, list sessions, or load a specific one.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `session_id` | string | no | Specific session ID to load |
+| `list_all` | boolean | no | List all sessions |
+| `include_prompt` | boolean | no | Include current system prompt in response |
+
+### `discipline_record_delta`
+
+Submit delta table entries during AUDIT or VERIFY phase.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `entries` | DeltaEntry[] | yes | Delta entries comparing source-of-truth vs implementation |
+| `sources` | SourceReference[] | yes | Sources of truth that were queried |
+| `phase` | enum | no | Override phase (`audit` or `verify`) |
+
+### `discipline_submit_plan`
+
+Submit a structured implementation plan during PLAN phase.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `description` | string | yes | Overall plan description |
+| `items` | PlanItem[] | yes | Plan items, each addressing a delta table entry |
+| `auto_approve` | boolean | no | Auto-approve the plan (default: false) |
+
+### `discipline_approve_plan`
+
+Approve a draft implementation plan.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `plan_index` | number | no | Index of plan to approve (default: latest) |
+
+### `discipline_verify`
+
+Generate a verification report during VERIFY phase.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `post_delta_entries` | DeltaEntry[] | yes | Post-execution delta entries from re-audit |
+| `post_delta_sources` | SourceReference[] | yes | Sources queried during verification |
+| `item_results` | ItemVerification[] | yes | Per-plan-item verification results |
+
+### `discipline_complete_session`
+
+Complete or abandon the active discipline session.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `status` | enum | yes | `completed`, `failed`, `abandoned` |
 
 ---
 

@@ -1,1 +1,33 @@
-[]
+[
+  {
+    "_schema": "Workflow — each entry describes a process flow in the target project",
+    "_fields": {
+      "id": "snake_case unique identifier (e.g. 'user_registration_flow')",
+      "name": "Human-readable workflow name",
+      "description": "What this workflow accomplishes end-to-end",
+      "trigger": "What initiates this workflow (e.g. 'HTTP POST /api/register', 'cron job', 'MCP tool call')",
+      "source_repo": "Repository name from DREAMGRAPH_REPOS config",
+      "source_files": ["Relative paths to files implementing this flow"],
+      "domain": "Business/technical domain",
+      "keywords": ["Terms for dreamer discovery"],
+      "status": "active | planned | deprecated",
+      "steps": [
+        {
+          "order": 1,
+          "name": "Step name",
+          "description": "What happens in this step"
+        }
+      ],
+      "links": [
+        {
+          "target": "ID of linked entity",
+          "type": "feature | workflow | data_model",
+          "relationship": "Verb (e.g. 'implemented_by', 'reads_from', 'writes_to')",
+          "description": "Why these are connected",
+          "strength": "strong | moderate | weak"
+        }
+      ]
+    },
+    "_note": "DELETE this schema entry after init_graph populates real workflows."
+  }
+]

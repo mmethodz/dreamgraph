@@ -1,1 +1,27 @@
-[]
+[
+  {
+    "_schema": "Feature — each entry describes a discoverable capability of the target project",
+    "_fields": {
+      "id": "snake_case unique identifier (e.g. 'user_authentication')",
+      "name": "Human-readable feature name",
+      "description": "What this feature does, in detail",
+      "source_repo": "Repository name from DREAMGRAPH_REPOS config",
+      "source_files": ["Relative paths to implementation files"],
+      "status": "active | planned | deprecated",
+      "category": "Domain category (e.g. 'auth', 'billing', 'cognitive_core')",
+      "tags": ["Searchable tags"],
+      "domain": "Business/technical domain this belongs to",
+      "keywords": ["Terms that help the dreamer find connections"],
+      "links": [
+        {
+          "target": "ID of linked entity",
+          "type": "feature | workflow | data_model",
+          "relationship": "Verb describing the link (e.g. 'implements', 'depends_on', 'triggers')",
+          "description": "Why these two entities are connected",
+          "strength": "strong | moderate | weak"
+        }
+      ]
+    },
+    "_note": "DELETE this schema entry after init_graph populates real features. This entry exists only to document the expected format."
+  }
+]

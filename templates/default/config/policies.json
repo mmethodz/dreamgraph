@@ -15,7 +15,17 @@
         "query_ui_elements|search_data_model|get_workflow"
       ],
       "mandatory_verify_tools": ["read_source_code"],
-      "protected_file_tiers": ["forbidden", "tool_mediated", "seed_data"]
+      "protected_file_tiers": ["forbidden", "tool_mediated", "seed_data"],
+      "cognitive_tuning": {
+        "promotion_confidence": 0.62,
+        "promotion_plausibility": 0.45,
+        "promotion_evidence": 0.4,
+        "promotion_evidence_count": 2,
+        "retention_plausibility": 0.35,
+        "max_contradiction": 0.3,
+        "decay_ttl": 8,
+        "decay_rate": 0.05
+      }
     },
     "balanced": {
       "description": "Moderate enforcement. Tool evidence required for structural claims. Plan recommended but not blocked.",
@@ -27,7 +37,17 @@
       "allow_creative_mode": true,
       "mandatory_ingest_tools": ["read_source_code"],
       "mandatory_verify_tools": [],
-      "protected_file_tiers": ["forbidden", "tool_mediated"]
+      "protected_file_tiers": ["forbidden", "tool_mediated"],
+      "cognitive_tuning": {
+        "promotion_confidence": 0.55,
+        "promotion_plausibility": 0.40,
+        "promotion_evidence": 0.35,
+        "promotion_evidence_count": 1,
+        "retention_plausibility": 0.30,
+        "max_contradiction": 0.35,
+        "decay_ttl": 10,
+        "decay_rate": 0.04
+      }
     },
     "creative": {
       "description": "Minimal enforcement. Used for brainstorming, exploration, and dream cycles. Tools available but not mandatory.",
@@ -39,7 +59,17 @@
       "allow_creative_mode": true,
       "mandatory_ingest_tools": [],
       "mandatory_verify_tools": [],
-      "protected_file_tiers": ["forbidden"]
+      "protected_file_tiers": ["forbidden"],
+      "cognitive_tuning": {
+        "promotion_confidence": 0.45,
+        "promotion_plausibility": 0.35,
+        "promotion_evidence": 0.25,
+        "promotion_evidence_count": 1,
+        "retention_plausibility": 0.25,
+        "max_contradiction": 0.4,
+        "decay_ttl": 12,
+        "decay_rate": 0.03
+      }
     }
   }
 }

@@ -771,7 +771,7 @@ You can also skip the manual data step entirely and just point the agent at your
 
 | Variable | Required | Description |
 |---|---|---|
-| `DREAMGRAPH_REPOS` | No | JSON object mapping repo names to local paths. Enables `list_directory`, `read_source_code`, `git_log`, `git_blame` tools. Example: `{"my-app": "/home/user/repos/my-app"}` |
+| `DREAMGRAPH_REPOS` | No | JSON object mapping repo names to local paths. Enables `list_directory`, `read_source_code`, `git_log`, `git_blame` tools. In instance mode, repos from `mcp.json` are merged automatically and `project_root` is auto-registered as a fallback — this env var becomes optional. Example: `{"my-app": "/home/user/repos/my-app"}` |
 | `DATABASE_URL` | No | PostgreSQL connection string for live DB schema queries via `query_db_schema`. Example: `postgresql://user:pass@host:5432/dbname` |
 | `DATABASE_SSL` | No | Set to `"false"` to disable SSL for local PostgreSQL. Default: SSL enabled |
 | `DREAMGRAPH_DEBUG` | No | Set to `"true"` for verbose stderr logging |
@@ -786,7 +786,7 @@ You can also skip the manual data step entirely and just point the agent at your
 | `DREAMGRAPH_NARRATIVE` | No | JSON config for continuous narrative: `{"auto_narrate": true, "narrative_interval": 10, "digest_interval": 50, "max_chapters": 100}` |
 | `DREAMGRAPH_SCHEDULER` | No | JSON config for the dream scheduler (v5.2): `{"enabled": true, "tick_interval_ms": 30000, "max_runs_per_hour": 30, "cooldown_ms": 10000, "nightmare_cooldown_ms": 300000, "error_streak_pause_limit": 3}` |
 
-None are required. Without `DREAMGRAPH_REPOS`, code/git tools will be unavailable. Without `DATABASE_URL`, the `query_db_schema` tool will be unavailable. Without `DREAMGRAPH_RUNTIME_ENDPOINT`, the `query_runtime_metrics` tool will return a configuration hint. The cognitive engine works regardless — it just has fewer senses.
+None are required. Without `DREAMGRAPH_REPOS` (and no instance-mode repos), code/git tools will be unavailable. In instance mode, repos from `mcp.json` and the attached `project_root` are auto-wired at startup. Without `DATABASE_URL`, the `query_db_schema` tool will be unavailable. Without `DREAMGRAPH_RUNTIME_ENDPOINT`, the `query_runtime_metrics` tool will return a configuration hint. The cognitive engine works regardless — it just has fewer senses.
 
 ---
 
@@ -795,7 +795,7 @@ None are required. Without `DREAMGRAPH_REPOS`, code/git tools will be unavailabl
 ```
                 +--------------+
                 |   MCP Layer  |
-                | (43 tools)   |
+                | (52 tools)   |
                 +------+-------+
                        |
         +--------------v--------------+
@@ -862,11 +862,16 @@ src/
 │   ├── event-router.ts     # Event-Driven Dreaming (reactive cognition)
 │   └── scheduler.ts        # Dream Scheduler — instance-aware orchestration (v5.2→v6.0)
 ├── discipline/             # Self-imposed execution governance (v6.0 La Catedral)
-│   ├── types.ts            # Phase, tool class, protection types
+│   ├── types.ts            # Phase, tool class, protection, session types
 │   ├── state-machine.ts    # Five-phase state machine with transition rules
 │   ├── protection.ts       # Three-tier data file protection
-│   ├── manifest.ts         # 43-tool classification + phase permissions
-│   └── register.ts         # discipline://manifest resource + barrel exports
+│   ├── manifest.ts         # 52-tool classification + phase permissions
+│   ├── register.ts         # discipline://manifest resource + tool registration + barrel exports
+│   ├── session.ts          # Task session lifecycle + disk persistence
+│   ├── prompts.ts          # Phase-specific system prompt templates
+│   ├── tool-proxy.ts       # Runtime tool permission checking + phase filtering
+│   ├── artifacts.ts        # Delta table, plan, verification report generators
+│   └── tools.ts            # 9 discipline MCP tools
 ├── instance/               # UUID-scoped instance architecture (v6.0 La Catedral)
 │   ├── types.ts            # Instance identity, registry, policy, config types
 │   ├── scope.ts            # InstanceScope — file-system isolation enforcement
@@ -935,12 +940,13 @@ data/                                   # Legacy mode (flat) or <instance>/data/
 ├── meta_log.json           # [runtime] Metacognitive analysis audit trail
 ├── event_log.json          # [runtime] Cognitive event dispatch log
 ├── system_story.json       # [runtime] Persistent system autobiography
-└── schedules.json          # [runtime] Dream scheduler persistence (v5.2)
+├── schedules.json          # [runtime] Dream scheduler persistence (v5.2)
+└── discipline_sessions/    # [runtime] Discipline session JSON files (v6.0 La Catedral)
 ```
 
 ---
 
-## MCP Tools (43 total)
+## MCP Tools (52 total)
 
 ### Cognitive Tools (23)
 
@@ -999,6 +1005,20 @@ data/                                   # Legacy mode (flat) or <instance>/data/
 | `query_ui_elements` | Search UI elements by category, purpose, platform, feature, or missing platform (instant migration checklist) |
 | `generate_ui_migration_plan` | Gap analysis between source and target platforms with data contract summaries and complexity estimates |
 | `export_living_docs` | Export the knowledge graph as structured Markdown for Docusaurus, Nextra, MkDocs, or plain GitHub. Stateless and idempotent |
+
+### Discipline Execution Tools (9)
+
+| Tool | Description |
+|---|---|
+| `discipline_start_session` | Start a new disciplinary task session, entering the INGEST phase. One active session at a time |
+| `discipline_transition` | Transition to a new phase with state machine guard checks and mandatory tool validation |
+| `discipline_check_tool` | Check whether a tool call is permitted in the current phase (pre-call validation) |
+| `discipline_get_session` | Read current session state, list all sessions, or load a specific one by ID |
+| `discipline_record_delta` | Submit delta table entries during AUDIT or VERIFY — source-of-truth vs implementation comparison |
+| `discipline_submit_plan` | Submit a structured implementation plan during PLAN phase with risk assessment and verification criteria |
+| `discipline_approve_plan` | Approve a draft plan, enabling transition to EXECUTE phase |
+| `discipline_verify` | Generate a verification report with regression detection and compliance scoring |
+| `discipline_complete_session` | Complete or abandon the active session with final status |
 
 ### MCP Resources (16)
 

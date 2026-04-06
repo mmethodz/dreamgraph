@@ -53,7 +53,7 @@ const ANALYSIS_PHASES: DisciplinePhase[] = [
 // ---------------------------------------------------------------------------
 
 /**
- * Complete classification of all 43 MCP tools.
+ * Complete classification of all 53 MCP tools.
  */
 export const TOOL_CLASSIFICATIONS: ToolClassification[] = [
   // =====================================================================
@@ -319,6 +319,14 @@ export const TOOL_CLASSIFICATIONS: ToolClassification[] = [
     requires_plan_entry: true,
     requires_audit_trail: true,
   },
+  {
+    tool_name: "enrich_seed_data",
+    tool_class: "write",
+    protection_level: "target-write",
+    allowed_phases: ["execute"],
+    requires_plan_entry: true,
+    requires_audit_trail: true,
+  },
 
   // =====================================================================
   // FILE OPERATION TOOLS — Target project writes (1 tool)
@@ -423,6 +431,83 @@ export const TOOL_CLASSIFICATIONS: ToolClassification[] = [
     requires_plan_entry: false,
     requires_audit_trail: true,
   },
+
+  // =====================================================================
+  // VERIFICATION / DISCIPLINE TOOLS — Session lifecycle & enforcement (9 tools)
+  // =====================================================================
+
+  {
+    tool_name: "discipline_start_session",
+    tool_class: "verification",
+    protection_level: "public",
+    allowed_phases: ALL_PHASES,
+    requires_plan_entry: false,
+    requires_audit_trail: true,
+  },
+  {
+    tool_name: "discipline_transition",
+    tool_class: "verification",
+    protection_level: "public",
+    allowed_phases: ALL_PHASES,
+    requires_plan_entry: false,
+    requires_audit_trail: true,
+  },
+  {
+    tool_name: "discipline_check_tool",
+    tool_class: "verification",
+    protection_level: "public",
+    allowed_phases: ALL_PHASES,
+    requires_plan_entry: false,
+    requires_audit_trail: false,
+  },
+  {
+    tool_name: "discipline_get_session",
+    tool_class: "verification",
+    protection_level: "public",
+    allowed_phases: ALL_PHASES,
+    requires_plan_entry: false,
+    requires_audit_trail: false,
+  },
+  {
+    tool_name: "discipline_record_delta",
+    tool_class: "verification",
+    protection_level: "public",
+    allowed_phases: ["audit", "verify"],
+    requires_plan_entry: false,
+    requires_audit_trail: true,
+  },
+  {
+    tool_name: "discipline_submit_plan",
+    tool_class: "verification",
+    protection_level: "public",
+    allowed_phases: ["plan"],
+    requires_plan_entry: false,
+    requires_audit_trail: true,
+  },
+  {
+    tool_name: "discipline_approve_plan",
+    tool_class: "verification",
+    protection_level: "public",
+    allowed_phases: ["plan"],
+    requires_plan_entry: false,
+    requires_audit_trail: true,
+  },
+  {
+    tool_name: "discipline_verify",
+    tool_class: "verification",
+    protection_level: "public",
+    allowed_phases: ["verify"],
+    requires_plan_entry: false,
+    requires_audit_trail: true,
+  },
+  {
+    tool_name: "discipline_complete_session",
+    tool_class: "verification",
+    protection_level: "public",
+    allowed_phases: ALL_PHASES,
+    requires_plan_entry: false,
+    requires_audit_trail: true,
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -432,7 +517,7 @@ export const TOOL_CLASSIFICATIONS: ToolClassification[] = [
 export const PHASE_PERMISSIONS: PhasePermissions[] = [
   {
     phase: "ingest",
-    allowed_tool_classes: ["truth", "analysis"],
+    allowed_tool_classes: ["truth", "analysis", "verification"],
     can_read_mcp: true,
     can_write_mcp: false,
     can_write_target: false,
@@ -441,7 +526,7 @@ export const PHASE_PERMISSIONS: PhasePermissions[] = [
   },
   {
     phase: "audit",
-    allowed_tool_classes: ["truth", "analysis"],
+    allowed_tool_classes: ["truth", "analysis", "verification"],
     can_read_mcp: true,
     can_write_mcp: false,
     can_write_target: false,
@@ -450,7 +535,7 @@ export const PHASE_PERMISSIONS: PhasePermissions[] = [
   },
   {
     phase: "plan",
-    allowed_tool_classes: ["truth", "analysis"],
+    allowed_tool_classes: ["truth", "analysis", "verification"],
     can_read_mcp: true,
     can_write_mcp: false,
     can_write_target: false,
@@ -459,7 +544,7 @@ export const PHASE_PERMISSIONS: PhasePermissions[] = [
   },
   {
     phase: "execute",
-    allowed_tool_classes: ["truth", "write", "file_operation"],
+    allowed_tool_classes: ["truth", "write", "file_operation", "verification"],
     can_read_mcp: true,
     can_write_mcp: true,
     can_write_target: true,
@@ -468,7 +553,7 @@ export const PHASE_PERMISSIONS: PhasePermissions[] = [
   },
   {
     phase: "verify",
-    allowed_tool_classes: ["truth", "analysis"],
+    allowed_tool_classes: ["truth", "analysis", "verification"],
     can_read_mcp: true,
     can_write_mcp: false,
     can_write_target: false,

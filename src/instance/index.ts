@@ -6,6 +6,7 @@
 
 // Types
 export type {
+  CognitiveTuning,
   DreamGraphInstance,
   InstanceMode,
   PolicyProfile,
@@ -66,6 +67,7 @@ export {
   switchProfile,
   reloadPolicies,
   isPolicyRequired,
+  getActiveCognitiveTuning,
 } from "./policies.js";
 
 export type { PolicyValidationResult } from "./policies.js";

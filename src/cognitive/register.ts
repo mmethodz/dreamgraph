@@ -547,6 +547,7 @@ export function registerCognitiveTools(server: McpServer): void {
 
           // AWAKE → REM
           engine.enterRem();
+          await engine.applyCognitiveTuning();
           transitions.push("awake → rem");
 
           // Step 1: Apply decay to existing dreams
@@ -744,7 +745,7 @@ export function registerCognitiveTools(server: McpServer): void {
         .max(1)
         .optional()
         .describe(
-          "Minimum confidence score to validate an edge (default: 0.75 from PromotionConfig). Lower values allow more into validated status."
+          "Minimum confidence score to validate an edge. Defaults to the active policy profile's promotion_confidence (strict=0.62, balanced=0.55, creative=0.45). Lower values allow more into validated status."
         ),
       strict: z
         .boolean()
@@ -755,7 +756,7 @@ export function registerCognitiveTools(server: McpServer): void {
     },
     async ({ threshold, strict }) => {
       logger.info(
-        `normalize_dreams tool called: threshold=${threshold ?? 0.7}, strict=${strict ?? false}`
+        `normalize_dreams tool called: threshold=${threshold ?? "(policy default)"}, strict=${strict ?? false}`
       );
 
       const result = await safeExecute<NormalizeDreamsOutput>(
@@ -767,9 +768,10 @@ export function registerCognitiveTools(server: McpServer): void {
 
           // AWAKE → REM → NORMALIZING (fast pass through REM)
           engine.enterRem();
+          await engine.applyCognitiveTuning();
           engine.enterNormalizing();
 
-          const normResult = await normalize(threshold ?? 0.7, strict ?? false);
+          const normResult = await normalize(threshold, strict ?? false);
 
           // NORMALIZING → AWAKE
           engine.wake();

@@ -84,8 +84,11 @@ export const config = {
    * Local repository paths for code-senses and git-senses tools.
    * Set via DREAMGRAPH_REPOS env var as a JSON object:
    *   {"my-app": "/home/user/repos/my-app", "api": "/home/user/repos/api"}
+   *
+   * In instance mode, repos from mcp.json are merged at startup.
+   * If project_root is set and no repos are mapped, it is auto-registered.
    */
-  repos: parseRepos(),
+  repos: parseRepos() as Record<string, string>,
 
   /**
    * Optional PostgreSQL connection for DB schema queries.

@@ -60,7 +60,7 @@ Speculative Edge → Normalization → Promotion Gate → Validated Edge
 graph TB
     subgraph "MCP Protocol Layer"
         Server["MCP Server<br/>STDIO / Streamable HTTP"]
-        Tools["43 Tools"]
+        Tools["52 Tools"]
         Resources["16 Resources"]
     end
 
@@ -188,11 +188,16 @@ src/
 │   ├── types.ts             # All cognitive type definitions
 │   └── register.ts          # Tool/resource registration + post-cycle hooks
 ├── discipline/              # Self-imposed execution governance (v6.0 La Catedral)
-│   ├── types.ts             # Phase, tool class, protection types
+│   ├── types.ts             # Phase, tool class, protection, session types
 │   ├── state-machine.ts     # Five-phase state machine with transition rules
 │   ├── protection.ts        # Three-tier data file protection
-│   ├── manifest.ts          # 43-tool classification + phase permissions
-│   └── register.ts          # discipline://manifest resource + barrel exports
+│   ├── manifest.ts          # 52-tool classification + phase permissions
+│   ├── register.ts          # discipline://manifest resource + tool registration + barrel exports
+│   ├── session.ts           # Task session lifecycle + disk persistence
+│   ├── prompts.ts           # Phase-specific system prompt templates
+│   ├── tool-proxy.ts        # Runtime tool permission checking + phase filtering
+│   ├── artifacts.ts         # Delta table, plan, verification report generators
+│   └── tools.ts             # 9 discipline MCP tools
 ├── instance/                # UUID-scoped instance architecture (v6.0 La Catedral)
 │   ├── types.ts             # Instance identity, registry, policy, config types
 │   ├── scope.ts             # InstanceScope — file-system isolation enforcement
@@ -284,4 +289,5 @@ data/                                    # Legacy mode (flat) or <instance>/data
 | `DATABASE_URL` | — | PostgreSQL connection string for DB senses |
 | `DREAMGRAPH_RUNTIME_ENDPOINT` | — | APM metrics endpoint URL |
 | `DREAMGRAPH_RUNTIME_TYPE` | — | Metrics format: `otlp`, `prometheus`, or `custom` |
+| `DREAMGRAPH_REPOS` | `{}` | JSON object mapping repo names to local paths. In instance mode, repos from `mcp.json` are merged automatically and `project_root` is auto-registered as a fallback — this env var becomes optional. |
 | `DREAMGRAPH_SCHEDULER` | `{"enabled":true}` | JSON config for dream scheduler (v5.2): `enabled`, `tick_interval_ms`, `max_runs_per_hour`, `cooldown_ms`, `nightmare_cooldown_ms`, `error_streak_pause_limit` |

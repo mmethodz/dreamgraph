@@ -126,6 +126,31 @@ export interface PolicyProfileDef {
   mandatory_ingest_tools: string[];
   mandatory_verify_tools: string[];
   protected_file_tiers: string[];
+  /** Optional cognitive engine tuning — promotion/decay thresholds. */
+  cognitive_tuning?: CognitiveTuning;
+}
+
+/**
+ * Per-profile cognitive tuning overrides.
+ * All fields are optional — missing fields fall back to cognitive DEFAULT_PROMOTION / DEFAULT_DECAY.
+ */
+export interface CognitiveTuning {
+  /** Minimum combined confidence for promotion to validated (default: 0.62) */
+  promotion_confidence?: number;
+  /** Minimum plausibility for promotion (default: 0.45) */
+  promotion_plausibility?: number;
+  /** Minimum evidence score for promotion (default: 0.4) */
+  promotion_evidence?: number;
+  /** Minimum distinct evidence signals for promotion (default: 2) */
+  promotion_evidence_count?: number;
+  /** Minimum plausibility for retention as latent (default: 0.35) */
+  retention_plausibility?: number;
+  /** Maximum contradiction score before rejection (default: 0.3) */
+  max_contradiction?: number;
+  /** Time-to-live in dream cycles (default: 8) */
+  decay_ttl?: number;
+  /** Confidence reduction per cycle (default: 0.05) */
+  decay_rate?: number;
 }
 
 /**
@@ -195,7 +220,11 @@ export const DATA_STUBS: Record<string, unknown> = {
   "validated_edges.json":   [],
   "tension_log.json":       { tensions: [] },
   "dream_history.json":     { cycles: [] },
-  "adr_log.json":           { decisions: [] },
+  "adr_log.json":           {
+    _schema: "ADR Log — Architecture Decision Records",
+    _fields: { id: "ADR-NNN", title: "string", status: "accepted|deprecated|superseded", context: "string", decision: "string", consequences: "string", date: "ISO 8601" },
+    decisions: [],
+  },
   "ui_registry.json":       { elements: [] },
   "event_log.json":         { events: [] },
   "meta_log.json":          { analyses: [] },
@@ -204,10 +233,31 @@ export const DATA_STUBS: Record<string, unknown> = {
   "threat_log.json":        [],
   "dream_archetypes.json":  [],
   "capabilities.json":      [],
-  /* Seed files — populated during first ingest, start as empty arrays */
-  "system_overview.json":   {},
-  "features.json":          [],
-  "workflows.json":         [],
-  "data_model.json":        [],
-  "index.json":             {},
+
+  /* Seed files — schema-documented stubs, populated by init_graph */
+  "system_overview.json":   {
+    _schema: "SystemOverview — project description with repository inventory",
+    id: "system_overview", name: "", description: "", source_repo: "", source_files: [],
+    repositories: [],
+  },
+  "features.json":          [{
+    _schema: "Feature — discoverable capability of the target project",
+    _fields: { id: "snake_case", name: "string", description: "string", source_repo: "string", source_files: ["paths"], status: "active|planned|deprecated", category: "string", tags: ["strings"], domain: "string", keywords: ["strings"], links: [{ target: "id", type: "feature|workflow|data_model", relationship: "verb", description: "string", strength: "strong|moderate|weak" }] },
+    _note: "DELETE after init_graph populates",
+  }],
+  "workflows.json":         [{
+    _schema: "Workflow — process flow in the target project",
+    _fields: { id: "snake_case", name: "string", description: "string", trigger: "string", source_repo: "string", source_files: ["paths"], domain: "string", keywords: ["strings"], status: "active|planned|deprecated", steps: [{ order: 1, name: "string", description: "string" }], links: [{ target: "id", type: "feature|workflow|data_model", relationship: "verb", description: "string", strength: "strong|moderate|weak" }] },
+    _note: "DELETE after init_graph populates",
+  }],
+  "data_model.json":        [{
+    _schema: "DataModelEntity — data store or persistent structure",
+    _fields: { id: "snake_case", name: "string", description: "string", table_name: "string", storage: "postgresql|json_file|sqlite|redis", source_repo: "string", source_files: ["paths"], domain: "string", keywords: ["strings"], status: "active|planned|deprecated", key_fields: [{ name: "string", type: "string", description: "string" }], relationships: [{ type: "has_many|belongs_to", target: "id", via: "fk" }], links: [] },
+    _note: "DELETE after init_graph populates",
+  }],
+  "index.json":             {
+    _schema: "ResourceIndex — fast lookup map of all entities",
+    _fields: { "<entity_id>": { type: "feature|workflow|data_model", uri: "dreamgraph://resource/<type>/<id>", name: "string", source_repo: "string" } },
+    entities: {},
+  },
 };

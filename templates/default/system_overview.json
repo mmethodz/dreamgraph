@@ -1,1 +1,22 @@
-{}
+{
+  "_schema": "SystemOverview — top-level project description with repository inventory",
+  "id": "system_overview",
+  "name": "Project System Overview",
+  "description": "Auto-populated by init_graph. Describes the overall project and its repositories.",
+  "source_repo": "",
+  "source_files": [],
+  "repositories": [
+    {
+      "_fields": {
+        "id": "snake_case repo identifier",
+        "name": "Human-readable repository name",
+        "description": "What this repository contains",
+        "technology": "Primary tech stack (e.g. 'TypeScript/Node.js', 'Python/FastAPI')",
+        "local_path": "Absolute local path (from DREAMGRAPH_REPOS config)",
+        "source_repo": "Same as id",
+        "source_files": ["Key entry-point files"]
+      },
+      "_note": "DELETE this schema entry after init_graph populates real repositories."
+    }
+  ]
+}

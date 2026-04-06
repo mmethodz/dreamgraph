@@ -38,7 +38,8 @@ import type {
   NormalizationOutcome,
   NormalizationReasonCode,
 } from "./types.js";
-import { countEvidence, computeConfidence, DEFAULT_PROMOTION } from "./types.js";
+import { countEvidence, computeConfidence, DEFAULT_PROMOTION, type PromotionConfig } from "./types.js";
+import { getActiveCognitiveTuning } from "../instance/index.js";
 
 // ---------------------------------------------------------------------------
 // Fact Graph lookup structures
@@ -221,12 +222,18 @@ function calculateSplitScore(
   isDuplicate: boolean,
   contradictions: string[],
   originalConfidence: number,
-  reinforcementCount: number
+  reinforcementCount: number,
+  promo: PromotionConfig = DEFAULT_PROMOTION
 ): SplitScore {
   // --- Contradiction Score (0–1) ---
   let contradictionScore = 0;
   if (!grounding.fromExists && !grounding.toExists) {
-    contradictionScore = 0.9; // both endpoints missing = almost fatal
+    // Both endpoints missing — strong negative signal but not instant death.
+    // After init_graph populates the fact graph, this case is rare; when it
+    // does occur the edge likely references entities that don't exist *yet*
+    // (e.g. dreamer-invented IDs).  A score of 0.5 is a heavy penalty but
+    // still allows well-supported edges through on reinforcement.
+    contradictionScore = 0.5;
   } else if (!grounding.fromExists || !grounding.toExists) {
     // One endpoint missing ≠ contradiction — it may not exist *yet*
     // This is "insufficient evidence", not "bad evidence"
@@ -279,21 +286,21 @@ function calculateSplitScore(
   let outcome: NormalizationOutcome;
   let reason_code: NormalizationReasonCode;
 
-  if (contradictionScore >= DEFAULT_PROMOTION.max_contradiction) {
+  if (contradictionScore >= promo.max_contradiction) {
     // High contradiction = reject
     outcome = "rejected";
     reason_code = isDuplicate ? "low_signal" :
       (!grounding.fromExists && !grounding.toExists) ? "invalid_endpoints" :
       "contradicted";
   } else if (
-    confidence >= DEFAULT_PROMOTION.promotion_confidence &&
-    plausibility >= DEFAULT_PROMOTION.promotion_plausibility &&
-    evidenceScore >= DEFAULT_PROMOTION.promotion_evidence
+    confidence >= promo.promotion_confidence &&
+    plausibility >= promo.promotion_plausibility &&
+    evidenceScore >= promo.promotion_evidence
   ) {
     // Strong on all axes = validate
     outcome = "validated";
     reason_code = "strong_evidence";
-  } else if (plausibility >= DEFAULT_PROMOTION.retention_plausibility) {
+  } else if (plausibility >= promo.retention_plausibility) {
     // Plausible but not proven = latent (speculative memory)
     outcome = "latent";
     reason_code = "insufficient_evidence";
@@ -320,7 +327,8 @@ function calculateSplitScore(
 function validateEdge(
   edge: DreamEdge,
   lookup: FactLookup,
-  cycle: number
+  cycle: number,
+  promo: PromotionConfig = DEFAULT_PROMOTION
 ): ValidationResult {
   const grounding = checkEntityGrounding(edge, lookup);
   const domainOverlap = checkDomainCoherence(edge, lookup);
@@ -358,7 +366,8 @@ function validateEdge(
     isDuplicate,
     contradictions,
     edge.confidence,
-    edge.reinforcement_count ?? 0
+    edge.reinforcement_count ?? 0,
+    promo
   );
 
   const evidenceObj: ValidationEvidence = {
@@ -415,7 +424,8 @@ function validateEdge(
 function validateNode(
   node: DreamNode,
   lookup: FactLookup,
-  cycle: number
+  cycle: number,
+  promo: PromotionConfig = DEFAULT_PROMOTION
 ): ValidationResult {
   // Check if inspiration entities exist
   const existingInspirations = node.inspiration.filter((id) =>
@@ -467,13 +477,13 @@ function validateNode(
   let outcome: NormalizationOutcome;
   let reason_code: NormalizationReasonCode;
   if (
-    confidence >= DEFAULT_PROMOTION.promotion_confidence &&
-    plausibility >= DEFAULT_PROMOTION.promotion_plausibility &&
+    confidence >= promo.promotion_confidence &&
+    plausibility >= promo.promotion_plausibility &&
     groundingRatio >= 0.5
   ) {
     outcome = "validated";
     reason_code = "strong_evidence";
-  } else if (plausibility >= DEFAULT_PROMOTION.retention_plausibility) {
+  } else if (plausibility >= promo.retention_plausibility) {
     outcome = "latent";
     reason_code = "insufficient_evidence";
   } else {
@@ -517,13 +527,14 @@ function validateNode(
 
 function promoteToValidatedEdge(
   edge: DreamEdge,
-  result: ValidationResult
+  result: ValidationResult,
+  promo: PromotionConfig = DEFAULT_PROMOTION
 ): ValidatedEdge | null {
   // Only "validated" outcome edges pass
   if (result.status !== "validated") return null;
 
   // Must have at least min_evidence_count distinct evidence signals
-  if (result.evidence_count < DEFAULT_PROMOTION.promotion_evidence_count) return null;
+  if (result.evidence_count < promo.promotion_evidence_count) return null;
 
   // Only edges between real fact graph entities can be promoted
   const validTypes = ["feature", "workflow", "data_model"] as const;
@@ -579,14 +590,26 @@ export interface NormalizationResult {
  * PRECONDITION: Engine must be in NORMALIZING state.
  */
 export async function normalize(
-  threshold: number = DEFAULT_PROMOTION.promotion_confidence,
+  threshold?: number,
   strict: boolean = false
 ): Promise<NormalizationResult> {
   engine.assertState("normalizing", "normalize");
 
+  // Resolve promotion config from active policy profile
+  const tuning = await getActiveCognitiveTuning();
+  const promo: PromotionConfig = {
+    promotion_confidence: tuning.promotion_confidence,
+    promotion_plausibility: tuning.promotion_plausibility,
+    promotion_evidence: tuning.promotion_evidence,
+    promotion_evidence_count: tuning.promotion_evidence_count,
+    retention_plausibility: tuning.retention_plausibility,
+    max_contradiction: tuning.max_contradiction,
+  };
+  const effectiveThreshold = threshold ?? promo.promotion_confidence;
+
   const cycle = engine.nextNormalizationCycle();
   logger.info(
-    `Normalization cycle #${cycle} starting (threshold: ${threshold}, strict: ${strict})`
+    `Normalization cycle #${cycle} starting (threshold: ${effectiveThreshold}, strict: ${strict}, profile tuning: confidence=${promo.promotion_confidence}, evidence_count=${promo.promotion_evidence_count})`
   );
 
   // Load fact graph and dream graph
@@ -608,10 +631,10 @@ export async function normalize(
     if (alreadyValidated.has(edge.id)) continue;
     if (edge.interrupted) continue;
 
-    const result = validateEdge(edge, lookup, cycle);
+    const result = validateEdge(edge, lookup, cycle, promo);
 
     // Apply custom threshold override
-    if (result.status === "validated" && result.confidence < threshold) {
+    if (result.status === "validated" && result.confidence < effectiveThreshold) {
       result.status = "latent";
       result.reason_code = "insufficient_evidence";
     }
@@ -634,7 +657,7 @@ export async function normalize(
 
     // PROMOTION GATE — only validated with sufficient evidence count
     if (result.status === "validated") {
-      const promoted = promoteToValidatedEdge(edge, result);
+      const promoted = promoteToValidatedEdge(edge, result, promo);
       if (promoted) {
         promotedEdges.push(promoted);
       } else {
@@ -650,9 +673,9 @@ export async function normalize(
     if (alreadyValidated.has(node.id)) continue;
     if (node.interrupted) continue;
 
-    const result = validateNode(node, lookup, cycle);
+    const result = validateNode(node, lookup, cycle, promo);
 
-    if (result.status === "validated" && result.confidence < threshold) {
+    if (result.status === "validated" && result.confidence < effectiveThreshold) {
       result.status = "latent";
       result.reason_code = "insufficient_evidence";
     }

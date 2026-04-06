@@ -1,1 +1,15 @@
-{}
+{
+  "_schema": "ResourceIndex — fast lookup map of all entities across features, workflows, and data_model",
+  "_fields": {
+    "entities": {
+      "<entity_id>": {
+        "type": "feature | workflow | data_model",
+        "uri": "dreamgraph://resource/<type>/<entity_id>",
+        "name": "Human-readable entity name",
+        "source_repo": "Repository name"
+      }
+    }
+  },
+  "_note": "DELETE _schema/_fields/_note keys after init_graph populates real index entries.",
+  "entities": {}
+}

@@ -18,6 +18,8 @@ import { registerADRTools } from "./adr-historian.js";
 import { registerUIRegistryTools } from "./ui-registry.js";
 import { registerLivingDocsTools } from "./living-docs-exporter.js";
 import { registerRuntimeSensesTools } from "./runtime-senses.js";
+import { registerInitGraphTool } from "./init-graph.js";
+import { registerEnrichSeedDataTool } from "./enrich-seed-data.js";
 import { logger } from "../utils/logger.js";
 
 export function registerTools(server: McpServer): void {
@@ -34,6 +36,8 @@ export function registerTools(server: McpServer): void {
   registerUIRegistryTools(server);
   registerLivingDocsTools(server);
   registerRuntimeSensesTools(server);
+  registerInitGraphTool(server);
+  registerEnrichSeedDataTool(server);
 
-  logger.info("Registered 20 tools");
+  logger.info("Registered 22 tools");
 }
