@@ -6,7 +6,7 @@
 
 ## What is DreamGraph?
 
-DreamGraph is a **cognitive dreaming engine** for MCP knowledge graphs. It speculatively discovers hidden connections between entities, validates them through a strict three-outcome classifier, and builds a persistent, evolving understanding of the systems it observes.
+DreamGraph is a **daemon-backed cognitive layer** and dreaming engine for software systems that builds a validated knowledge graph from code, workflows, schemas, and runtime signals, then continuously explores and verifies new relationships.
 
 It thinks in cycles: **dream → validate → learn → repeat** — and now schedules its own cognitive work autonomously.
 
