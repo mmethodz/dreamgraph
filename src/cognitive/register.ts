@@ -588,6 +588,7 @@ export function registerCognitiveTools(server: McpServer): void {
             // in the fact graph — the system "struggled" with these connections.
             // Tension urgency is scaled to 0.3–0.7 range so tensions are
             // meaningful but not overwhelming.
+            logger.info(`Tension pipeline: ${normalization.tensionCandidates?.length ?? 'UNDEFINED'} candidates, ${normalization.promotedEdges?.length ?? 0} promoted`);
             for (const tc of normalization.tensionCandidates) {
               const urgency = Math.max(0.3, Math.min(0.7,
                 tc.confidence * 2 + 0.2  // scale low confidences into useful range
@@ -600,17 +601,22 @@ export function registerCognitiveTools(server: McpServer): void {
               });
               tensionsCreated++;
             }
+            if (tensionsCreated > 0) {
+              logger.info(`Tension pipeline: ${tensionsCreated} tensions recorded`);
+            }
 
             // RESOLVE tensions when promoted edges address them
+            // Require BOTH endpoints of the promoted edge to appear in the
+            // tension's entity list — prevents a single match from resolving
+            // unrelated tensions.
             if (normalization.promotedEdges.length > 0) {
               const unresolvedTensions = await engine.getUnresolvedTensions();
               for (const promoted of normalization.promotedEdges) {
                 for (const tension of unresolvedTensions) {
                   if (tension.resolved) continue;
-                  const addresses = tension.entities.some(
-                    (e) => e === promoted.from || e === promoted.to
-                  );
-                  if (addresses) {
+                  const fromMatch = tension.entities.includes(promoted.from);
+                  const toMatch = tension.entities.includes(promoted.to);
+                  if (fromMatch && toMatch) {
                     await engine.resolveTension(
                       tension.id,
                       "system",

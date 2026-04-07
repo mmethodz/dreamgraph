@@ -916,12 +916,15 @@ class CognitiveEngine {
     const tensions = await this.loadTensions();
     const now = new Date().toISOString();
 
-    // Check for existing similar tension (same type + overlapping entities)
+    // Check for existing similar tension (same type + BOTH entities match)
+    // Previously used .some() which caused greedy merging — 27+ separate
+    // rejections would collapse into 1 mega-tension. Now require ALL
+    // entities from the new signal to already exist in the existing tension.
     const existing = tensions.signals.find(
       (s) =>
         s.type === signal.type &&
         !s.resolved &&
-        signal.entities.some((e) => s.entities.includes(e))
+        signal.entities.every((e) => s.entities.includes(e))
     );
 
     if (existing) {
@@ -933,12 +936,6 @@ class CognitiveEngine {
       );
       // Reset TTL on re-observation (tension is still alive)
       existing.ttl = this.tensionConfig.default_tension_ttl;
-      // Merge entity lists
-      for (const e of signal.entities) {
-        if (!existing.entities.includes(e)) {
-          existing.entities.push(e);
-        }
-      }
       await this.saveTensions(tensions);
       return existing;
     }

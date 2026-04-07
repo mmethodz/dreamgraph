@@ -252,6 +252,56 @@ async function executeAction(schedule: DreamSchedule): Promise<string> {
 
       engine.enterNormalizing();
       const normResult = await normalize();
+
+      // --- Tension creation from normalizer's tension candidates ---
+      let tensionsCreated = 0;
+      let tensionsResolved = 0;
+
+      if (normResult.tensionCandidates && normResult.tensionCandidates.length > 0) {
+        logger.info(`[scheduler] Tension pipeline: ${normResult.tensionCandidates.length} candidates, ${normResult.promotedEdges.length} promoted`);
+        for (const tc of normResult.tensionCandidates) {
+          const urgency = Math.max(0.3, Math.min(0.7,
+            tc.confidence * 2 + 0.2
+          ));
+          await engine.recordTension({
+            type: "weak_connection",
+            entities: [tc.from, tc.to],
+            description: `Dream "${tc.dreamId}" rejected: ${tc.reason}`,
+            urgency,
+          });
+          tensionsCreated++;
+        }
+        if (tensionsCreated > 0) {
+          logger.info(`[scheduler] Tension pipeline: ${tensionsCreated} tensions recorded`);
+        }
+      }
+
+      // --- Resolve tensions when promoted edges address them ---
+      if (normResult.promotedEdges.length > 0) {
+        const unresolvedTensions = await engine.getUnresolvedTensions();
+        for (const promoted of normResult.promotedEdges) {
+          for (const tension of unresolvedTensions) {
+            if (tension.resolved) continue;
+            // Require BOTH endpoints of the promoted edge to appear in the tension
+            const fromMatch = tension.entities.includes(promoted.from);
+            const toMatch = tension.entities.includes(promoted.to);
+            if (fromMatch && toMatch) {
+              await engine.resolveTension(
+                tension.id,
+                "system",
+                "confirmed_fixed",
+                "Addressed by promoted edge " + promoted.from + " -> " + promoted.to
+              );
+              tension.resolved = true;
+              tensionsResolved++;
+              logger.info(
+                "[scheduler] Tension resolved: '" + tension.id + "' addressed by promoted edge " + promoted.from + " -> " + promoted.to
+              );
+            }
+          }
+        }
+      }
+
       engine.wake();
 
       // Record history
@@ -274,8 +324,8 @@ async function executeAction(schedule: DreamSchedule): Promise<string> {
           promoted_entities: normResult.promotedNodes,
           blocked_by_gate: normResult.blockedByGate,
         },
-        tension_signals_created: 0,
-        tension_signals_resolved: 0,
+        tension_signals_created: tensionsCreated,
+        tension_signals_resolved: tensionsResolved,
         tensions_expired: tensionDecay.expired,
         tensions_decayed: tensionDecay.decayed,
       };
