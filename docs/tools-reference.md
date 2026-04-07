@@ -1,6 +1,6 @@
 # DreamGraph Tools Reference
 
-> Complete catalog of all 54 MCP tools (23 cognitive + 22 general + 9 discipline) and 22 MCP resources.
+> Complete catalog of all 55 MCP tools (23 cognitive + 23 general + 9 discipline) and 22 MCP resources.
 
 ---
 
@@ -424,6 +424,20 @@ Feed curated knowledge into the fact graph. The LLM reads source code (via code 
 **Replace mode**: All existing data is discarded. Only the validated incoming entries are written. Use when you have a complete, authoritative view and want to clean out stale `init_graph` data.
 
 Both modes auto-strip template stubs (`_schema`, `_fields`, `_note` entries), invalidate cache, and rebuild `index.json`.
+
+#### `scan_project`
+
+Automated project scan with LLM enrichment. Scans the project directory structure, reads key source files, then uses the configured dreamer LLM to generate rich semantic entries for features, workflows, and data model entities. Non-destructive — always uses merge mode. Falls back to structural-only analysis if no LLM is configured.
+
+This is a convenience orchestrator. All individual tools (`init_graph`, `enrich_seed_data`, `register_ui_element`) remain available for manual or targeted enrichment.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `depth` | enum | `deep` | `shallow` (3 levels) or `deep` (10 levels). Shallow is faster but may miss nested modules. |
+| `targets` | string[] | all three | Subset of `["features", "workflows", "data_model"]` to populate. |
+| `repos` | string[] | all configured | Specific repo names to scan. |
+
+**Returns:** Summary with counts for repos scanned, files discovered, UI files detected, technology detected, features/workflows/data_model inserted/updated/total, index entries rebuilt, LLM tokens used, and any warnings.
 
 ---
 

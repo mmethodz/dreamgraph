@@ -16,7 +16,7 @@
  *   for existing deployments.
  */
 
-import { mkdir, writeFile, readFile, copyFile, readdir } from "node:fs/promises";
+import { mkdir, writeFile, readFile, copyFile, readdir, rename } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -385,7 +385,13 @@ export async function updateInstanceCounters(
 
   try {
     const raw = await readFile(instancePath, "utf-8");
-    const instance = JSON.parse(raw) as DreamGraphInstance;
+    // Guard against empty / truncated reads (race with concurrent writes)
+    const trimmed = raw.trim();
+    if (!trimmed || !trimmed.startsWith("{")) {
+      logger.debug("instance.json empty or truncated — skipping counter update");
+      return;
+    }
+    const instance = JSON.parse(trimmed) as DreamGraphInstance;
 
     if (updates.total_dream_cycles !== undefined) {
       instance.total_dream_cycles = updates.total_dream_cycles;
@@ -395,7 +401,10 @@ export async function updateInstanceCounters(
     }
     instance.last_active_at = updates.last_active_at ?? new Date().toISOString();
 
-    await writeFile(instancePath, JSON.stringify(instance, null, 2), "utf-8");
+    // Atomic write: tmp file + rename to avoid partial-read races
+    const tmp = instancePath + ".tmp";
+    await writeFile(tmp, JSON.stringify(instance, null, 2), "utf-8");
+    await rename(tmp, instancePath);
   } catch (err) {
     logger.warn(`Failed to update instance counters: ${err instanceof Error ? err.message : err}`);
   }

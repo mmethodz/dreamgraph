@@ -60,7 +60,7 @@ Speculative Edge → Normalization → Promotion Gate → Validated Edge
 graph TB
     subgraph "MCP Protocol Layer"
         Server["MCP Server<br/>STDIO / Streamable HTTP"]
-        Tools["54 Tools"]
+        Tools["55 Tools"]
         Resources["22 Resources"]
     end
 

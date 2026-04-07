@@ -677,11 +677,30 @@ Sessions are isolated — each connecting client gets its own `mcp-session-id` h
 
 ### 5. Dream
 
-Tell the AI to explore your codebase and start dreaming:
+Bootstrap your knowledge graph — pick either the quick automated path or the manual path:
+
+**Quick path** — one tool does everything:
+
+```
+scan_project()
+```
+
+This scans your project structure, reads key source files, uses the LLM to extract rich features, workflows, and data model entities, and populates all seed data in merge mode. Non-destructive and safe to re-run.
+
+**Manual path** — full control over each step:
 
 > "Read my codebase, build the knowledge graph, and run the first dream cycle."
 
 Or trigger it directly:
+
+```
+init_graph()
+enrich_seed_data(target="features", entries=[...])
+enrich_seed_data(target="workflows", entries=[...])
+enrich_seed_data(target="data_model", entries=[...])
+```
+
+Then start dreaming:
 
 ```
 dream_cycle(strategy="all", max_dreams=100)
@@ -879,7 +898,7 @@ None are required. Without `DREAMGRAPH_REPOS` (and no instance-mode repos), code
 ```
                 +--------------+
                 |   MCP Layer  |
-                | (54 tools)   |
+                | (55 tools)   |
                 +------+-------+
                        |
         +--------------v--------------+
@@ -989,6 +1008,7 @@ src/
 │   ├── solidify-insight.ts # solidify_cognitive_insight
 │   ├── enrich-seed-data.ts # enrich_seed_data (merge/replace seed data)
 │   ├── init-graph.ts       # init_graph (bootstrap knowledge graph from source)
+│   ├── scan-project.ts     # scan_project (automated project scan + LLM enrichment)
 │   ├── visual-architect.ts # generate_visual_flow (Mermaid diagrams)
 │   ├── adr-historian.ts    # record/query/deprecate architecture decisions
 │   ├── ui-registry.ts      # register/query UI elements, migration plans
@@ -1082,7 +1102,7 @@ data/                                   # Legacy mode (flat) or <instance>/data/
 | `delete_schedule` | Permanently remove a schedule |
 | `get_schedule_history` | Retrieve execution history for a schedule or all schedules |
 
-### Sense & Knowledge Tools (14)
+### Sense & Knowledge Tools (15)
 
 | Tool | Description |
 |---|---|
@@ -1096,6 +1116,7 @@ data/                                   # Legacy mode (flat) or <instance>/data/
 | `solidify_cognitive_insight` | Persist a validated insight to the knowledge graph |
 | `enrich_seed_data` | Feed curated knowledge (features, workflows, data model) into the fact graph with merge or replace mode |
 | `init_graph` | Bootstrap a knowledge graph from source code — scans repos and builds seed data |
+| `scan_project` | Automated project scan with LLM enrichment — populates features, workflows, and data model in one call (merge mode, non-destructive) |
 | `get_workflow` | Retrieve a specific workflow by ID |
 | `search_data_model` | Search for a data entity by name |
 | `query_resource` | Query features, workflows, or data model with filters |

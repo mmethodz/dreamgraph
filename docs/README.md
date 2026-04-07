@@ -21,7 +21,7 @@ System overview, cognitive states, state machine, promotion pipeline, feature de
 How the engine thinks: state machine internals, 10 dream strategies (incl. LLM dream + PGO wave), normalization pipeline, speculative memory lifecycle, tension system, adversarial dreaming, causal/temporal analysis, v5.1 capabilities (metacognitive self-tuning, event-driven dreaming, continuous narrative), and v5.2 dream scheduling.
 
 ### [Tools Reference](tools-reference.md)
-Complete catalog of all **54 MCP tools** (23 cognitive + 22 general + 9 discipline) and **22 MCP resources**, with parameters, types, defaults, and descriptions.
+Complete catalog of all **55 MCP tools** (23 cognitive + 23 general + 9 discipline) and **22 MCP resources**, with parameters, types, defaults, and descriptions.
 
 ### [Data Model](data-model.md)
 All **13 data stores**: dream graph, candidate edges, validated edges, tension log, dream history, threat log, archetypes, ADR log, UI registry, fact graph, capabilities, system story, and schedules. Full schemas and relationship map.
