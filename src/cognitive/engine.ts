@@ -927,6 +927,30 @@ class CognitiveEngine {
         signal.entities.every((e) => s.entities.includes(e))
     );
 
+    // If no existing match, enforce max_active_tensions cap
+    // Merging into existing tensions (occurrences++) is always allowed.
+    if (!existing) {
+      const activeCount = tensions.signals.filter((s) => !s.resolved).length;
+      if (activeCount >= this.tensionConfig.max_active_tensions) {
+        logger.debug(`Tension cap reached (${activeCount}/${this.tensionConfig.max_active_tensions}), skipping new tension for [${signal.entities.join(", ")}]`);
+        // Return a stub so callers don't break — but don't persist
+        return {
+          id: "capped",
+          type: signal.type,
+          domain: "general",
+          entities: signal.entities,
+          description: signal.description,
+          occurrences: 0,
+          urgency: 0,
+          first_seen: now,
+          last_seen: now,
+          attempted: false,
+          resolved: true,
+          ttl: 0,
+        } as TensionSignal;
+      }
+    }
+
     if (existing) {
       existing.occurrences++;
       existing.last_seen = now;

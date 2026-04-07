@@ -588,8 +588,14 @@ export function registerCognitiveTools(server: McpServer): void {
             // in the fact graph — the system "struggled" with these connections.
             // Tension urgency is scaled to 0.3–0.7 range so tensions are
             // meaningful but not overwhelming.
-            logger.info(`Tension pipeline: ${normalization.tensionCandidates?.length ?? 'UNDEFINED'} candidates, ${normalization.promotedEdges?.length ?? 0} promoted`);
-            for (const tc of normalization.tensionCandidates) {
+            // Sort by confidence descending and take top 5 per cycle to prevent
+            // tension floods. Recurring rejections will naturally reappear and
+            // merge via occurrences++, building urgency organically.
+            const sortedCandidates = [...normalization.tensionCandidates]
+              .sort((a, b) => b.confidence - a.confidence)
+              .slice(0, 5);
+            logger.info(`Tension pipeline: ${normalization.tensionCandidates?.length ?? 'UNDEFINED'} candidates, selecting top ${sortedCandidates.length}, ${normalization.promotedEdges?.length ?? 0} promoted`);
+            for (const tc of sortedCandidates) {
               const urgency = Math.max(0.3, Math.min(0.7,
                 tc.confidence * 2 + 0.2  // scale low confidences into useful range
               ));

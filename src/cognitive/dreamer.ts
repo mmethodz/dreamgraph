@@ -42,6 +42,7 @@ import type {
   TensionSignal,
 } from "./types.js";
 import { DEFAULT_DECAY } from "./types.js";
+import { groundEntities } from "../utils/senses.js";
 
 // ---------------------------------------------------------------------------
 // Fact Graph Snapshot — in-memory read-only copy for dream analysis
@@ -803,8 +804,9 @@ const DREAM_RESPONSE_SCHEMA: Record<string, unknown> = {
           reason:     { type: "string", description: "Why this connection exists (1-2 sentences)" },
           confidence: { type: "number", description: "0.0-1.0 confidence estimate" },
           type:       { type: "string", description: "Edge type (default: hypothetical)" },
+          source_evidence: { type: "string", description: "REQUIRED: The source file path and line/function/class that justifies this connection. Must reference code from the Source Code Evidence section. Example: 'src/MEF/Hosting/ToolHost.cs:LoadPlugins() calls IPlugin.Initialize() — proving dependency chain'" },
         },
-        required: ["from", "to", "relation", "reason", "confidence", "type"],
+        required: ["from", "to", "relation", "reason", "confidence", "type", "source_evidence"],
         additionalProperties: false,
       },
     },
@@ -910,30 +912,29 @@ async function llmDream(
   scored.sort((a, b) => b.score - a.score);
   const entitiesToSummarize = scored.slice(0, 80).map(s => s.entity);
 
+  // --- BLINDFOLDED SUMMARIES ---
+  // Only give the LLM skeletal metadata (ID, name, type, domain, files).
+  // NO descriptions, NO keywords, NO tags, NO steps, NO key_fields.
+  // Force it to READ the actual source code (provided in grounding section)
+  // to understand what entities do.
   for (const e of entitiesToSummarize) {
     const parts = [`[${e.id}] ${e.name} (${e.type}, domain: ${e.domain || "none"})`];
-    if (e.description) parts.push(`  desc: ${e.description.slice(0, 200)}`);
-    if (e.keywords.length > 0) parts.push(`  keywords: ${e.keywords.join(", ")}`);
-    if (e.tags.length > 0) parts.push(`  tags: ${e.tags.join(", ")}`);
-    if (e.source_files.length > 0) parts.push(`  files: ${e.source_files.slice(0, 5).join(", ")}`);
-    if (e.steps.length > 0) parts.push(`  steps: ${e.steps.join(" → ")}`);
-    if (e.key_fields.length > 0) parts.push(`  fields: ${e.key_fields.join(", ")}`);
-    if (e.relationships.length > 0) {
-      parts.push(`  relations: ${e.relationships.map(r => `${r.type}→${r.target} via ${r.via}`).join(", ")}`);
-    }
+    if (e.source_files.length > 0) parts.push(`  files: ${e.source_files.slice(0, 3).join(", ")}`);
     entitySummaries.push(parts.join("\n"));
   }
 
-  // Summarize existing edges (cap at 60)
+  // Only show VALIDATED edges (cap at 20) — no speculative/latent context
   let edgeCount = 0;
   for (const e of snapshot.entities.values()) {
-    if (edgeCount >= 60) break;
+    if (edgeCount >= 20) break;
     for (const link of e.links) {
-      if (edgeCount >= 60) break;
-      edgeSummaries.push(
-        `${e.id} --[${link.relationship}${link.strength ? ` (${link.strength})` : ""}]--> ${link.target}`
-      );
-      edgeCount++;
+      if (edgeCount >= 20) break;
+      if (link.strength === "strong" || link.strength === "moderate") {
+        edgeSummaries.push(
+          `${e.id} --[${link.relationship}]--> ${link.target}`
+        );
+        edgeCount++;
+      }
     }
   }
 
@@ -961,6 +962,44 @@ async function llmDream(
     }
   } catch { /* ignore */ }
 
+  // -----------------------------------------------------------------------
+  // Reality Grounding Phase — read actual source code for tension entities
+  // so the LLM dreams about code it has SEEN, not just entity abstractions.
+  // -----------------------------------------------------------------------
+  let groundingContext = "";
+  try {
+    // Prioritize entities involved in active tensions, then high-scored
+    const entitiesToGround = entitiesToSummarize
+      .filter((e) => e.source_files.length > 0)
+      .sort((a, b) => {
+        const aT = tensionEntityIds.has(a.id) ? 1 : 0;
+        const bT = tensionEntityIds.has(b.id) ? 1 : 0;
+        return bT - aT; // tension entities first
+      })
+      .slice(0, 8)
+      .map((e) => ({ id: e.id, sourceFiles: e.source_files }));
+
+    if (entitiesToGround.length > 0) {
+      const grounding = await groundEntities(entitiesToGround, 8, 40);
+      if (grounding.length > 0) {
+        const snippets = grounding.map((g) => {
+          let text = `### ${g.entityId} — ${g.file}\n\`\`\`\n${g.snippet}\n\`\`\``;
+          if (g.recentChanges && g.recentChanges.length > 0) {
+            text += `\nRecent changes: ${g.recentChanges.map((c) => c.message).join("; ")}`;
+          }
+          return text;
+        });
+        groundingContext = "\n## Source Code Evidence (real code from the project)\n" +
+          snippets.join("\n\n");
+        logger.info(
+          `LLM dream grounding: read ${grounding.length} source files for ${entitiesToGround.length} entities`
+        );
+      }
+    }
+  } catch (err) {
+    logger.debug(`LLM dream grounding: failed (${err instanceof Error ? err.message : "error"})`);
+  }
+
   // Build the dream prompt
   const systemPrompt = `You are the cognitive dream engine of DreamGraph — a knowledge graph system that analyzes software projects. Your role is to DREAM: to make creative, speculative connections between entities that structural analysis alone would miss.
 
@@ -968,13 +1007,32 @@ You analyze a knowledge graph of features, workflows, and data models and propos
 
 Rules:
 - Output ONLY valid JSON — an array of edge objects
-- Each edge needs: from (entity ID), to (entity ID), relation (verb), reason (1-2 sentences WHY), confidence (0.0-1.0), and optionally type ("hypothetical" for dream nodes)
+- Each edge needs: from (entity ID), to (entity ID), relation (verb), reason (1-2 sentences WHY), confidence (0.0-1.0), type ("hypothetical" for dream edges), and source_evidence (MANDATORY)
 - Use EXISTING entity IDs from the graph (listed below). Do NOT invent entity IDs.
-- Be creative but grounded — propose connections that COULD be real based on the evidence
-- Focus on: hidden dependencies, architectural patterns, data flow insights, integration opportunities, potential risks, emergent behaviors
-- Confidence guide: 0.3-0.5 = speculative hunch, 0.5-0.7 = reasonable hypothesis, 0.7-0.9 = strong inference
+- **PROOF OF WORK**: Every edge MUST include a "source_evidence" field citing the specific source file path, function, class, or line from the Source Code Evidence section below. Edges without source evidence will be REJECTED by the normalizer. If you cannot cite real code, do not propose the edge.
+- Be creative but grounded IN THE CODE — propose connections that the source code PROVES or strongly implies
+- Focus on: hidden dependencies found in actual imports/calls, architectural patterns visible in code structure, data flow through actual function signatures, integration points proven by shared interfaces
+- Confidence guide: 0.3-0.5 = code hints at it, 0.5-0.7 = code structure supports it, 0.7-0.9 = code directly proves it
 - Aim for ${Math.min(max, 15)} edges (quality over quantity)
-- If you see potential for a NEW concept (something not in the graph), include it as a "new_node" object with: id (dream_llm_<name>), name, description, type ("hypothetical_feature" or "hypothetical_workflow" or "hypothetical_entity"), domain (e.g. "inference", "core"), keywords (array of semantic tags), and category ("feature", "workflow", or "data_model"). Nodes with strong evidence will be promoted into the fact graph after normalization.`;
+- If you see potential for a NEW concept (something not in the graph), include it as a "new_node" object with: id (dream_llm_<name>), name, description, type ("hypothetical_feature" or "hypothetical_workflow" or "hypothetical_entity"), domain (e.g. "inference", "core"), keywords (array of semantic tags), and category ("feature", "workflow", or "data_model"). Nodes with strong evidence will be promoted into the fact graph after normalization.
+- Copy-paste exact identifiers, class names, or short code fragments (under 50 characters). Do NOT include markdown formatting, newlines, or extra indentation in the source_evidence string, as this will break the exact substring verification.
+- Output format MUST be strictly this JSON array:
+  [
+    {
+      "from": "entity-1",
+      "to": "entity-2",
+      "relation": "implements",
+      "reason": "Because Class A implements Interface B.",
+      "confidence": 0.8,
+      "type": "hypothetical",
+      "source_evidence": "public class JsonFormatter : IGuiTool",
+      "new_node": null // OR the new node object if applicable
+    }
+  ]
+
+CRITICAL: Your source_evidence field is verified programmatically against the actual source code provided. If it contains ANY text not present in the Source Code Evidence section, the edge is REJECTED. Copy-paste exact identifiers, class names, method names, or code fragments. Do NOT paraphrase, abbreviate, or invent code.
+
+CRITICAL: If the provided source code does NOT contain evidence for a connection, return FEWER edges or an empty array. It is better to return 0 edges than to fabricate evidence. Empty arrays are a valid and expected response.`;
 
   const userPrompt = `# Knowledge Graph — Dream Cycle #${cycle}
 
@@ -995,11 +1053,12 @@ ${Array.from(snapshot.sourceFileIndex.entries())
   .join("\n") || "(none detected)"}
 ${tensionContext}
 ${validatedContext}
+${groundingContext}
 
-Analyze this knowledge graph. Propose ${Math.min(max, 15)} creative edge hypotheses that structural analysis would miss. Output a JSON object with:
+Analyze the SOURCE CODE EVIDENCE above together with the entity graph. Propose ${Math.min(max, 15)} edge hypotheses that are GROUNDED IN THE CODE you can see. Every edge must cite specific source evidence. Output a JSON object with:
 {
   "edges": [
-    { "from": "entity_id", "to": "entity_id", "relation": "verb", "reason": "why this connection", "confidence": 0.5 }
+    { "from": "entity_id", "to": "entity_id", "relation": "verb", "reason": "why this connection", "confidence": 0.5, "source_evidence": "src/path/File.cs:ClassName.Method() — proves X" }
   ],
   "new_nodes": [
     { "id": "dream_llm_name", "name": "Descriptive Name", "description": "What this concept represents", "intent": "WHY this entity should exist and what role it plays in the system", "type": "hypothetical_feature", "domain": "core", "keywords": ["tag1", "tag2"], "category": "feature" }
@@ -1027,7 +1086,7 @@ Analyze this knowledge graph. Propose ${Math.min(max, 15)} creative edge hypothe
     logger.debug(`LLM dream: received ${response.text.length} chars from ${response.model}`);
 
     // Parse the LLM response
-    const parsed = parseLlmDreamResponse(response.text, snapshot, cycle, now, entityIds);
+    const parsed = parseLlmDreamResponse(response.text, snapshot, cycle, now, entityIds, groundingContext);
     edges.push(...parsed.edges.slice(0, max));
     nodes.push(...parsed.nodes.slice(0, Math.ceil(max / 3)));
 
@@ -1054,6 +1113,7 @@ function parseLlmDreamResponse(
   cycle: number,
   now: string,
   knownIds: string[],
+  groundingContext: string = "",
 ): { edges: DreamEdge[]; nodes: DreamNode[] } {
   const edges: DreamEdge[] = [];
   const nodes: DreamNode[] = [];
@@ -1066,6 +1126,7 @@ function parseLlmDreamResponse(
       reason?: string;
       confidence?: number;
       type?: string;
+      source_evidence?: string;
     }>;
     new_nodes?: Array<{
       id?: string;
@@ -1141,9 +1202,56 @@ function parseLlmDreamResponse(
     });
   }
 
+  // Build normalized grounding text for substring validation.
+  // We collapse whitespace so minor formatting differences don't cause
+  // false negatives, but the LLM must still cite real identifiers.
+  const normalizedGrounding = groundingContext.replace(/\s+/g, " ").toLowerCase();
+
+  /**
+   * Validate source_evidence against actual grounding context.
+   * Extracts key identifiers (class names, method names, file paths)
+   * from the evidence string and checks each appears in the code we
+   * actually showed the LLM. At least 2 distinct tokens must match.
+   */
+  function isEvidenceGrounded(evidence: string): boolean {
+    if (!evidence || evidence.trim().length < 10) return false;
+    if (!normalizedGrounding) return false; // no grounding = can't verify
+
+    // Extract meaningful tokens: identifiers, file paths, method calls
+    // Match CamelCase words, dotted paths, file paths with extensions
+    const tokens = evidence.match(/[A-Za-z_][A-Za-z0-9_.]{3,}/g) ?? [];
+    const uniqueTokens = [...new Set(tokens.map((t) => t.toLowerCase()))];
+
+    // Each token must appear in the grounding context
+    let matchCount = 0;
+    for (const token of uniqueTokens) {
+      if (normalizedGrounding.includes(token)) {
+        matchCount++;
+      }
+    }
+
+    // Require at least 2 distinct grounded tokens to pass
+    return matchCount >= 2;
+  }
+
   // Process edges
+  let rejectedNoEvidence = 0;
+  let rejectedFakeEvidence = 0;
   for (const e of data.edges ?? []) {
     if (!e.from || !e.to || !e.relation) continue;
+
+    // PROOF OF WORK: reject edges without source evidence
+    if (!e.source_evidence || e.source_evidence.trim().length < 10) {
+      rejectedNoEvidence++;
+      continue;
+    }
+
+    // RECEIPT CHECK: verify the citation actually appears in the code we showed
+    if (!isEvidenceGrounded(e.source_evidence)) {
+      rejectedFakeEvidence++;
+      logger.debug(`LLM dream: rejected fabricated evidence: "${e.source_evidence.slice(0, 80)}..."`);
+      continue;
+    }
 
     // Validate that entity IDs exist (in fact graph or in new dream nodes)
     const fromValid = idSet.has(e.from) || newNodeIds.has(e.from);
@@ -1172,7 +1280,7 @@ function parseLlmDreamResponse(
       created_at: now,
       dream_cycle: cycle,
       strategy: "llm_dream",
-      meta: { llm_generated: true },
+      meta: { llm_generated: true, source_evidence: e.source_evidence ?? "" },
       ttl: DEFAULT_DECAY.ttl + 2, // LLM dreams get slightly longer TTL
       decay_rate: DEFAULT_DECAY.decay_rate,
       reinforcement_count: 0,
@@ -1183,6 +1291,10 @@ function parseLlmDreamResponse(
       evidence_score: 0,
       contradiction_score: 0,
     });
+  }
+
+  if (rejectedNoEvidence > 0 || rejectedFakeEvidence > 0) {
+    logger.info(`LLM dream: rejected ${rejectedNoEvidence} edges with no evidence, ${rejectedFakeEvidence} with fabricated evidence (proof-of-work filter)`);
   }
 
   return { edges, nodes };

@@ -258,8 +258,14 @@ async function executeAction(schedule: DreamSchedule): Promise<string> {
       let tensionsResolved = 0;
 
       if (normResult.tensionCandidates && normResult.tensionCandidates.length > 0) {
-        logger.info(`[scheduler] Tension pipeline: ${normResult.tensionCandidates.length} candidates, ${normResult.promotedEdges.length} promoted`);
-        for (const tc of normResult.tensionCandidates) {
+        // Sort by confidence descending and take top 5 per cycle to prevent
+        // tension floods. Lower-confidence rejections will recur in future
+        // cycles if they're real, naturally building urgency over time.
+        const sortedCandidates = [...normResult.tensionCandidates]
+          .sort((a, b) => b.confidence - a.confidence)
+          .slice(0, 5);
+        logger.info(`[scheduler] Tension pipeline: ${normResult.tensionCandidates.length} candidates, selecting top ${sortedCandidates.length}, ${normResult.promotedEdges.length} promoted`);
+        for (const tc of sortedCandidates) {
           const urgency = Math.max(0.3, Math.min(0.7,
             tc.confidence * 2 + 0.2
           ));

@@ -253,6 +253,7 @@ export function registerGitSensesTools(server: McpServer): void {
               cwd: root,
               timeout: GIT_TIMEOUT_MS,
               maxBuffer: MAX_OUTPUT_BYTES,
+              windowsHide: true,
             });
 
             const commits = parseGitLog(stdout);
@@ -344,6 +345,7 @@ export function registerGitSensesTools(server: McpServer): void {
               cwd: root,
               timeout: GIT_TIMEOUT_MS,
               maxBuffer: MAX_OUTPUT_BYTES,
+              windowsHide: true,
             });
 
             const blameLines = parseGitBlame(stdout);
