@@ -140,4 +140,4 @@ get_system_narrative(depth="technical")
 
 ## License
 
-MIT
+DreamGraph License v1.0
