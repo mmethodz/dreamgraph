@@ -53,33 +53,66 @@ import type {
 // Zod schemas for LLM-supplied entity data
 // ---------------------------------------------------------------------------
 
+// Lenient schemas: accept both full objects AND plain strings.
+// LLMs frequently send simplified forms; we coerce them to full objects.
+
 const GraphLinkSchema = z.object({
   target: z.string(),
-  type: z.enum(["feature", "workflow", "data_model"]),
-  relationship: z.string(),
-  description: z.string(),
+  type: z.enum(["feature", "workflow", "data_model"]).default("feature"),
+  relationship: z.string().default("related_to"),
+  description: z.string().default(""),
   strength: z.enum(["strong", "moderate", "weak"]).default("moderate"),
 }).passthrough();
+
+/** Accept full GraphLink object OR a plain string (coerced to a link target). */
+const GraphLinkLenient = z.union([
+  GraphLinkSchema,
+  z.string().transform((s) => ({
+    target: s,
+    type: "feature" as const,
+    relationship: "related_to",
+    description: "",
+    strength: "moderate" as const,
+  })),
+]);
+
+/** Accept a string path or an object like {path: "..."}. */
+const SourceFileItem = z.union([
+  z.string(),
+  z.object({ path: z.string() }).transform((o) => o.path),
+  z.object({ file: z.string() }).transform((o) => o.file),
+  z.object({ rel: z.string() }).transform((o) => o.rel),
+]);
 
 const FeatureEntrySchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   description: z.string().default(""),
   source_repo: z.string().default(""),
-  source_files: z.array(z.string()).default([]),
+  source_files: z.array(SourceFileItem).default([]),
   status: z.string().default("active"),
   category: z.string().default("core"),
   tags: z.array(z.string()).default([]),
   domain: z.string().default("core"),
   keywords: z.array(z.string()).default([]),
-  links: z.array(GraphLinkSchema).default([]),
+  links: z.array(GraphLinkLenient).default([]),
 }).passthrough();
 
 const WorkflowStepSchema = z.object({
-  order: z.number(),
+  order: z.number().default(0),
   name: z.string(),
   description: z.string().default(""),
 });
+
+/** Accept full step object OR a plain string (coerced to a named step). */
+const WorkflowStepLenient = z.union([
+  WorkflowStepSchema,
+  z.string().transform((s) => ({
+    order: 0,
+    name: s,
+    description: "",
+  })),
+]);
 
 const WorkflowEntrySchema = z.object({
   id: z.string().min(1),
@@ -87,12 +120,12 @@ const WorkflowEntrySchema = z.object({
   description: z.string().default(""),
   trigger: z.string().default(""),
   source_repo: z.string().default(""),
-  source_files: z.array(z.string()).default([]),
+  source_files: z.array(SourceFileItem).default([]),
   domain: z.string().default("core"),
   keywords: z.array(z.string()).default([]),
   status: z.string().default("active"),
-  steps: z.array(WorkflowStepSchema).default([]),
-  links: z.array(GraphLinkSchema).default([]),
+  steps: z.array(WorkflowStepLenient).default([]),
+  links: z.array(GraphLinkLenient).default([]),
 }).passthrough();
 
 const EntityFieldSchema = z.object({
@@ -101,11 +134,23 @@ const EntityFieldSchema = z.object({
   description: z.string().default(""),
 });
 
+/** Accept full field object OR a plain string (coerced to a named field). */
+const EntityFieldLenient = z.union([
+  EntityFieldSchema,
+  z.string().transform((s) => ({ name: s, type: "unknown", description: "" })),
+]);
+
 const EntityRelationshipSchema = z.object({
   type: z.string(),
   target: z.string(),
   via: z.string().default(""),
 });
+
+/** Accept full rel object OR a plain string (coerced to a references target). */
+const EntityRelationshipLenient = z.union([
+  EntityRelationshipSchema,
+  z.string().transform((s) => ({ type: "references", target: s, via: "" })),
+]);
 
 const DataModelEntrySchema = z.object({
   id: z.string().min(1),
@@ -114,13 +159,13 @@ const DataModelEntrySchema = z.object({
   table_name: z.string().default(""),
   storage: z.string().default("unknown"),
   source_repo: z.string().default(""),
-  source_files: z.array(z.string()).default([]),
+  source_files: z.array(SourceFileItem).default([]),
   domain: z.string().default("core"),
   keywords: z.array(z.string()).default([]),
   status: z.string().default("active"),
-  key_fields: z.array(EntityFieldSchema).default([]),
-  relationships: z.array(EntityRelationshipSchema).default([]),
-  links: z.array(GraphLinkSchema).default([]),
+  key_fields: z.array(EntityFieldLenient).default([]),
+  relationships: z.array(EntityRelationshipLenient).default([]),
+  links: z.array(GraphLinkLenient).default([]),
 }).passthrough();
 
 // ---------------------------------------------------------------------------
@@ -253,9 +298,16 @@ export function registerEnrichSeedDataTool(server: McpServer): void {
         .array(z.record(z.string(), z.unknown()))
         .min(1)
         .describe(
-          "Array of entity objects. Each must have at minimum 'id' and 'name'. " +
-          "Structure depends on target: features need category/tags/domain/keywords/links, " +
-          "workflows need trigger/steps/domain, data_model needs table_name/storage/key_fields/relationships.",
+          "Array of entity objects. Each MUST have 'id' (string) and 'name' (string). " +
+          "Common optional fields: description, source_repo, source_files (string[]), " +
+          "domain, keywords (string[]), status, tags (string[]), " +
+          "links (array of {target, type, relationship, description, strength} — or plain target strings). " +
+          "Features additionally: category. " +
+          "Workflows additionally: trigger, steps (array of {order, name, description} — or plain step-name strings). " +
+          "Data model additionally: table_name, storage, " +
+          "key_fields (array of {name, type, description} — or plain field-name strings), " +
+          "relationships (array of {type, target, via} — or plain target strings). " +
+          "Simple string values are auto-coerced to full objects where possible.",
         ),
       mode: z
         .enum(["merge", "replace"])
@@ -297,7 +349,15 @@ export function registerEnrichSeedDataTool(server: McpServer): void {
               for (const raw of entries) {
                 const parsed = WorkflowEntrySchema.safeParse(raw);
                 if (parsed.success) {
-                  validated.push(parsed.data as unknown as Workflow);
+                  // Re-number steps that have order=0 (from string coercion or missing order)
+                  const wf = parsed.data as unknown as Workflow;
+                  if (wf.steps?.length) {
+                    const needsRenumber = wf.steps.some((s: WorkflowStep) => s.order === 0);
+                    if (needsRenumber) {
+                      wf.steps.forEach((s: WorkflowStep, i: number) => { s.order = i + 1; });
+                    }
+                  }
+                  validated.push(wf);
                 } else {
                   validationErrors.push(
                     `Workflow entry '${(raw as Record<string, unknown>).id ?? "?"}': ${parsed.error.issues.map((i) => i.message).join("; ")}`,

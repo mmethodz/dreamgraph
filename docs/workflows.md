@@ -16,7 +16,7 @@
 |------|------|-------------|
 | 1 | Pre-flight checks | Assert AWAKE state. Load dream graph from disk. |
 | 2 | Transition to REM | AWAKE → REM. Fact graph loaded as grounding dataset. |
-| 3 | Strategy selection | Select from 8 strategies. Budget distributed adaptively — strategies with 3+ zero-yield cycles are benched, probed every 6th cycle. |
+| 3 | Strategy selection | Select from 10 strategies (incl. LLM dream + PGO wave). Budget: LLM 35%, PGO wave 15%, structural 50% — distributed adaptively. Strategies with 3+ zero-yield cycles are benched, probed every 6th cycle. LLM dream and PGO wave are never benched. |
 | 4 | Speculative generation | Each strategy generates DreamEdges with initial TTL=8, strategy-specific confidence. Deduplication applied. Edges matching reinforcement memory inherit accumulated count. Max dreams capped (default 20). |
 | 5 | Dream persistence | New edges appended to `dream_graph.json`. Duplicates get `reinforcement_count++` instead of duplication. |
 | 6 | Transition to NORMALIZING | REM → NORMALIZING (if `auto_normalize=true`). |

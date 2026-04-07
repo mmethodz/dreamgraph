@@ -86,28 +86,30 @@ interface DirectoryEntry {
 // ---------------------------------------------------------------------------
 
 export function registerCodeSensesTools(server: McpServer): void {
+  const repoNames = Object.keys(config.repos);
+  const repoDesc = repoNames.length > 0
+    ? `Repository name. Available: ${repoNames.map(r => `"${r}"`).join(", ")}. Path is resolved relative to this repo root.`
+    : "Repository name (none currently configured). Path is resolved relative to repo root.";
+
   // =========================================================================
   // list_directory — Browse workspace directories
   // =========================================================================
   server.tool(
     "list_directory",
-    "Listaa tiedostot ja kansiot annetussa polussa. Käytä tätä löytääksesi oikeat kooditiedostot. " +
-      "Polku voi olla suhteellinen mihin tahansa konfiguroituun repoon, tai absoluuttinen. " +
-      "Palauttaa nimen ja tyypin (tiedosto/kansio) jokaiselle kohteelle.",
+    "List files and directories at the given path. Use this to discover the right source files. " +
+      "Path can be relative to any configured repo, or absolute. " +
+      "Returns the name and type (file/directory) for each entry.",
     {
       dirPath: z
         .string()
         .describe(
-          "Kansion polku suhteessa projektin juureen (esim. 'src/server') " +
-            "tai absoluuttinen polku. Tyhjä merkkijono listaa repon juuren."
+          "Directory path relative to the project root (e.g. 'src/server') " +
+            "or an absolute path. Empty string lists the repo root."
         ),
       repo: z
         .string()
         .optional()
-        .describe(
-          "Repository name as configured in DREAMGRAPH_REPOS. " +
-            "Jos annettu, dirPath ratkaistaan tämän repon juuresta."
-        ),
+        .describe(repoDesc),
     },
     async ({ dirPath, repo }) => {
       logger.debug(
@@ -184,29 +186,26 @@ export function registerCodeSensesTools(server: McpServer): void {
   // =========================================================================
   server.tool(
     "read_source_code",
-    "Lukee ja palauttaa lähdekooditiedoston sisällön. Käytä tätä validoidaksesi, " +
-      "miten asiat on oikeasti koodattu. Tiedoston sisältö palautetaan markdown-koodilohkossa.",
+    "Read and return the contents of a source code file. Use this to validate " +
+      "how things are actually implemented. File contents are returned in a markdown code block.",
     {
       filePath: z
         .string()
         .describe(
-          "Tiedoston polku suhteessa projektin juureen " +
-            "(esim. 'src/server/webhooks/maventa.ts') tai absoluuttinen polku."
+          "File path relative to the project root " +
+            "(e.g. 'src/server/webhooks/maventa.ts') or an absolute path."
         ),
       repo: z
         .string()
         .optional()
-        .describe(
-          "Repository name as configured in DREAMGRAPH_REPOS. " +
-            "Jos annettu, filePath ratkaistaan tämän repon juuresta."
-        ),
+        .describe(repoDesc),
       startLine: z
         .number()
         .int()
         .min(1)
         .optional()
         .describe(
-          "Aloitusrivi (1-pohjainen). Jos annettu, palauttaa vain osan tiedostosta."
+          "Start line (1-based). If provided, returns only a portion of the file."
         ),
       endLine: z
         .number()
@@ -214,7 +213,7 @@ export function registerCodeSensesTools(server: McpServer): void {
         .min(1)
         .optional()
         .describe(
-          "Lopetusrivi (1-pohjainen, mukaanlukien). Jos annettu startLinen kanssa, palauttaa vain kyseisen alueen."
+          "End line (1-based, inclusive). If provided together with startLine, returns only that range."
         ),
     },
     async ({ filePath, repo, startLine, endLine }) => {
@@ -321,26 +320,23 @@ export function registerCodeSensesTools(server: McpServer): void {
   // =========================================================================
   server.tool(
     "create_file",
-    "Luo uuden tiedoston tai ylikirjoittaa olemassaolevan tiedoston konfiguroituun repoon. " +
-      "Luo puuttuvat ylähakemistot automaattisesti. Polku on pakollinen ja sen tulee olla " +
-      "konfiguroitujen repojen sisällä (turvarajaus).",
+    "Create a new file or overwrite an existing file inside a configured repository. " +
+      "Creates missing parent directories automatically. Path must be within a " +
+      "configured repo (security boundary).",
     {
       filePath: z
         .string()
         .describe(
-          "Tiedoston polku suhteessa projektin juureen " +
-            "(esim. 'src/utils/helpers.ts') tai absoluuttinen polku."
+          "File path relative to the repository root " +
+            "(e.g. 'src/utils/helpers.ts') or an absolute path."
         ),
       content: z
         .string()
-        .describe("Tiedoston sisältö kirjoitettavaksi."),
+        .describe("File content to write."),
       repo: z
         .string()
         .optional()
-        .describe(
-          "Repository name as configured in DREAMGRAPH_REPOS. " +
-            "Jos annettu, filePath ratkaistaan tämän repon juuresta."
-        ),
+        .describe(repoDesc),
     },
     async ({ filePath: reqPath, content, repo }) => {
       logger.debug(

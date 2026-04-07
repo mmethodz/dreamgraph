@@ -41,6 +41,7 @@ import { logger } from "../utils/logger.js";
 import { setDataDirResolver } from "../utils/cache.js";
 import { setDataDirOverride } from "../utils/paths.js";
 import { setMutexKeyResolver } from "../utils/mutex.js";
+import { loadEngineEnv } from "../utils/engine-env.js";
 
 /** Project root — three levels up from dist/instance/lifecycle.js */
 const PROJECT_ROOT = resolve(fileURLToPath(import.meta.url), "..", "..", "..");
@@ -51,6 +52,9 @@ const PROJECT_ROOT = resolve(fileURLToPath(import.meta.url), "..", "..", "..");
 
 /** The currently active InstanceScope, or null if running in legacy mode. */
 let activeScope: InstanceScope | null = null;
+
+/** In-memory tool-call counter — initialized from instance.json on startup. */
+let _toolCallCount = 0;
 
 /**
  * Get the active InstanceScope.
@@ -83,6 +87,23 @@ export function getEffectiveDataDir(): string {
  */
 export function getEffectiveMutexKey(filename: string): string {
   return activeScope?.mutexKey(filename) ?? filename;
+}
+
+/**
+ * Record a single MCP tool invocation.
+ * Increments the in-memory counter and persists to instance.json.
+ * Safe to call in legacy mode (no-ops gracefully).
+ */
+export async function recordToolCall(): Promise<void> {
+  _toolCallCount++;
+  await updateInstanceCounters({ total_tool_calls: _toolCallCount });
+}
+
+/**
+ * Get the current tool-call count (in-memory, for fast reads).
+ */
+export function getToolCallCount(): number {
+  return _toolCallCount;
 }
 
 /* ------------------------------------------------------------------ */
@@ -264,6 +285,38 @@ export async function createInstance(
     "utf-8",
   );
 
+  // engine.env — per-instance LLM & secrets configuration
+  const engineEnvContent = [
+    "# DreamGraph Engine Configuration",
+    "# Per-instance LLM provider settings. Uncomment and edit as needed.",
+    "# Values here override global environment variables.",
+    "#",
+    "# Provider: ollama (local, default) | openai (API) | sampling (MCP client) | none",
+    "# DREAMGRAPH_LLM_PROVIDER=ollama",
+    "#",
+    "# Model name (provider-specific)",
+    "# DREAMGRAPH_LLM_MODEL=qwen3:8b",
+    "#",
+    "# API base URL",
+    "# DREAMGRAPH_LLM_URL=http://localhost:11434",
+    "#",
+    "# API key (for openai-compatible providers)",
+    "# DREAMGRAPH_LLM_API_KEY=",
+    "#",
+    "# Creativity (0.0 = deterministic, 1.0 = maximum creativity)",
+    "# DREAMGRAPH_LLM_TEMPERATURE=0.7",
+    "#",
+    "# Maximum response tokens per LLM call",
+    "# DREAMGRAPH_LLM_MAX_TOKENS=2048",
+    "",
+  ].join("\n");
+
+  await writeFile(
+    resolve(instanceRoot, "config", "engine.env"),
+    engineEnvContent,
+    "utf-8",
+  );
+
   // 4. Write data stubs — copy from templates/default/ first, fall back to DATA_STUBS
   const dataDir = resolve(instanceRoot, "data");
   const templateDir = resolve(PROJECT_ROOT, "templates", "default");
@@ -311,6 +364,41 @@ export async function createInstance(
 
   logger.info(`Instance ${uuid} created successfully`);
   return { instance, scope };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Instance state updates                                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Update counters in the instance.json file.
+ * Call after dream cycles, tool calls, etc. to keep status accurate.
+ */
+export async function updateInstanceCounters(
+  updates: Partial<Pick<DreamGraphInstance, "total_dream_cycles" | "total_tool_calls" | "last_active_at">>,
+): Promise<void> {
+  const scope = getActiveScope();
+  if (!scope) return; // Legacy mode — no instance.json to update
+
+  const dir = resolveMasterDir();
+  const instancePath = resolve(dir, scope.uuid, "instance.json");
+
+  try {
+    const raw = await readFile(instancePath, "utf-8");
+    const instance = JSON.parse(raw) as DreamGraphInstance;
+
+    if (updates.total_dream_cycles !== undefined) {
+      instance.total_dream_cycles = updates.total_dream_cycles;
+    }
+    if (updates.total_tool_calls !== undefined) {
+      instance.total_tool_calls = updates.total_tool_calls;
+    }
+    instance.last_active_at = updates.last_active_at ?? new Date().toISOString();
+
+    await writeFile(instancePath, JSON.stringify(instance, null, 2), "utf-8");
+  } catch (err) {
+    logger.warn(`Failed to update instance counters: ${err instanceof Error ? err.message : err}`);
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -380,10 +468,22 @@ export async function resolveInstanceAtStartup(): Promise<InstanceScope | null> 
     const { instance, scope } = await loadInstance(uuid);
     activeScope = scope;
 
+    // Seed the in-memory tool-call counter from the persisted value
+    _toolCallCount = instance.total_tool_calls ?? 0;
+
     // Wire the cache, path resolver, and mutex key resolver for instance mode
     setDataDirResolver(() => scope.dataDir);
     setDataDirOverride(scope.dataDir);
     setMutexKeyResolver((key) => scope.mutexKey(key));
+
+    // Load per-instance engine.env (LLM provider, API keys, model config).
+    // Values are injected into process.env BEFORE any config parsing runs,
+    // so parseLlmConfig() picks up instance-specific overrides while
+    // falling back to global env vars for anything not specified.
+    const envVars = loadEngineEnv(scope.engineEnvPath);
+    if (envVars > 0) {
+      logger.info(`Loaded ${envVars} env vars from ${scope.engineEnvPath}`);
+    }
 
     // Merge instance repos into config.repos so all tools can discover them.
     // mcp.json repos take precedence, then project_root as fallback default.

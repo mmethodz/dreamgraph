@@ -165,6 +165,11 @@ function parseGitBlame(raw: string): GitBlameLine[] {
 // ---------------------------------------------------------------------------
 
 export function registerGitSensesTools(server: McpServer): void {
+  const repoNames = Object.keys(config.repos);
+  const repoDesc = repoNames.length > 0
+    ? `Repository name. Available: ${repoNames.map(r => `"${r}"`).join(", ")}.`
+    : "Repository name (none currently configured — set DREAMGRAPH_REPOS or attach a project).";
+
   // =========================================================================
   // git_log - Commit history
   // =========================================================================
@@ -177,9 +182,7 @@ export function registerGitSensesTools(server: McpServer): void {
     {
       repo: z
         .string()
-        .describe(
-          "Repository name from config (as defined in DREAMGRAPH_REPOS env var)."
-        ),
+        .describe(repoDesc),
       path: z
         .string()
         .optional()
@@ -284,9 +287,7 @@ export function registerGitSensesTools(server: McpServer): void {
     {
       repo: z
         .string()
-        .describe(
-          "Repository name from config (as defined in DREAMGRAPH_REPOS env var)."
-        ),
+        .describe(repoDesc),
       filePath: z
         .string()
         .describe(

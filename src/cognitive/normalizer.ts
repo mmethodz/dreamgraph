@@ -39,6 +39,8 @@ import type {
   NormalizationReasonCode,
 } from "./types.js";
 import { countEvidence, computeConfidence, DEFAULT_PROMOTION, type PromotionConfig } from "./types.js";
+import { isLlmAvailable, getLlmProvider, getNormalizerLlmConfig } from "./llm.js";
+import type { LlmMessage } from "./llm.js";
 import { getActiveCognitiveTuning } from "../instance/index.js";
 
 // ---------------------------------------------------------------------------
@@ -170,6 +172,12 @@ function checkDuplicate(
   edge: DreamEdge,
   lookup: FactLookup
 ): boolean {
+  // Only flag as duplicate if the EXACT same direction exists in the fact graph.
+  // Symmetry-completion edges propose B→A when A→B exists — that's the point,
+  // not a duplicate.  The reverse direction is new information.
+  if (edge.strategy === "symmetry_completion") {
+    return lookup.edgeSet.has(`${edge.from}|${edge.to}`);
+  }
   return (
     lookup.edgeSet.has(`${edge.from}|${edge.to}`) ||
     lookup.edgeSet.has(`${edge.to}|${edge.from}`)
@@ -259,6 +267,8 @@ function calculateSplitScore(
   if (repoMatch) plausibility += 0.15;
   // Original dreamer confidence reflects pattern quality
   plausibility += originalConfidence * 0.15;
+  // Reinforcement bonus: persistent ideas are inherently more plausible
+  plausibility += Math.min(reinforcementCount * 0.06, 0.15);
   plausibility = Math.round(Math.min(Math.max(plausibility, 0), 1) * 100) / 100;
 
   // --- Evidence Score (0–1): grounding in actual data ---
@@ -272,6 +282,8 @@ function calculateSplitScore(
   evidenceScore += Math.min(keywordOverlap.length * 0.05, 0.15);
   // Repo match is factual evidence
   if (repoMatch) evidenceScore += 0.15;
+  // Reinforcement history: surviving multiple cycles IS evidence
+  evidenceScore += Math.min(reinforcementCount * 0.04, 0.10);
   evidenceScore = Math.round(Math.min(Math.max(evidenceScore, 0), 1) * 100) / 100;
 
   // --- Combined Confidence ---
@@ -522,6 +534,199 @@ function validateNode(
 }
 
 // ---------------------------------------------------------------------------
+// LLM Semantic Validation — ask the LLM to evaluate abstract concept matches
+// ---------------------------------------------------------------------------
+
+/** Schema for LLM semantic validation responses (strict mode) */
+const SEMANTIC_VALIDATION_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  properties: {
+    evaluations: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          edge_id:            { type: "string", description: "The dream edge ID being evaluated" },
+          semantic_relevance: { type: "number", description: "0.0-1.0 how semantically meaningful is this connection" },
+          reasoning:          { type: "string", description: "Brief explanation of the semantic judgment" },
+        },
+        required: ["edge_id", "semantic_relevance", "reasoning"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["evaluations"],
+  additionalProperties: false,
+};
+
+interface SemanticEvaluation {
+  edge_id: string;
+  semantic_relevance: number;
+  reasoning: string;
+}
+
+/**
+ * Batch-evaluate latent/near-threshold edges using the LLM for semantic
+ * understanding. Structural scoring cannot judge whether abstract concepts
+ * like "caching_layer relates_to query_optimizer" make sense — only the LLM
+ * can reason about intent and meaning.
+ *
+ * Cost control:
+ * - Only evaluates edges with confidence > 0.4 (worth the LLM cost)
+ * - Batches up to 10 edges per call (~500 tokens)
+ * - Skips entirely if LLM is unavailable
+ * - Uses low temperature (0.3) for consistent judgments
+ *
+ * Returns a map of edge_id → SemanticEvaluation for edges the LLM reviewed.
+ */
+async function llmSemanticValidation(
+  edges: Array<{ edge: DreamEdge; result: ValidationResult }>,
+  lookup: FactLookup,
+): Promise<Map<string, SemanticEvaluation>> {
+  const evaluations = new Map<string, SemanticEvaluation>();
+
+  // Filter to candidates worth evaluating: latent or near-threshold
+  const candidates = edges.filter(({ result }) =>
+    result.status === "latent" && result.confidence >= 0.4
+  );
+
+  if (candidates.length === 0) return evaluations;
+
+  // Check LLM availability
+  const available = await isLlmAvailable();
+  if (!available) {
+    logger.debug("Semantic validation: LLM not available, skipping");
+    return evaluations;
+  }
+
+  const llm = getLlmProvider();
+
+  // Batch up to 10 edges per call
+  const batch = candidates.slice(0, 10);
+
+  // Build context: describe each edge and its endpoints
+  const edgeDescriptions = batch.map(({ edge, result }) => {
+    const fromDomain = lookup.domains.get(edge.from) ?? "unknown";
+    const toDomain = lookup.domains.get(edge.to) ?? "unknown";
+    const fromKw = (lookup.keywords.get(edge.from) ?? []).join(", ");
+    const toKw = (lookup.keywords.get(edge.to) ?? []).join(", ");
+    return [
+      `ID: ${edge.id}`,
+      `  ${edge.from} (domain: ${fromDomain}, keywords: ${fromKw || "none"})`,
+      `  --[${edge.relation}]-->`,
+      `  ${edge.to} (domain: ${toDomain}, keywords: ${toKw || "none"})`,
+      `  Reason: ${edge.reason}`,
+      `  Structural confidence: ${result.confidence}, plausibility: ${result.plausibility}`,
+    ].join("\n");
+  }).join("\n\n");
+
+  const messages: LlmMessage[] = [
+    {
+      role: "system",
+      content: `You are a strict semantic validator for a software knowledge graph. You evaluate proposed relationships between entities and judge whether they make genuine semantic sense — not just syntactic or structural similarity.
+
+Score each edge's semantic_relevance from 0.0 to 1.0:
+- 0.0-0.3: No meaningful semantic connection, coincidental overlap
+- 0.3-0.5: Weak or indirect connection, not worth promoting
+- 0.5-0.7: Reasonable connection with clear rationale
+- 0.7-1.0: Strong, insightful connection that reveals real architectural meaning
+
+Be a strict critic. Only score above 0.6 if the relationship genuinely reveals something meaningful about the software architecture.`,
+    },
+    {
+      role: "user",
+      content: `Evaluate the semantic validity of these proposed knowledge graph edges:\n\n${edgeDescriptions}\n\nRespond with a JSON object containing an "evaluations" array.`,
+    },
+  ];
+
+  try {
+    logger.debug(`Semantic validation: evaluating ${batch.length} edges via LLM`);
+
+    const normCfg = getNormalizerLlmConfig();
+    const response = await llm.complete(messages, {
+      temperature: normCfg.temperature,
+      maxTokens: normCfg.maxTokens,
+      model: normCfg.model,
+      jsonSchema: {
+        name: "semantic_validation",
+        schema: SEMANTIC_VALIDATION_SCHEMA,
+      },
+    });
+
+    const parsed = JSON.parse(response.text) as { evaluations?: SemanticEvaluation[] };
+    if (Array.isArray(parsed.evaluations)) {
+      for (const ev of parsed.evaluations) {
+        if (ev.edge_id && typeof ev.semantic_relevance === "number") {
+          evaluations.set(ev.edge_id, {
+            edge_id: ev.edge_id,
+            semantic_relevance: Math.max(0, Math.min(1, ev.semantic_relevance)),
+            reasoning: ev.reasoning ?? "",
+          });
+        }
+      }
+    }
+
+    logger.info(
+      `Semantic validation: ${evaluations.size}/${batch.length} edges evaluated ` +
+      `(${response.tokensUsed ?? "?"} tokens)`
+    );
+  } catch (err) {
+    logger.warn(
+      `Semantic validation failed: ${err instanceof Error ? err.message : "unknown error"}`
+    );
+  }
+
+  return evaluations;
+}
+
+/**
+ * Apply semantic validation results to edge assessments.
+ * Edges with high semantic relevance get boosted:
+ * - plausibility +0.15, evidence +0.10
+ * - evidence_count +1 (semantic = distinct evidence type)
+ * - reason_code → "semantic_boost"
+ * - If the boosted scores cross thresholds → upgraded to "validated"
+ */
+function applySemanticBoost(
+  result: ValidationResult,
+  evaluation: SemanticEvaluation,
+  promo: PromotionConfig,
+): void {
+  if (evaluation.semantic_relevance < 0.6) return;
+
+  // Scale boost by semantic relevance (0.6→small, 1.0→full)
+  const boostScale = (evaluation.semantic_relevance - 0.6) / 0.4; // 0→1
+
+  const plausBoost = 0.15 * boostScale;
+  const evidBoost = 0.10 * boostScale;
+
+  result.plausibility = Math.round(Math.min(result.plausibility + plausBoost, 1) * 100) / 100;
+  result.evidence_score = Math.round(Math.min(result.evidence_score + evidBoost, 1) * 100) / 100;
+  result.evidence_count += 1; // semantic validation = distinct evidence signal
+
+  // Recompute confidence with boosted scores
+  result.confidence = computeConfidence(
+    result.plausibility,
+    result.evidence_score,
+    0, // reinforcement already baked in
+    result.contradiction_score,
+  );
+
+  // Append semantic reasoning
+  result.reason = `${result.reason} LLM semantic: ${evaluation.reasoning} (relevance: ${evaluation.semantic_relevance.toFixed(2)})`;
+  result.reason_code = "semantic_boost";
+
+  // Re-classify with boosted scores
+  if (
+    result.confidence >= promo.promotion_confidence &&
+    result.plausibility >= promo.promotion_plausibility &&
+    result.evidence_score >= promo.promotion_evidence
+  ) {
+    result.status = "validated";
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Edge promotion — three-outcome gate uses PromotionConfig thresholds
 // ---------------------------------------------------------------------------
 
@@ -533,8 +738,14 @@ function promoteToValidatedEdge(
   // Only "validated" outcome edges pass
   if (result.status !== "validated") return null;
 
+  // Reinforcement persistence counts as evidence: if independent dream cycles
+  // keep re-generating the same connection, that IS a distinct evidence signal.
+  // Threshold: 10+ reinforcements = 1 extra evidence count.
+  const reinforcementBonus = (edge.reinforcement_count ?? 0) >= 10 ? 1 : 0;
+  const effectiveEvidenceCount = result.evidence_count + reinforcementBonus;
+
   // Must have at least min_evidence_count distinct evidence signals
-  if (result.evidence_count < promo.promotion_evidence_count) return null;
+  if (effectiveEvidenceCount < promo.promotion_evidence_count) return null;
 
   // Only edges between real fact graph entities can be promoted
   const validTypes = ["feature", "workflow", "data_model"] as const;
@@ -554,7 +765,7 @@ function promoteToValidatedEdge(
     origin: "rem",
     status: "validated",
     evidence_summary: result.reason,
-    evidence_count: result.evidence_count,
+    evidence_count: effectiveEvidenceCount,
     reinforcement_count: edge.reinforcement_count ?? 0,
     dream_cycle: edge.dream_cycle,
     normalization_cycle: result.normalization_cycle,
@@ -574,6 +785,8 @@ export interface NormalizationResult {
   rejected: number;
   blockedByGate: number;
   promotedEdges: ValidatedEdge[];
+  /** Number of dream nodes promoted to the fact graph as entities */
+  promotedNodes: number;
 }
 
 /**
@@ -619,17 +832,28 @@ export async function normalize(
     engine.loadCandidateEdges(),
   ]);
 
-  // Track which dream IDs have already been validated
-  const alreadyValidated = new Set(existingCandidates.results.map((r) => r.dream_id));
+  // Build map of previous assessment results by dream ID.
+  // Edges that were previously "validated" or "rejected" are final — skip them.
+  // Edges that were "latent" AND have gained reinforcement since their last
+  // assessment deserve re-evaluation (reinforcement = new evidence).
+  const previousResults = new Map(
+    existingCandidates.results.map((r) => [r.dream_id, r] as const)
+  );
 
-  // Validate all unvalidated edges
+  // Validate all eligible edges — PASS 1: structural scoring
+  const edgeAssessments: Array<{ edge: DreamEdge; result: ValidationResult }> = [];
   const newResults: ValidationResult[] = [];
-  const promotedEdges: ValidatedEdge[] = [];
-  let blockedByGate = 0;
 
   for (const edge of dreamGraph.edges) {
-    if (alreadyValidated.has(edge.id)) continue;
     if (edge.interrupted) continue;
+
+    const prev = previousResults.get(edge.id);
+    if (prev) {
+      // Already validated or rejected — final, skip
+      if (prev.status === "validated" || prev.status === "rejected") continue;
+      // Latent: only re-evaluate if reinforced since last assessment
+      if (prev.status === "latent" && (edge.reinforcement_count ?? 0) === 0) continue;
+    }
 
     const result = validateEdge(edge, lookup, cycle, promo);
 
@@ -645,8 +869,31 @@ export async function normalize(
       result.reason_code = "low_signal";
     }
 
+    edgeAssessments.push({ edge, result });
     newResults.push(result);
+  }
 
+  // PASS 2: LLM semantic validation on latent edges
+  // The LLM evaluates abstract concept matches that structural scoring misses.
+  // Only runs when LLM is available; gracefully degrades to structural-only.
+  const semanticResults = await llmSemanticValidation(edgeAssessments, lookup);
+  let semanticBoosts = 0;
+  for (const { edge, result } of edgeAssessments) {
+    const evaluation = semanticResults.get(edge.id);
+    if (evaluation) {
+      applySemanticBoost(result, evaluation, promo);
+      if (result.reason_code === "semantic_boost") semanticBoosts++;
+    }
+  }
+  if (semanticBoosts > 0) {
+    logger.info(`Semantic validation boosted ${semanticBoosts} edges`);
+  }
+
+  // PASS 3: promotion gate — apply after semantic boosts
+  const promotedEdges: ValidatedEdge[] = [];
+  let blockedByGate = 0;
+
+  for (const { edge, result } of edgeAssessments) {
     // Update edge status in dream graph to reflect normalization outcome
     edge.status = result.status === "validated" ? "validated" :
                   result.status === "latent" ? "latent" : "rejected";
@@ -661,17 +908,28 @@ export async function normalize(
       if (promoted) {
         promotedEdges.push(promoted);
       } else {
-        // Validated but blocked by evidence count gate — downgrade to latent
+        // Validated but blocked by evidence count gate — downgrade BOTH
+        // dream graph edge AND candidate result to latent.  Without this,
+        // the candidate stays "validated" and gets skipped forever.
         edge.status = "latent";
+        result.status = "latent";
+        result.reason_code = "insufficient_evidence";
         blockedByGate++;
       }
     }
   }
 
-  // Validate all unvalidated nodes
+  // Validate all eligible nodes
+  const promotableNodes: DreamNode[] = [];
   for (const node of dreamGraph.nodes) {
-    if (alreadyValidated.has(node.id)) continue;
     if (node.interrupted) continue;
+    if (node.promoted_at) continue; // Already promoted to fact graph
+
+    const prev = previousResults.get(node.id);
+    if (prev) {
+      if (prev.status === "validated" || prev.status === "rejected") continue;
+      if (prev.status === "latent" && (node.reinforcement_count ?? 0) === 0) continue;
+    }
 
     const result = validateNode(node, lookup, cycle, promo);
 
@@ -692,6 +950,11 @@ export async function normalize(
     node.activation_score = result.status === "latent"
       ? Math.round(result.plausibility * 0.5 * 100) / 100
       : 0;
+
+    // Collect validated nodes for entity promotion
+    if (result.status === "validated") {
+      promotableNodes.push(node);
+    }
   }
 
   // Persist updated dream graph (with status/scores written back)
@@ -706,6 +969,14 @@ export async function normalize(
     await engine.promoteEdges(promotedEdges);
   }
 
+  // ENTITY PROMOTION — validated nodes become fact entities
+  // Intent becomes factual when confidence is reached.
+  let promotedNodeCount = 0;
+  if (promotableNodes.length > 0) {
+    const result = await engine.promoteNodesToFactGraph(promotableNodes);
+    promotedNodeCount = result.promoted;
+  }
+
   const counts = {
     validated: newResults.filter((r) => r.status === "validated").length,
     latent: newResults.filter((r) => r.status === "latent").length,
@@ -715,7 +986,7 @@ export async function normalize(
   logger.info(
     `Normalization cycle #${cycle} complete: ${newResults.length} processed ` +
       `(${counts.validated} validated, ${counts.latent} latent, ${counts.rejected} rejected), ` +
-      `${promotedEdges.length} edges promoted, ${blockedByGate} blocked by gate`
+      `${promotedEdges.length} edges promoted, ${promotedNodeCount} entities promoted, ${blockedByGate} blocked by gate`
   );
 
   return {
@@ -724,5 +995,6 @@ export async function normalize(
     ...counts,
     blockedByGate,
     promotedEdges,
+    promotedNodes: promotedNodeCount,
   };
 }

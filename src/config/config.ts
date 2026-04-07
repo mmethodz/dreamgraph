@@ -13,6 +13,8 @@ import {
   DEFAULT_NARRATIVE_CONFIG,
   DEFAULT_SCHEDULER_CONFIG,
 } from "../cognitive/types.js";
+import type { LlmConfig } from "../cognitive/llm.js";
+import { parseLlmConfig } from "../cognitive/llm.js";
 
 /** Project root — two levels up from dist/config/config.js */
 const PROJECT_ROOT = resolve(fileURLToPath(import.meta.url), "..", "..", "..");
@@ -137,4 +139,7 @@ export const config = {
 
   /** v5.2 — Dream scheduler configuration */
   scheduler: parseSchedulerConfig(),
+
+  /** v6.0.1 — LLM provider configuration for dream engine */
+  llm: parseLlmConfig(),
 } as const;

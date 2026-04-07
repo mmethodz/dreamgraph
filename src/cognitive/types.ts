@@ -40,6 +40,8 @@ export type DreamStrategy =
   | "tension_directed"
   | "reflective"
   | "causal_replay"
+  | "pgo_wave"
+  | "llm_dream"
   | "all";
 
 /** Adversarial dream strategies (used in NIGHTMARE state) */
@@ -76,7 +78,8 @@ export type NormalizationReasonCode =
   | "insufficient_evidence"
   | "contradicted"
   | "invalid_endpoints"
-  | "low_signal";
+  | "low_signal"
+  | "semantic_boost";
 
 /** Entity types — includes hypothetical types for dream nodes */
 export type DreamEntityType =
@@ -222,6 +225,23 @@ export interface DreamNode {
   status: DreamEdgeStatus;
   /** How much dream attention this node should receive next cycle */
   activation_score: number;
+
+  // --- Entity enrichment (populated by LLM for entity promotion) ---
+
+  /**
+   * Speculative intent — the LLM's proposed purpose or role for this entity.
+   * Starts as a dream hypothesis. When normalization promotes the node,
+   * intent becomes factual and is written into the fact graph description.
+   */
+  intent?: string;
+  /** Domain tag for fact-graph placement (e.g. "inference", "core") */
+  domain?: string;
+  /** Keywords for semantic grounding */
+  keywords?: string[];
+  /** Target seed category when promoted: feature, workflow, or data_model */
+  category?: "feature" | "workflow" | "data_model";
+  /** ISO 8601 timestamp of promotion to fact graph (undefined = still dreaming) */
+  promoted_at?: string;
 }
 
 /**
@@ -551,6 +571,8 @@ export interface DreamHistoryEntry {
     latent: number;
     rejected: number;
     promoted: number;
+    /** Dream nodes promoted to fact graph as entities */
+    promoted_entities?: number;
     /** Edges blocked by promotion gate */
     blocked_by_gate: number;
   };
@@ -618,6 +640,12 @@ export interface CognitiveState {
   last_normalization: string | null;
   promotion_config: PromotionConfig;
   decay_config: DecayConfig;
+  /** LLM provider status — dreams require an LLM for creative generation */
+  llm?: {
+    provider: string;
+    model: string;
+    available: boolean;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -682,8 +710,10 @@ export interface DreamCycleOutput {
     latent: number;
     rejected: number;
     blocked_by_gate: number;
+    promoted_entities?: number;
   };
   promoted_edges: number;
+  promoted_entities?: number;
   tensions_created: number;
   tensions_resolved: number;
   /** Tensions auto-expired by decay this cycle */
@@ -706,6 +736,7 @@ export interface NormalizeDreamsOutput {
   rejected: number;
   blocked_by_gate: number;
   promoted_edges: ValidatedEdge[];
+  promoted_entities?: number;
 }
 
 export interface QueryDreamsInput {

@@ -1,0 +1,73 @@
+/**
+ * DreamGraph — engine.env loader.
+ *
+ * Parses a simple KEY=VALUE env file (no dependencies — no dotenv needed).
+ * Supports:
+ *   - `KEY=VALUE` and `KEY="VALUE"` and `KEY='VALUE'`
+ *   - Comments: lines starting with `#`
+ *   - Empty lines are ignored
+ *   - Inline comments are NOT supported (values may contain `#`)
+ *
+ * Values are injected into `process.env` with "instance wins" semantics:
+ * if a key is already set in the environment, the engine.env value takes
+ * precedence (per-instance config > global env).
+ */
+
+import { readFileSync, existsSync } from "node:fs";
+import { logger } from "./logger.js";
+
+/**
+ * Load an engine.env file and inject its values into process.env.
+ *
+ * @param envPath  Absolute path to the engine.env file.
+ * @returns        Number of env vars loaded.
+ */
+export function loadEngineEnv(envPath: string): number {
+  if (!existsSync(envPath)) {
+    return 0;
+  }
+
+  let loaded = 0;
+
+  try {
+    const content = readFileSync(envPath, "utf-8");
+    const lines = content.split(/\r?\n/);
+
+    for (const raw of lines) {
+      const line = raw.trim();
+
+      // Skip empty lines and comments
+      if (!line || line.startsWith("#")) continue;
+
+      // Find the first `=`
+      const eqIdx = line.indexOf("=");
+      if (eqIdx <= 0) continue;
+
+      const key = line.slice(0, eqIdx).trim();
+      let value = line.slice(eqIdx + 1).trim();
+
+      // Strip surrounding quotes
+      if (
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        value = value.slice(1, -1);
+      }
+
+      // Validate key — must look like an env var name
+      if (!/^[A-Z_][A-Z0-9_]*$/i.test(key)) {
+        logger.warn(`engine.env: skipping invalid key "${key}"`);
+        continue;
+      }
+
+      // Instance config OVERRIDES global env (per-instance wins)
+      process.env[key] = value;
+      loaded++;
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.warn(`engine.env: failed to load ${envPath}: ${msg}`);
+  }
+
+  return loaded;
+}

@@ -34,7 +34,7 @@ AWAKE ──→ REM ──→ NORMALIZING ──→ AWAKE
 | State | Purpose | What Happens |
 |-------|---------|-------------|
 | **AWAKE** | Idle / query-ready | All MCP tools available, reads/writes fact graph |
-| **REM** | Speculative generation | Dreamer generates hypothetical edges using 7 strategies |
+| **REM** | Speculative generation | Dreamer generates hypothetical edges using 10 strategies (incl. LLM dream + PGO wave) |
 | **NORMALIZING** | Validation | Three-outcome classifier: validate, retain, or reject |
 | **NIGHTMARE** | Adversarial scanning | Five security strategies probe for vulnerabilities |
 
@@ -66,7 +66,7 @@ graph TB
 
     subgraph "Cognitive Core"
         Engine["Cognitive Engine<br/>State Machine"]
-        Dreamer["Dreamer<br/>7 Strategies"]
+        Dreamer["Dreamer<br/>10 Strategies"]
         Normalizer["Normalizer<br/>Truth Filter"]
         Adversarial["Adversarial<br/>5 Scan Types"]
     end
@@ -87,6 +87,10 @@ graph TB
 
     subgraph "v5.2 Capabilities"
         Scheduler["Dream Scheduler<br/>Policy-Driven Orchestration"]
+    end
+
+    subgraph "LLM Integration"
+        LLM["LLM Provider<br/>Ollama / OpenAI / Sampling"]
     end
 
     subgraph "Senses (External I/O)"
@@ -118,6 +122,7 @@ graph TB
     Engine --> Narrator
     Engine --> Metacognition
     Engine --> EventRouter
+    Dreamer --> LLM
     Engine --> Scheduler
     Narrator --> ContinuousNarrative
     Scheduler --> Engine
@@ -174,7 +179,8 @@ src/
 │   └── config.ts            # Central configuration + env var parsing
 ├── cognitive/
 │   ├── engine.ts            # State machine, tension management, persistence
-│   ├── dreamer.ts           # REM generation — 7 dream strategies
+│   ├── dreamer.ts           # REM generation — 10 dream strategies (incl. LLM dream + PGO wave)
+│   ├── llm.ts               # LLM provider abstraction — Ollama, OpenAI, MCP Sampling, None
 │   ├── normalizer.ts        # Three-outcome classifier (Truth Filter)
 │   ├── adversarial.ts       # NIGHTMARE state — 5 security scan strategies
 │   ├── causal.ts            # Causal chain discovery via BFS
@@ -244,6 +250,7 @@ src/
 │   └── index.ts             # Re-exports
 └── utils/
     ├── cache.ts             # In-memory JSON cache + pluggable dataDir resolver
+    ├── engine-env.ts        # Per-instance engine.env loader (KEY=VALUE parser)
     ├── errors.ts            # Error handling + response factories
     ├── logger.ts            # Stderr logger (protects STDIO stream)
     ├── mutex.ts             # Async file mutex with instance-aware key resolver
@@ -286,6 +293,21 @@ data/                                    # Legacy mode (flat) or <instance>/data
 └── schedules.json           # Dream Scheduler persistence (v5.2)
 ```
 
+### Instance Config Directory
+
+Each UUID-scoped instance also has a `config/` directory:
+
+```
+~/.dreamgraph/<uuid>/config/
+├── instance.json            # Instance identity (UUID, name, version, project_root)
+├── mcp.json                 # Repos, transport, daemon settings
+├── policies.json            # Discipline rules (strict/balanced/creative)
+├── schema_version.json      # Data schema version for migrations
+└── engine.env               # LLM provider, API keys, model settings (KEY=VALUE format)
+```
+
+The `engine.env` file overrides global environment variables with per-instance values, enabling different LLM configurations per project.
+
 ## Configuration
 
 | Env Variable | Default | Description |
@@ -302,3 +324,19 @@ data/                                    # Legacy mode (flat) or <instance>/data
 | `DREAMGRAPH_RUNTIME_TYPE` | — | Metrics format: `otlp`, `prometheus`, or `custom` |
 | `DREAMGRAPH_REPOS` | `{}` | JSON object mapping repo names to local paths. In instance mode, repos from `mcp.json` are merged automatically and `project_root` is auto-registered as a fallback — this env var becomes optional. |
 | `DREAMGRAPH_SCHEDULER` | `{"enabled":true}` | JSON config for dream scheduler (v5.2): `enabled`, `tick_interval_ms`, `max_runs_per_hour`, `cooldown_ms`, `nightmare_cooldown_ms`, `error_streak_pause_limit` |
+| `DREAMGRAPH_LLM_PROVIDER` | `"ollama"` | LLM provider: `ollama`, `openai`, `sampling`, `none` |
+| `DREAMGRAPH_LLM_MODEL` | `"qwen3:8b"` | Model name (provider-dependent default) |
+| `DREAMGRAPH_LLM_URL` | `http://localhost:11434` | API base URL |
+| `DREAMGRAPH_LLM_API_KEY` | — | API key for OpenAI-compatible providers |
+| `DREAMGRAPH_LLM_TEMPERATURE` | `0.7` | Creativity parameter (0.0–1.0). Recommended: `0.9` for cloud models with Structured Outputs |
+| `DREAMGRAPH_LLM_MAX_TOKENS` | `2048` | Max response tokens per dream cycle |
+| `DREAMGRAPH_LLM_DREAMER_MODEL` | *(base model)* | Override model for Dreamer component |
+| `DREAMGRAPH_LLM_DREAMER_TEMPERATURE` | *(base temp)* | Override temperature for Dreamer |
+| `DREAMGRAPH_LLM_DREAMER_MAX_TOKENS` | *(base tokens)* | Override max tokens for Dreamer |
+| `DREAMGRAPH_LLM_NORMALIZER_MODEL` | *(base model)* | Override model for Normalizer component |
+| `DREAMGRAPH_LLM_NORMALIZER_TEMPERATURE` | *(base temp)* | Override temperature for Normalizer |
+| `DREAMGRAPH_LLM_NORMALIZER_MAX_TOKENS` | *(base tokens)* | Override max tokens for Normalizer |
+
+> **Per-instance override:** Each instance can have a `config/engine.env` file that overrides the global env vars above. This allows different instances to use different LLM providers and models.
+
+> **⚠️ Cost Warning:** Cloud LLM providers (`openai`) incur API costs on every dream cycle. With scheduled dreaming at 60-second intervals, GPT-4o-mini costs ~$2–4/day; GPT-4o costs ~$30–60/day. Use `DREAMGRAPH_SCHEDULER` `max_runs_per_hour` to cap frequency and monitor your billing dashboard. Use `ollama` for free local dreaming or `none` to disable LLM entirely.

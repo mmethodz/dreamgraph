@@ -831,7 +831,7 @@ node scripts/enrich-graph.mjs
 Rebuild (`npm run build`) and reconnect your MCP client. The cognitive engine will:
 
 - Build a FactSnapshot from your enriched data
-- Dream speculative connections using 7 strategies
+- Dream speculative connections using 10 strategies
 - Detect tensions (missing links, contradictions, weak spots)
 - Continuously improve the graph over multiple cycles
 
@@ -857,6 +857,36 @@ You can also skip the manual data step entirely and just point the agent at your
 | `DREAMGRAPH_EVENTS` | No | JSON config for the event router: `{"tension_threshold": 0.8, "cooldown_ms": 60000, "max_auto_cycles_per_hour": 10, "runtime_error_threshold": 0.05}` |
 | `DREAMGRAPH_NARRATIVE` | No | JSON config for continuous narrative: `{"auto_narrate": true, "narrative_interval": 10, "digest_interval": 50, "max_chapters": 100}` |
 | `DREAMGRAPH_SCHEDULER` | No | JSON config for the dream scheduler (v5.2): `{"enabled": true, "tick_interval_ms": 30000, "max_runs_per_hour": 30, "cooldown_ms": 10000, "nightmare_cooldown_ms": 300000, "error_streak_pause_limit": 3}` |
+| `DREAMGRAPH_LLM_PROVIDER` | No | LLM provider: `"ollama"`, `"openai"`, `"sampling"`, `"none"` (default: `"ollama"`) |
+| `DREAMGRAPH_LLM_MODEL` | No | Model name (default: `qwen3:8b` for Ollama, `gpt-4o-mini` for OpenAI) |
+| `DREAMGRAPH_LLM_URL` | No | API base URL (default: `http://localhost:11434` for Ollama) |
+| `DREAMGRAPH_LLM_API_KEY` | No | API key for OpenAI-compatible providers |
+| `DREAMGRAPH_LLM_TEMPERATURE` | No | Creativity parameter 0.0–1.0 (default: `0.7`). Higher values produce more creative but less predictable dreams. Recommended: `0.9` for cloud models with Structured Outputs. |
+| `DREAMGRAPH_LLM_MAX_TOKENS` | No | Max response tokens per dream cycle (default: `2048`). Higher values allow more edges per cycle but increase cost. |
+| `DREAMGRAPH_LLM_DREAMER_MODEL` | No | Override model for the Dreamer component (falls back to `DREAMGRAPH_LLM_MODEL`) |
+| `DREAMGRAPH_LLM_DREAMER_TEMPERATURE` | No | Override temperature for the Dreamer (falls back to `DREAMGRAPH_LLM_TEMPERATURE`) |
+| `DREAMGRAPH_LLM_DREAMER_MAX_TOKENS` | No | Override max tokens for the Dreamer (falls back to `DREAMGRAPH_LLM_MAX_TOKENS`) |
+| `DREAMGRAPH_LLM_NORMALIZER_MODEL` | No | Override model for the Normalizer component (falls back to `DREAMGRAPH_LLM_MODEL`) |
+| `DREAMGRAPH_LLM_NORMALIZER_TEMPERATURE` | No | Override temperature for the Normalizer (falls back to `DREAMGRAPH_LLM_TEMPERATURE`). Recommended: low value like `0.1` for deterministic validation |
+| `DREAMGRAPH_LLM_NORMALIZER_MAX_TOKENS` | No | Override max tokens for the Normalizer (falls back to `DREAMGRAPH_LLM_MAX_TOKENS`) |
+
+LLM configuration can also be set per-instance via `config/engine.env` in the instance directory. Per-instance values override global env vars. Per-component overrides (`_DREAMER_`, `_NORMALIZER_`) allow fine-grained control — e.g., a creative model at high temperature for dreaming and a precise model at low temperature for normalization.
+
+> **⚠️ Cost Warning — Cloud LLM Providers:**
+> When using `openai` or other cloud providers, **every dream cycle makes an API call**. With scheduled dreaming enabled, this means continuous spend:
+>
+> | Schedule Interval | Est. Cost (GPT-4o-mini) | Est. Cost (GPT-4o) |
+> |---|---|---|
+> | Every 60s | ~$2–4/day | ~$30–60/day |
+> | Every 5 min | ~$0.50–1/day | ~$6–12/day |
+> | Every 30 min | ~$0.10–0.20/day | ~$1–2/day |
+>
+> **Recommendations:**
+> - Use `DREAMGRAPH_LLM_PROVIDER=ollama` for local models (free, no API costs)
+> - Set conservative scheduler intervals when using cloud providers (`interval_seconds` ≥ 300)
+> - Use `DREAMGRAPH_SCHEDULER` `max_runs_per_hour` to cap cycle frequency
+> - Monitor your provider's billing dashboard
+> - Set `DREAMGRAPH_LLM_PROVIDER=none` to disable LLM dreaming entirely
 
 None are required. Without `DREAMGRAPH_REPOS` (and no instance-mode repos), code/git tools will be unavailable. In instance mode, repos from `mcp.json` and the attached `project_root` are auto-wired at startup. Without `DATABASE_URL`, the `query_db_schema` tool will be unavailable. Without `DREAMGRAPH_RUNTIME_ENDPOINT`, the `query_runtime_metrics` tool will return a configuration hint. The cognitive engine works regardless — it just has fewer senses.
 
@@ -877,7 +907,7 @@ None are required. Without `DREAMGRAPH_REPOS` (and no instance-mode repos), code
         |    │                             |
         |    └──→ NIGHTMARE ──→ AWAKE      |
         |                             |
-        |  - 7 dream strategies       |
+        |  - 10 dream strategies      |
         |  - 5 adversarial scans      |
         |  - Causal reasoning         |
         |  - Temporal analysis        |
@@ -920,7 +950,7 @@ None are required. Without `DREAMGRAPH_REPOS` (and no instance-mode repos), code
 src/
 ├── cognitive/              # The dreaming engine (the core)
 │   ├── engine.ts           # State machine: AWAKE / REM / NORMALIZING / NIGHTMARE
-│   ├── dreamer.ts          # 7 dream strategies for edge generation
+│   ├── dreamer.ts          # 10 dream strategies for edge generation (incl. LLM dream + PGO wave)\n│   ├── llm.ts              # LLM provider abstraction — Ollama, OpenAI, MCP Sampling, None
 │   ├── normalizer.ts       # Three-outcome classifier (validate/latent/reject)
 │   ├── register.ts         # MCP tool + resource registration for cognitive layer
 │   ├── types.ts            # All cognitive type definitions
@@ -931,6 +961,7 @@ src/
 │   ├── narrator.ts         # Dream Narratives (system autobiography + continuous story)
 │   ├── intervention.ts     # Intervention Engine (remediation plans)
 │   ├── metacognition.ts    # Metacognitive Self-Tuning Engine
+│   ├── llm.ts              # LLM provider abstraction — Ollama, OpenAI, MCP Sampling, None
 │   ├── event-router.ts     # Event-Driven Dreaming (reactive cognition)
 │   └── scheduler.ts        # Dream Scheduler — instance-aware orchestration (v5.2→v6.0)
 ├── discipline/             # Self-imposed execution governance (v6.0 La Catedral)
@@ -993,6 +1024,7 @@ src/
 │   └── index.ts             # Shared TypeScript type definitions
 └── utils/
     ├── cache.ts             # In-memory JSON cache + pluggable dataDir resolver
+    ├── engine-env.ts        # Per-instance engine.env loader (KEY=VALUE parser)
     ├── errors.ts            # Error handling + response factories
     ├── logger.ts            # Stderr logger (protects STDIO stream)
     ├── mutex.ts             # Async file mutex with instance-aware key resolver
@@ -1147,10 +1179,11 @@ Read-only views the agent can inspect at any time:
 
 ## Dream Strategies
 
-The dreamer uses 7 strategies to generate speculative edges:
+The dreamer uses 10 strategies to generate speculative edges:
 
 | Strategy | What it does |
 |---|---|
+| **LLM Dream** | LLM-powered creative dreaming — sends structured context to the configured LLM and receives novel connection proposals. Primary strategy when an LLM is available; the normalizer filters hallucinations |
 | **Gap Detection** | Finds entity pairs that share domain or keywords but have no direct edge |
 | **Weak Reinforcement** | Finds weak edges and looks for indirect support via shared third-party connections |
 | **Cross-Domain Bridging** | Connects entities from different domains that share keywords |
@@ -1158,6 +1191,8 @@ The dreamer uses 7 strategies to generate speculative edges:
 | **Symmetry Completion** | Finds A→B edges where B→A is missing and proposes the reverse |
 | **Tension-Directed** | Uses unresolved tensions (sorted by urgency) to focus dreaming on problem areas |
 | **Causal Replay** | Mines dream history for cause→effect patterns and generates edges along discovered causal chains |
+| **Reflective** | Agent-directed insights from code reading — AI reads source code and solidifies observations as dream edges |
+| **PGO Wave** | Stochastic divergence via Lévy flights (Pareto α=1.5) and stochastic resonance — random neural-inspired bursts that force creative leaps across distant domains. 8 novel relation types, faster decay. Mathematically grounded in PGO wave neuroscience |
 
 Strategies adapt over time. After 3 consecutive zero-yield cycles, a strategy is benched and its budget is redistributed to active strategies. Every 6th cycle it gets a probe run to check if conditions have changed.
 
@@ -1351,6 +1386,8 @@ This project introduces a cognitive model with the following primitives:
 | **Dream Schedule** | A policy-driven rule that triggers cognitive actions automatically (interval, cron, cycle-based, or idle-based) |
 | **Discipline Manifest** | The self-imposed governance contract: tool classifications, phase permissions, and data protection tiers (v6.0 La Catedral) |
 | **La Catedral** | v6.0 release name — like Escobar's self-built prison, the system constructs its own confinement rules |
+| **LLM Dream** | An LLM-powered creative dream strategy — the LLM proposes connections that no structural algorithm would discover; the normalizer validates them |
+| **Engine Env** | Per-instance configuration file (`config/engine.env`) for LLM provider, API keys, and model settings — overrides global env vars |
 
 You can think of DreamGraph as:
 

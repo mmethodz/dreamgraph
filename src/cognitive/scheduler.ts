@@ -23,6 +23,7 @@ import { existsSync } from "node:fs";
 import { engine } from "./engine.js";
 import { dataPath } from "../utils/paths.js";
 import { getActiveScope } from "../instance/lifecycle.js";
+import { updateInstanceCounters } from "../instance/index.js";
 import { dream } from "./dreamer.js";
 import { normalize } from "./normalizer.js";
 import { nightmare } from "./adversarial.js";
@@ -240,7 +241,7 @@ async function executeAction(schedule: DreamSchedule): Promise<string> {
   switch (schedule.action) {
     case "dream_cycle": {
       const strategy = (schedule.parameters.strategy as string) ?? "all";
-      const maxDreams = (schedule.parameters.max_dreams as number) ?? 20;
+      const maxDreams = (schedule.parameters.max_dreams as number) ?? 100;
 
       // Execute a full dream cycle internally
       if (engine.getState() !== "awake") await engine.interrupt();
@@ -270,6 +271,7 @@ async function executeAction(schedule: DreamSchedule): Promise<string> {
           latent: normResult.latent,
           rejected: normResult.rejected,
           promoted: normResult.promotedEdges.length,
+          promoted_entities: normResult.promotedNodes,
           blocked_by_gate: normResult.blockedByGate,
         },
         tension_signals_created: 0,
@@ -278,6 +280,13 @@ async function executeAction(schedule: DreamSchedule): Promise<string> {
         tensions_decayed: tensionDecay.decayed,
       };
       await engine.appendHistoryEntry(entry);
+
+      // Persist cycle counter to instance state
+      try {
+        await updateInstanceCounters({
+          total_dream_cycles: engine.getCurrentDreamCycle(),
+        });
+      } catch { /* non-critical */ }
 
       // Post-cycle hooks
       try { await maybeAutoNarrate(); } catch { /* swallow */ }

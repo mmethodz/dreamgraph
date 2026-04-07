@@ -41,7 +41,7 @@ The engine is a **singleton**. Concurrent state transitions are prevented by des
 
 ## Dream Strategies
 
-The dreamer implements **8 strategies** (7 original + reflective in v5.0):
+The dreamer implements **10 strategies** (7 original + reflective in v5.0 + PGO wave + LLM dream):
 
 ### 1. Gap Detection
 Finds entity pairs with no direct edge but shared context (keywords, domain, repo). Generates a hypothetical connecting edge with a rationale describing the gap.
@@ -67,7 +67,21 @@ Mines dream history for cause→effect chains. Uses BFS to build propagation cha
 ### 8. Reflective *(v5.0+)*
 Agent-directed insights from code reading. The AI reads actual source code and solidifies observations as dream edges.
 
-When `strategy="all"`, all strategies run and their outputs are merged with duplicate suppression.
+### 9. PGO Wave *(v6.0+)*
+Stochastic divergence inspired by **Ponto-Geniculo-Occipital waves** — the random neural bursts during REM sleep that force the forebrain to synthesize meaning from noise. Mathematically grounded in three models:
+
+- **Burst amplitude** — Geometric distribution (p=0.3, mean ~3.3). Most cycles produce a few edges; occasionally a large creative burst occurs.
+- **Lévy flight entity selection** — Pareto(α=1.5) step distribution. Lots of small local hops + occasional giant leaps across distant domains. Domain distance reduced by keyword overlap.
+- **Stochastic resonance confidence** — Confidence assigned in a narrow band [0.25, 0.50]. Higher domain distance → slightly higher confidence (noise amplifies weak cross-domain signals).
+
+Produces 8 novel relation types: `emergent_pattern`, `hidden_dependency`, `conceptual_bridge`, `phantom_coupling`, `resonance_link`, `convergent_evolution`, `shadow_interaction`, `latent_composition`. Edges decay 1.2× faster than normal — noise should fade quickly. PGO wave is never adaptively benched (same immunity as LLM dream).
+
+### 10. LLM Dream *(v6.0+)*
+LLM-powered creative dreaming. The dream engine sends a structured prompt to the configured LLM provider (Ollama, OpenAI-compatible, or MCP Sampling) with the current fact graph context — entity summaries, existing edges, active tensions, validated edges, and source file overlaps. The LLM proposes novel connections (edges and optionally new dream nodes) that no structural algorithm would discover. The normalizer then validates LLM suggestions against the fact graph — hallucinations are filtered out, genuine insights are promoted. LLM dream is the **primary** strategy: when an LLM is available, it runs first with 40% of the dream budget; remaining budget is split among structural strategies.
+
+**Configuration:** LLM provider settings come from environment variables (`DREAMGRAPH_LLM_*`) or per-instance `config/engine.env` files. Default: Ollama with `qwen3:8b` at `localhost:11434`. When no LLM is reachable, dreams fall back to structural-only mode (degraded). Per-component overrides (`DREAMGRAPH_LLM_DREAMER_*`, `DREAMGRAPH_LLM_NORMALIZER_*`) allow the dreamer and normalizer to use different models and temperatures — e.g., a creative model at high temperature for dreaming and a precise model at low temperature for validation.
+
+When `strategy="all"`, all strategies run and their outputs are merged with duplicate suppression. LLM dream runs first when available, allocated 35% of the total budget. PGO wave gets 15%. The remaining 50% is split among structural strategies.
 
 ---
 
@@ -398,3 +412,106 @@ The scheduler integrates with the cognitive engine through two hooks:
 
 1. **`notifyCycleComplete(cycle)`** — called after every `dream_cycle`, enables `after_cycles` triggers
 2. **`recordActivity()`** — called on any MCP tool invocation, resets the idle timer for `on_idle` triggers
+
+---
+
+## LLM Provider Integration
+
+Dreams don't work without an LLM. The deterministic strategies find structural patterns; the LLM provides the creative leap — proposing connections no graph algorithm would discover. The normalizer then filters hallucinations from insights.
+
+### Provider Hierarchy
+
+| Priority | Provider | When Used |
+|----------|----------|-----------|
+| 1 | **Ollama** (local) | Autonomous daemon dreaming — no API key needed |
+| 2 | **OpenAI-compatible** (cloud) | Anthropic, OpenAI, Groq, etc. — requires API key |
+| 3 | **MCP Sampling** | Ask the connected client's LLM (IDE mode, human-in-the-loop) |
+| 4 | **None** | Structural-only fallback (degraded mode) |
+
+### Configuration
+
+LLM settings are configured via environment variables or per-instance `config/engine.env` files:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DREAMGRAPH_LLM_PROVIDER` | `ollama` | Provider type: `ollama`, `openai`, `sampling`, `none` |
+| `DREAMGRAPH_LLM_MODEL` | `qwen3:8b` | Model name (provider-dependent) |
+| `DREAMGRAPH_LLM_URL` | `http://localhost:11434` | API base URL |
+| `DREAMGRAPH_LLM_API_KEY` | — | API key (required for `openai` provider) |
+| `DREAMGRAPH_LLM_TEMPERATURE` | `0.7` | Creativity parameter (0.0–1.0) |
+| `DREAMGRAPH_LLM_MAX_TOKENS` | `2048` | Max response tokens |
+
+### Per-Instance Configuration
+
+Each instance can override the global LLM settings via a `config/engine.env` file:
+
+```
+~/.dreamgraph/<uuid>/
+└── config/
+    ├── instance.json     # Identity
+    ├── mcp.json          # Repos, transport
+    ├── policies.json     # Discipline rules
+    ├── schema_version.json
+    └── engine.env        # LLM provider, API keys, model settings
+```
+
+The `engine.env` file uses simple `KEY=VALUE` syntax (supports comments with `#`, quoted values). Values are loaded at startup **before** config parsing, so they override global env vars with "per-instance wins" semantics. This allows different instances to use different models, providers, or API keys.
+
+### Integration with the Dreamer
+
+When `strategy="all"` is used (the default for scheduled dream cycles):
+
+1. **LLM dream runs first** — allocated 40% of the total dream budget
+2. **Structural strategies split the remaining 60%** — gap detection, weak reinforcement, etc.
+3. All results are merged with **duplicate suppression** — identical edge proposals are reinforced rather than duplicated
+4. The normalizer validates all edges equally regardless of source — LLM-generated edges must pass the same Truth Filter thresholds as structural edges
+
+If the LLM provider is not reachable, the dream cycle operates in **degraded mode** — structural strategies only. The system logs a warning at startup when the provider is unavailable.
+
+### JSON Schema Enforcement
+
+When using the OpenAI provider, the dreamer sends a **Structured Outputs** request (`response_format: { type: "json_schema", json_schema: { strict: true, schema: ... } }`). This guarantees that every LLM response conforms to the exact expected schema — no malformed JSON, no missing fields, no matter how high the temperature is set. The model can hallucinate the wildest architectural tensions it wants; the V8 parser never breaks.
+
+For Ollama, the system falls back to basic `format: "json"` mode, which produces valid JSON but does not enforce a specific schema. The tolerant `parseLlmDreamResponse()` parser handles edge cases (code fences, partial output, extra text) for both providers.
+
+### Temperature Guide
+
+| Temperature | Behavior | Recommended For |
+|-------------|----------|-----------------|
+| 0.3–0.5 | Conservative, predictable | Testing, low-budget setups |
+| 0.7 | Balanced (default) | General use, Ollama local models |
+| 0.9 | Creative, speculative | Cloud models with Structured Outputs (recommended) |
+| 1.0+ | Chaotic | Not recommended — increased risk of entity ID hallucination |
+
+The normalizer acts as the strict critic regardless of temperature. Higher creativity produces more novel hypotheses; the normalizer's job is to separate genuine insights from hallucinations.
+
+### ⚠️ Cost & Usage Warning
+
+**Every dream cycle with a cloud LLM provider makes an API call.** When combined with scheduled dreaming, this creates continuous, unattended spend.
+
+**Estimated cost per dream cycle (GPT-4o-mini):**
+- Input: ~2,000–5,000 tokens (knowledge graph context)
+- Output: ~500–2,000 tokens (edge proposals)
+- Cost: ~$0.001–0.003 per cycle
+
+**Projected daily cost by schedule interval:**
+
+| Schedule Interval | Cycles/Day | Est. Cost (GPT-4o-mini) | Est. Cost (GPT-4o) |
+|---|---|---|---|
+| Every 60 seconds | 1,440 | $1.50–$4.30 | $22–$65 |
+| Every 5 minutes | 288 | $0.30–$0.85 | $4.30–$13 |
+| Every 30 minutes | 48 | $0.05–$0.15 | $0.70–$2.20 |
+| Every hour | 24 | $0.025–$0.07 | $0.35–$1.10 |
+
+**Cost control recommendations:**
+
+1. **Use Ollama for local development** — `DREAMGRAPH_LLM_PROVIDER=ollama` is free and runs entirely on your hardware
+2. **Set conservative schedule intervals** — `interval_seconds` ≥ 300 (5 min) for cloud providers
+3. **Cap cycles per hour** — `DREAMGRAPH_SCHEDULER` `max_runs_per_hour` limits how often the scheduler fires
+4. **Monitor your billing dashboard** — set billing alerts with your cloud provider
+5. **Stop the daemon when not needed** — `dg stop <instance>` halts all scheduled cycles
+6. **Use `none` to disable** — `DREAMGRAPH_LLM_PROVIDER=none` falls back to structural-only dreaming at zero cost
+
+> **🚨 Do not leave scheduled cloud LLM dreaming running unattended without billing limits.**
+> A daemon running at 60-second intervals with GPT-4o can accumulate $30–60+/day.
+> Always configure `max_runs_per_hour` and monitor your API provider's usage dashboard.

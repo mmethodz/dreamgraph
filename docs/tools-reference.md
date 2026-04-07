@@ -16,8 +16,8 @@ Trigger a full AWAKE → REM → NORMALIZING → AWAKE cycle. Generates speculat
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `strategy` | enum | `"all"` | `gap_detection`, `weak_reinforcement`, `cross_domain`, `missing_abstraction`, `symmetry_completion`, `tension_directed`, `causal_replay`, `reflective`, `all` |
-| `max_dreams` | number (1–100) | 20 | Maximum dream items to generate |
+| `strategy` | enum | `"all"` | `llm_dream`, `pgo_wave`, `gap_detection`, `weak_reinforcement`, `cross_domain`, `missing_abstraction`, `symmetry_completion`, `tension_directed`, `causal_replay`, `reflective`, `all` |
+| `max_dreams` | number (1–500) | 100 | Maximum dream items to generate |
 | `auto_normalize` | boolean | true | Run normalization after dreaming |
 
 **Post-cycle hooks (v5.1):** `maybeAutoNarrate()` — generates a chapter every 10 cycles; `checkTensionThresholds()` — dispatches event if tension count exceeds limit.

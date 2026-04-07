@@ -51,6 +51,9 @@ export {
   loadInstance,
   resolveInstanceAtStartup,
   migrateFromLegacy,
+  updateInstanceCounters,
+  recordToolCall,
+  getToolCallCount,
 } from "./lifecycle.js";
 
 export type { CreateInstanceOptions } from "./lifecycle.js";

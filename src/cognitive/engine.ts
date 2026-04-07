@@ -28,6 +28,7 @@ import { resolve } from "node:path";
 import { config as appConfig } from "../config/config.js";
 import { logger } from "../utils/logger.js";
 import { dataPath } from "../utils/paths.js";
+import { loadJsonArray, invalidateCache } from "../utils/cache.js";
 import { getActiveCognitiveTuning } from "../instance/index.js";
 import type {
   CognitiveStateName,
@@ -50,6 +51,7 @@ import type {
   DreamHistoryEntry,
   DreamHistoryFile,
 } from "./types.js";
+import type { Feature, Workflow, DataModelEntity, ResourceIndex, IndexEntry } from "../types/index.js";
 import { DEFAULT_DECAY, DEFAULT_PROMOTION, DEFAULT_TENSION_CONFIG } from "./types.js";
 
 // ---------------------------------------------------------------------------
@@ -100,6 +102,26 @@ class CognitiveEngine {
    */
   private reinforcementMemory = new Map<string, ReinforcementMemory>();
   private static readonly MEMORY_TTL_CYCLES = 30;
+
+  /**
+   * Hydrate counters from the persisted dream graph.
+   * Called once at startup so the engine doesn't restart counting from 0
+   * after a server restart.
+   */
+  async hydrate(): Promise<void> {
+    try {
+      const graph = await this.loadDreamGraph();
+      if (graph.metadata.total_cycles > 0) {
+        this.totalDreamCycles = graph.metadata.total_cycles;
+        this.lastDreamCycle = graph.metadata.last_dream_cycle;
+        logger.info(
+          `Cognitive engine hydrated: ${this.totalDreamCycles} prior dream cycles`
+        );
+      }
+    } catch {
+      // Fresh start — no graph yet
+    }
+  }
 
   // -------------------------------------------------------------------------
   // State Machine
@@ -350,6 +372,17 @@ class CognitiveEngine {
     let decayedEdges = 0;
     let decayedNodes = 0;
 
+    // Build tension relevance set: entities mentioned in active tensions.
+    // Edges/nodes involving these entities decay at half rate — they're
+    // actively relevant and shouldn't expire before the system resolves them.
+    const tensionEntityIds = new Set<string>();
+    try {
+      const tensions = await this.getUnresolvedTensions();
+      for (const t of tensions) {
+        for (const eid of t.entities) tensionEntityIds.add(eid);
+      }
+    } catch { /* ignore — decay proceeds without protection */ }
+
     // Decay edges
     const survivingEdges: DreamEdge[] = [];
     for (const edge of graph.edges) {
@@ -359,9 +392,16 @@ class CognitiveEngine {
         continue;
       }
 
+      // Tension-aware decay: halve rate for edges involving tension entities
+      const tensionRelevant = tensionEntityIds.has(edge.from) || tensionEntityIds.has(edge.to);
+      const decayRate = tensionRelevant
+        ? (edge.decay_rate ?? this.decayConfig.decay_rate) * 0.5
+        : (edge.decay_rate ?? this.decayConfig.decay_rate);
+      const ttlDecrement = tensionRelevant ? 0.5 : 1;
+
       // Apply decay
-      const newTtl = (edge.ttl ?? this.decayConfig.ttl) - 1;
-      const newConfidence = edge.confidence - (edge.decay_rate ?? this.decayConfig.decay_rate);
+      const newTtl = (edge.ttl ?? this.decayConfig.ttl) - ttlDecrement;
+      const newConfidence = edge.confidence - decayRate;
 
       if (newTtl <= 0 || newConfidence <= 0) {
         // SAVE TO REINFORCEMENT MEMORY before expiring
@@ -394,8 +434,15 @@ class CognitiveEngine {
         continue;
       }
 
-      const newTtl = (node.ttl ?? this.decayConfig.ttl) - 1;
-      const newConfidence = node.confidence - (node.decay_rate ?? this.decayConfig.decay_rate);
+      // Tension-aware decay: halve rate for nodes related to tension entities
+      const nodeTensionRelevant = node.inspiration.some(id => tensionEntityIds.has(id));
+      const nodeDecayRate = nodeTensionRelevant
+        ? (node.decay_rate ?? this.decayConfig.decay_rate) * 0.5
+        : (node.decay_rate ?? this.decayConfig.decay_rate);
+      const nodeTtlDecrement = nodeTensionRelevant ? 0.5 : 1;
+
+      const newTtl = (node.ttl ?? this.decayConfig.ttl) - nodeTtlDecrement;
+      const newConfidence = node.confidence - nodeDecayRate;
 
       if (newTtl <= 0 || newConfidence <= 0) {
         decayedNodes++;
@@ -666,6 +713,168 @@ class CognitiveEngine {
     validated.metadata.total_validated = validated.edges.length;
     await this.saveValidatedEdges(validated);
     logger.info(`Promoted ${edges.length} dream edges to validated status`);
+  }
+
+  // -------------------------------------------------------------------------
+  // Entity Promotion — Dream nodes → Fact graph seed files
+  // -------------------------------------------------------------------------
+
+  /**
+   * Promote validated dream nodes into the fact graph.
+   *
+   * When a dream node's intent reaches sufficient confidence through
+   * normalization, it becomes a factual entity. The speculative intent
+   * becomes the entity's description — dreams become reality.
+   *
+   * Each node is written to the appropriate seed file based on its
+   * category (feature, workflow, or data_model), then the resource
+   * index is rebuilt.
+   *
+   * The dream node is marked with `promoted_at` so it won't be
+   * promoted again, but remains in dream_graph.json as provenance.
+   */
+  async promoteNodesToFactGraph(nodes: DreamNode[]): Promise<{ promoted: number; skipped: number }> {
+    this.assertState("normalizing", "promoteNodesToFactGraph");
+
+    if (nodes.length === 0) return { promoted: 0, skipped: 0 };
+
+    // Load current seed files
+    const [features, workflows, dataModel] = await Promise.all([
+      loadJsonArray<Feature>("features.json"),
+      loadJsonArray<Workflow>("workflows.json"),
+      loadJsonArray<DataModelEntity>("data_model.json"),
+    ]);
+
+    // Build existing ID sets to prevent duplicates
+    const existingIds = new Set<string>([
+      ...features.map(f => f.id),
+      ...workflows.map(w => w.id),
+      ...dataModel.map(d => d.id),
+    ]);
+
+    let promoted = 0;
+    let skipped = 0;
+    const now = new Date().toISOString();
+
+    for (const node of nodes) {
+      // Strip dream_ prefix for the fact graph ID
+      const factId = node.id.replace(/^dream_(llm_)?/, "");
+
+      if (existingIds.has(factId) || existingIds.has(node.id)) {
+        skipped++;
+        continue;
+      }
+
+      const category = node.category ?? "feature";
+      // Intent becomes the factual description — dreams become reality
+      const description = node.intent
+        ? `${node.description}. Intent: ${node.intent}`
+        : node.description;
+
+      if (category === "feature") {
+        features.push({
+          id: factId,
+          name: node.name,
+          description,
+          source_repo: "",
+          source_files: [],
+          status: "discovered",
+          category: node.domain ?? "dream-promoted",
+          tags: ["dream-promoted"],
+          domain: node.domain ?? "",
+          keywords: node.keywords ?? [],
+          links: [],
+        });
+      } else if (category === "workflow") {
+        workflows.push({
+          id: factId,
+          name: node.name,
+          description,
+          source_repo: "",
+          source_files: [],
+          trigger: "unknown",
+          steps: [],
+          domain: node.domain ?? "",
+          keywords: node.keywords ?? [],
+          status: "discovered",
+          links: [],
+        });
+      } else {
+        dataModel.push({
+          id: factId,
+          name: node.name,
+          description,
+          source_repo: "",
+          source_files: [],
+          table_name: "",
+          storage: "unknown",
+          key_fields: [],
+          relationships: [],
+          domain: node.domain ?? "",
+          keywords: node.keywords ?? [],
+          status: "discovered",
+          links: [],
+        });
+      }
+
+      // Mark the dream node as promoted
+      node.promoted_at = now;
+      existingIds.add(factId);
+      promoted++;
+    }
+
+    if (promoted === 0) return { promoted: 0, skipped };
+
+    // Write updated seed files
+    const writes: Promise<void>[] = [];
+
+    const writeSeed = async (filename: string, data: unknown) => {
+      await writeFile(dataPath(filename), JSON.stringify(data, null, 2), "utf-8");
+      invalidateCache(filename);
+    };
+
+    writes.push(writeSeed("features.json", features));
+    writes.push(writeSeed("workflows.json", workflows));
+    writes.push(writeSeed("data_model.json", dataModel));
+    await Promise.all(writes);
+
+    // Rebuild resource index
+    const entities: Record<string, IndexEntry> = {};
+    for (const f of features.filter(e => !("_schema" in e))) {
+      entities[f.id] = { type: "feature", uri: `dreamgraph://resource/feature/${f.id}`, name: f.name, source_repo: f.source_repo };
+    }
+    for (const w of workflows.filter(e => !("_schema" in e))) {
+      entities[w.id] = { type: "workflow", uri: `dreamgraph://resource/workflow/${w.id}`, name: w.name, source_repo: w.source_repo };
+    }
+    for (const d of dataModel.filter(e => !("_schema" in e))) {
+      entities[d.id] = { type: "data_model", uri: `dreamgraph://resource/data_model/${d.id}`, name: d.name, source_repo: d.source_repo };
+    }
+    const index: ResourceIndex = { entities };
+    await writeFile(dataPath("index.json"), JSON.stringify(index, null, 2), "utf-8");
+    invalidateCache("index.json");
+
+    // Save dream graph with promoted_at markers
+    const dreamGraph = await this.loadDreamGraph();
+    const promotedIds = new Set(nodes.filter(n => n.promoted_at).map(n => n.id));
+    for (const n of dreamGraph.nodes) {
+      if (promotedIds.has(n.id)) n.promoted_at = now;
+    }
+    await this.saveDreamGraph(dreamGraph);
+
+    logger.info(
+      `Entity promotion: ${promoted} dream nodes became fact entities ` +
+      `(${skipped} skipped as duplicates) — intent is now factual`
+    );
+
+    return { promoted, skipped };
+  }
+
+  /** Get the N most recently validated edges (for LLM dream context). */
+  async getRecentValidatedEdges(n: number = 10): Promise<ValidatedEdge[]> {
+    const validated = await this.loadValidatedEdges();
+    return validated.edges
+      .sort((a, b) => (b.validated_at ?? "").localeCompare(a.validated_at ?? ""))
+      .slice(0, n);
   }
 
   // -------------------------------------------------------------------------
@@ -1167,6 +1376,21 @@ class CognitiveEngine {
         }
       })(),
       decay_config: this.decayConfig,
+      llm: await (async () => {
+        try {
+          const { getLlmProvider, getLlmConfig } = await import("./llm.js");
+          const cfg = getLlmConfig();
+          const provider = getLlmProvider();
+          const available = await provider.isAvailable();
+          return {
+            provider: cfg.provider,
+            model: cfg.model,
+            available,
+          };
+        } catch {
+          return { provider: "none", model: "", available: false };
+        }
+      })(),
     };
   }
 }

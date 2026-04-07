@@ -48,6 +48,7 @@ import { generateNarrative, maybeAutoNarrate, generateDiffChapter, appendToStory
 import { runMetacognitiveAnalysis, getMetaLog } from "./metacognition.js";
 import { dispatchEvent, checkTensionThresholds, getEventLog } from "./event-router.js";
 import { generateRemediationPlans } from "./intervention.js";
+import { updateInstanceCounters } from "../instance/index.js";
 import {
   createSchedule,
   updateSchedule,
@@ -493,10 +494,11 @@ export function registerCognitiveTools(server: McpServer): void {
   // =========================================================================
   server.tool(
     "dream_cycle",
-    "Trigger a full cognitive dream cycle: AWAKE → REM (decay existing dreams, generate speculative connections with duplicate suppression) → NORMALIZING (three-outcome classifier: validated/latent/rejected with split scoring and promotion gate) → AWAKE. Latent edges remain as speculative memory. Records full history. Supports tension-directed dreaming.",
+    "Trigger a full cognitive dream cycle: AWAKE → REM (decay existing dreams, generate speculative connections via LLM + structural analysis with duplicate suppression) → NORMALIZING (three-outcome classifier: validated/latent/rejected with split scoring and promotion gate) → AWAKE. The LLM dream strategy is the creative core — it asks an LLM to analyze the knowledge graph and propose insightful connections. Structural strategies provide graph-algorithm backup. Latent edges remain as speculative memory. Records full history. Supports tension-directed dreaming.",
     {
       strategy: z
         .enum([
+          "llm_dream",
           "gap_detection",
           "weak_reinforcement",
           "cross_domain",
@@ -509,14 +511,14 @@ export function registerCognitiveTools(server: McpServer): void {
         ])
         .optional()
         .describe(
-          'Dream strategy. "gap_detection": find unconnected related entities. "weak_reinforcement": strengthen weak edges. "cross_domain": bridge different domains. "missing_abstraction": propose unifying features. "symmetry_completion": add reverse edges. "tension_directed": focus on unresolved tensions. "causal_replay": mine history for cause→effect chains. "reflective": agent-directed insights from code reading. "all": run all strategies. Default: "all".'
+          'Dream strategy. "llm_dream": LLM-powered creative dreaming (THE primary strategy). "gap_detection": find unconnected related entities. "weak_reinforcement": strengthen weak edges. "cross_domain": bridge different domains. "missing_abstraction": propose unifying features. "symmetry_completion": add reverse edges. "tension_directed": focus on unresolved tensions. "causal_replay": mine history for cause→effect chains. "reflective": agent-directed insights from code reading. "all": run all strategies (LLM first, then structural). Default: "all".'
         ),
       max_dreams: z
         .number()
         .min(1)
-        .max(100)
+        .max(500)
         .optional()
-        .describe("Maximum number of dream items to generate (default: 20)."),
+        .describe("Maximum number of dream items to generate (default: 100)."),
       auto_normalize: z
         .boolean()
         .optional()
@@ -528,7 +530,7 @@ export function registerCognitiveTools(server: McpServer): void {
       recordActivity(); // v5.2 — track activity for idle triggers
       const startTime = Date.now();
       const strat = strategy ?? "all";
-      const maxD = max_dreams ?? 20;
+      const maxD = max_dreams ?? 100;
       const autoNorm = auto_normalize ?? true;
 
       logger.info(
@@ -576,6 +578,7 @@ export function registerCognitiveTools(server: McpServer): void {
               latent: normalization.latent,
               rejected: normalization.rejected,
               blocked_by_gate: normalization.blockedByGate,
+              promoted_entities: normalization.promotedNodes,
             };
             promoted = normalization.promotedEdges.length;
             blockedByGate = normalization.blockedByGate;
@@ -675,6 +678,15 @@ export function registerCognitiveTools(server: McpServer): void {
           };
           await engine.appendHistoryEntry(historyEntry);
 
+          // Persist cycle counter to instance state
+          try {
+            await updateInstanceCounters({
+              total_dream_cycles: engine.getCurrentDreamCycle(),
+            });
+          } catch (e) {
+            logger.warn(`Failed to update instance counters: ${e}`);
+          }
+
           // v5.1 post-cycle hooks (fire-and-forget, errors logged but not propagated)
           try {
             await maybeAutoNarrate();
@@ -707,6 +719,7 @@ export function registerCognitiveTools(server: McpServer): void {
             },
             normalization: normResult,
             promoted_edges: promoted,
+            promoted_entities: normResult?.promoted_entities ?? 0,
             tensions_created: tensionsCreated,
             tensions_resolved: tensionsResolved,
             tensions_expired: tensionDecayResult.expired,
@@ -784,6 +797,7 @@ export function registerCognitiveTools(server: McpServer): void {
             rejected: normResult.rejected,
             blocked_by_gate: normResult.blockedByGate,
             promoted_edges: normResult.promotedEdges,
+            promoted_entities: normResult.promotedNodes,
           });
         }
       );

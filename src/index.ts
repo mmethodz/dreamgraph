@@ -17,7 +17,9 @@
  */
 
 import { createServer } from "./server/server.js";
-import { resolveInstanceAtStartup } from "./instance/index.js";
+import { resolveInstanceAtStartup, updateInstanceCounters } from "./instance/index.js";
+import { engine } from "./cognitive/engine.js";
+import { initLlmProvider } from "./cognitive/llm.js";
 import { logger } from "./utils/logger.js";
 
 /* ------------------------------------------------------------------ */
@@ -222,9 +224,27 @@ const opts = parseArgs();
 // all three resolvers (dataDir, paths, mutex).  In legacy mode
 // (no DREAMGRAPH_INSTANCE_UUID env var) this is a harmless no-op.
 resolveInstanceAtStartup()
-  .then(() =>
-    opts.transport === "http" ? startHTTP(opts.port) : startStdio(),
-  )
+  .then(async () => {
+    // Hydrate cognitive engine counters from persisted dream graph
+    await engine.hydrate();
+
+    // Initialize the LLM provider for dream cycles
+    const llm = initLlmProvider();
+    const available = await llm.isAvailable();
+    if (available) {
+      logger.info(`LLM provider "${llm.name}" is online — dreams will use LLM`);
+    } else {
+      logger.warn(`LLM provider "${llm.name}" is NOT reachable — dreams will be structural-only (degraded)`);
+    }
+
+    // Sync instance.json counters with actual persisted values
+    const cycles = engine.getCurrentDreamCycle();
+    if (cycles > 0) {
+      await updateInstanceCounters({ total_dream_cycles: cycles });
+    }
+
+    return opts.transport === "http" ? startHTTP(opts.port) : startStdio();
+  })
   .catch((err) => {
     logger.error("Fatal error:", err);
     process.exit(1);

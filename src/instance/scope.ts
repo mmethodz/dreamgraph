@@ -233,6 +233,11 @@ export class InstanceScope {
     return resolve(this.configDir, filename);
   }
 
+  /** Full path to the per-instance engine.env file. */
+  get engineEnvPath(): string {
+    return resolve(this.configDir, "engine.env");
+  }
+
   /** Resolve a filename within the logs directory. */
   logPath(filename: string): string {
     return resolve(this.logsDir, filename);

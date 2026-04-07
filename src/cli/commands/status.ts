@@ -245,16 +245,39 @@ async function gatherDataStats(dataDir: string): Promise<DataStats> {
     stats.graphEdges = graph.edges?.length ?? 0;
   }
 
-  const candidates = (await read("candidate_edges.json")) as unknown[] | null;
-  if (Array.isArray(candidates)) stats.candidateEdges = candidates.length;
+  const candidates = (await read("candidate_edges.json")) as
+    | { results?: unknown[] }
+    | unknown[]
+    | null;
+  if (candidates) {
+    if (Array.isArray(candidates)) {
+      stats.candidateEdges = candidates.length;
+    } else if (Array.isArray((candidates as { results?: unknown[] }).results)) {
+      stats.candidateEdges = (candidates as { results: unknown[] }).results.length;
+    }
+  }
 
-  const validated = (await read("validated_edges.json")) as unknown[] | null;
-  if (Array.isArray(validated)) stats.validatedEdges = validated.length;
+  const validated = (await read("validated_edges.json")) as
+    | { edges?: unknown[] }
+    | unknown[]
+    | null;
+  if (validated) {
+    if (Array.isArray(validated)) {
+      stats.validatedEdges = validated.length;
+    } else if (Array.isArray((validated as { edges?: unknown[] }).edges)) {
+      stats.validatedEdges = (validated as { edges: unknown[] }).edges.length;
+    }
+  }
 
   const tensions = (await read("tension_log.json")) as {
+    signals?: unknown[];
     tensions?: unknown[];
   } | null;
-  if (tensions?.tensions) stats.tensions = tensions.tensions.length;
+  if (tensions?.signals) {
+    stats.tensions = tensions.signals.length;
+  } else if (tensions?.tensions) {
+    stats.tensions = tensions.tensions.length;
+  }
 
   const adr = (await read("adr_log.json")) as {
     decisions?: unknown[];
