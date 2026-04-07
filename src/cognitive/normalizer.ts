@@ -10,13 +10,20 @@
  * - latent:     Plausible, structurally valid, but evidence too weak → keep in dream space
  * - rejected:   Contradicted, malformed, or low-value noise → discard
  *
- * Split scoring:
+ * Two-pass scoring:
+ * PASS 1 — Structural heuristic scoring:
  * - plausibility: structural/semantic fit (domain, keyword, repo coherence)
  * - evidence:     grounding in actual graph data (entity existence, shared connections)
  * - contradiction: severity of conflicts (0 = none, 1 = fatal)
  * - confidence:   combined score = plausibility × 0.45 + evidence × 0.45 + bonus − penalty
  *
- * Two-threshold promotion:
+ * PASS 2 — LLM semantic validation (normalizer model, low temperature):
+ * - Evaluates latent edges and low_signal rejections via LLM
+ * - Boosts plausibility/evidence for semantically meaningful connections
+ * - Can upgrade rejected → latent or latent → validated
+ * - Generates tension signals for rejected edges with confidence ≥ 0.30
+ *
+ * Promotion thresholds:
  * - confidence >= 0.62 AND plausibility >= 0.45 AND evidence >= 0.4 AND evidence_count >= 2
  *   → validated (promoted to fact-adjacent space)
  * - plausibility >= 0.35 AND not contradicted → latent (kept in speculative memory)
@@ -572,10 +579,10 @@ interface SemanticEvaluation {
  * can reason about intent and meaning.
  *
  * Cost control:
- * - Only evaluates edges with confidence > 0.4 (worth the LLM cost)
- * - Batches up to 10 edges per call (~500 tokens)
+ * - Evaluates latent edges (confidence ≥ 0.35) and low_signal rejections
+ * - Batches up to 20 edges per call (~800 tokens)
  * - Skips entirely if LLM is unavailable
- * - Uses low temperature (0.3) for consistent judgments
+ * - Uses normalizer LLM config (low temperature) for consistent judgments
  *
  * Returns a map of edge_id → SemanticEvaluation for edges the LLM reviewed.
  */
@@ -585,10 +592,23 @@ async function llmSemanticValidation(
 ): Promise<Map<string, SemanticEvaluation>> {
   const evaluations = new Map<string, SemanticEvaluation>();
 
-  // Filter to candidates worth evaluating: latent or near-threshold
-  const candidates = edges.filter(({ result }) =>
-    result.status === "latent" && result.confidence >= 0.4
-  );
+  // Filter to candidates worth evaluating:
+  // 1. Latent edges (speculative memory — may have semantic value the heuristic missed)
+  // 2. Rejected edges with reason_code "low_signal" whose endpoints both exist
+  //    in the fact graph (structurally valid but heuristically under-scored)
+  // This rescues edges that are semantically meaningful but lack keyword/domain overlap.
+  const candidates = edges.filter(({ edge, result }) => {
+    // Latent edges near threshold — existing behavior
+    if (result.status === "latent" && result.confidence >= 0.35) return true;
+    // Low-signal rejections where both endpoints are grounded — the heuristic
+    // couldn't find structural overlap, but the LLM may see semantic meaning
+    if (
+      result.status === "rejected" &&
+      result.reason_code === "low_signal" &&
+      result.contradiction_score < 0.3
+    ) return true;
+    return false;
+  });
 
   if (candidates.length === 0) return evaluations;
 
@@ -601,8 +621,8 @@ async function llmSemanticValidation(
 
   const llm = getLlmProvider();
 
-  // Batch up to 10 edges per call
-  const batch = candidates.slice(0, 10);
+  // Batch up to 20 edges per call (low_signal rejections need coverage)
+  const batch = candidates.slice(0, 20);
 
   // Build context: describe each edge and its endpoints
   const edgeDescriptions = batch.map(({ edge, result }) => {
@@ -692,13 +712,15 @@ function applySemanticBoost(
   evaluation: SemanticEvaluation,
   promo: PromotionConfig,
 ): void {
-  if (evaluation.semantic_relevance < 0.6) return;
+  if (evaluation.semantic_relevance < 0.5) return;
 
-  // Scale boost by semantic relevance (0.6→small, 1.0→full)
-  const boostScale = (evaluation.semantic_relevance - 0.6) / 0.4; // 0→1
+  // Scale boost by semantic relevance (0.5→small, 1.0→full)
+  const boostScale = (evaluation.semantic_relevance - 0.5) / 0.5; // 0→1
 
-  const plausBoost = 0.15 * boostScale;
-  const evidBoost = 0.10 * boostScale;
+  // Stronger boosts for rejected edges (they start from a deeper deficit)
+  const wasRejected = result.status === "rejected";
+  const plausBoost = (wasRejected ? 0.30 : 0.15) * boostScale;
+  const evidBoost  = (wasRejected ? 0.20 : 0.10) * boostScale;
 
   result.plausibility = Math.round(Math.min(result.plausibility + plausBoost, 1) * 100) / 100;
   result.evidence_score = Math.round(Math.min(result.evidence_score + evidBoost, 1) * 100) / 100;
@@ -716,13 +738,16 @@ function applySemanticBoost(
   result.reason = `${result.reason} LLM semantic: ${evaluation.reasoning} (relevance: ${evaluation.semantic_relevance.toFixed(2)})`;
   result.reason_code = "semantic_boost";
 
-  // Re-classify with boosted scores
+  // Re-classify with boosted scores — can upgrade rejected→latent or latent→validated
   if (
     result.confidence >= promo.promotion_confidence &&
     result.plausibility >= promo.promotion_plausibility &&
     result.evidence_score >= promo.promotion_evidence
   ) {
     result.status = "validated";
+  } else if (result.plausibility >= promo.retention_plausibility) {
+    // Semantic boost rescued this from rejection → latent (speculative memory)
+    if (result.status === "rejected") result.status = "latent";
   }
 }
 
@@ -777,6 +802,14 @@ function promoteToValidatedEdge(
 // Public API — Normalize
 // ---------------------------------------------------------------------------
 
+export interface TensionCandidate {
+  dreamId: string;
+  from: string;
+  to: string;
+  confidence: number;
+  reason: string;
+}
+
 export interface NormalizationResult {
   cycle: number;
   processed: number;
@@ -787,6 +820,8 @@ export interface NormalizationResult {
   promotedEdges: ValidatedEdge[];
   /** Number of dream nodes promoted to the fact graph as entities */
   promotedNodes: number;
+  /** Rejected edges that are tension-worthy (grounded endpoints, non-trivial rejection) */
+  tensionCandidates: TensionCandidate[];
 }
 
 /**
@@ -863,11 +898,8 @@ export async function normalize(
       result.reason_code = "insufficient_evidence";
     }
 
-    // In strict mode, reject latent items too (only keep validated)
-    if (strict && result.status === "latent") {
-      result.status = "rejected";
-      result.reason_code = "low_signal";
-    }
+    // NOTE: strict-mode downgrade (latent→rejected) is deferred until AFTER
+    // the LLM semantic validation pass so the LLM can rescue edges first.
 
     edgeAssessments.push({ edge, result });
     newResults.push(result);
@@ -887,6 +919,16 @@ export async function normalize(
   }
   if (semanticBoosts > 0) {
     logger.info(`Semantic validation boosted ${semanticBoosts} edges`);
+  }
+
+  // PASS 2b: apply strict-mode downgrade AFTER LLM has had its say
+  if (strict) {
+    for (const { result } of edgeAssessments) {
+      if (result.status === "latent") {
+        result.status = "rejected";
+        result.reason_code = "low_signal";
+      }
+    }
   }
 
   // PASS 3: promotion gate — apply after semantic boosts
@@ -983,6 +1025,34 @@ export async function normalize(
     rejected: newResults.filter((r) => r.status === "rejected").length,
   };
 
+  // Collect tension-worthy rejections:
+  // 1. Rejected edges where at least one endpoint is grounded in the fact graph
+  // 2. NOT invalid_endpoints (both endpoints missing = noise, not tension)
+  // 3. NOT contradicted (contradictions are clear rejections, not ambiguous)
+  // These represent edges the system "struggled with" — tension signals that
+  // should direct future dreaming.
+  const tensionCandidates: TensionCandidate[] = [];
+  for (const { edge, result } of edgeAssessments) {
+    if (
+      result.status === "rejected" &&
+      result.reason_code !== "contradicted" &&
+      // At least one endpoint must be grounded (otherwise it's pure noise)
+      (lookup.entityIds.has(edge.from) || lookup.entityIds.has(edge.to))
+    ) {
+      tensionCandidates.push({
+        dreamId: edge.id,
+        from: edge.from,
+        to: edge.to,
+        confidence: result.confidence,
+        reason: result.reason,
+      });
+    }
+  }
+
+  if (tensionCandidates.length > 0) {
+    logger.info(`Normalization: ${tensionCandidates.length} tension-worthy rejections identified`);
+  }
+
   logger.info(
     `Normalization cycle #${cycle} complete: ${newResults.length} processed ` +
       `(${counts.validated} validated, ${counts.latent} latent, ${counts.rejected} rejected), ` +
@@ -996,5 +1066,6 @@ export async function normalize(
     blockedByGate,
     promotedEdges,
     promotedNodes: promotedNodeCount,
+    tensionCandidates,
   };
 }

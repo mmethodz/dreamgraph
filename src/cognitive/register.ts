@@ -583,32 +583,20 @@ export function registerCognitiveTools(server: McpServer): void {
             promoted = normalization.promotedEdges.length;
             blockedByGate = normalization.blockedByGate;
 
-            // Create tension signals for rejected edges that had potential
-            // BUG FIX: use actual entity IDs (from/to), not dream_id
-            const dreamGraph = await engine.loadDreamGraph();
-            const dreamEdgeMap = new Map(
-              dreamGraph.edges.map((e) => [e.id, e])
-            );
-
-            for (const result of await (async () => {
-              const candidates = await engine.loadCandidateEdges();
-              return candidates.results.filter(
-                (r) =>
-                  r.normalization_cycle === normalization.cycle &&
-                  r.status === "rejected" &&
-                  r.confidence >= 0.3
-              );
-            })()) {
-              const dreamEdge = dreamEdgeMap.get(result.dream_id);
-              const entities = dreamEdge
-                ? [dreamEdge.from, dreamEdge.to]
-                : [result.dream_id];
-
+            // Create tension signals from the normalizer's tension candidates.
+            // These are rejected edges where at least one endpoint is grounded
+            // in the fact graph — the system "struggled" with these connections.
+            // Tension urgency is scaled to 0.3–0.7 range so tensions are
+            // meaningful but not overwhelming.
+            for (const tc of normalization.tensionCandidates) {
+              const urgency = Math.max(0.3, Math.min(0.7,
+                tc.confidence * 2 + 0.2  // scale low confidences into useful range
+              ));
               await engine.recordTension({
                 type: "weak_connection",
-                entities,
-                description: `Dream "${result.dream_id}" rejected with confidence ${result.confidence}: ${result.reason}`,
-                urgency: result.confidence,
+                entities: [tc.from, tc.to],
+                description: `Dream "${tc.dreamId}" rejected: ${tc.reason}`,
+                urgency,
               });
               tensionsCreated++;
             }

@@ -87,9 +87,9 @@ When `strategy="all"`, all strategies run and their outputs are merged with dupl
 
 ## Normalization Pipeline
 
-The normalizer is the **strictest critic** in the system. It classifies every speculative edge against the fact graph.
+The normalizer is the **strictest critic** in the system. It classifies every speculative edge against the fact graph using a two-pass approach: structural heuristics first, then LLM semantic validation.
 
-### Split Scoring
+### PASS 1: Split Scoring (Structural)
 
 Each edge receives four independent scores:
 
@@ -104,6 +104,17 @@ Each edge receives four independent scores:
 ```
 confidence = plausibility × 0.45 + evidence × 0.45 + bonus − penalty
 ```
+
+### PASS 2: LLM Semantic Validation
+
+Structural scoring cannot judge whether abstract concepts like "caching_layer relates_to query_optimizer" make sense — only the LLM can reason about intent and meaning. The semantic validation pass uses the **normalizer LLM** (low temperature, factual) to:
+
+- Evaluate **latent edges** (confidence ≥ 0.35) that the heuristic couldn't decide on
+- Rescue **low_signal rejected edges** where the heuristic found no structural overlap but the relationship may be semantically meaningful
+- Boost plausibility (+0.30 for rejected, +0.15 for latent) and evidence scores based on `semantic_relevance` (0.0–1.0)
+- Upgrade edges: rejected → latent, or latent → validated, when boosted scores cross thresholds
+
+Cost is controlled by batching up to 20 edges per LLM call and skipping entirely when no LLM is configured (graceful degradation to structural-only).
 
 ### Three Outcomes
 
