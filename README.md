@@ -566,9 +566,9 @@ The graph knew *what* the app does and *how* its components relate — not *how*
 
 ## Getting Started
 
-DreamGraph is an MCP server. Setup is three steps.
+### 1. Install
 
-### 1. Clone and build
+Clone and install DreamGraph globally:
 
 ```bash
 git clone https://github.com/mikajussila/dreamgraph.git
@@ -577,28 +577,69 @@ npm install
 npm run build
 ```
 
-For a global install with CLI shims on your PATH:
-
 ```powershell
-# Windows
+# Windows — installs dg + dreamgraph shims to PATH
 .\scripts\install.ps1
 
 # Linux / macOS
 bash scripts/install.sh
 ```
 
-### 2. Connect to your IDE
+After installation, `dg` and `dreamgraph` are available globally:
 
-DreamGraph supports two transport modes:
+```bash
+dg --version          # DreamGraph CLI v6.0.0 (La Catedral)
+dreamgraph --help     # low-level server entry-point (dg wraps this)
+```
 
-| Mode | Flag | Best for |
-|------|------|----------|
-| **STDIO** (default) | `--transport stdio` | IDE integrations (Claude Desktop, VS Code, Cursor) |
-| **Streamable HTTP** | `--transport http --port 8100` | Web clients, CLI tools, remote agents |
+To upgrade later: `.\scripts\install.ps1 -Force` (Windows) or `bash scripts/install.sh --force` (Linux/macOS).
 
-#### A. STDIO mode (default)
+### 2. Create an instance
 
-Add a single JSON block to your MCP client configuration.
+Each project gets its own UUID-scoped instance with isolated data, config, and logs:
+
+```bash
+dg init --name my-project --project /path/to/my-repo
+```
+
+This creates `~/.dreamgraph/<uuid>/` with `data/`, `config/`, and `logs/` directories. The `--project` flag binds a local repo so code-senses and git-senses work automatically.
+
+### 3. Start the daemon
+
+```bash
+# Start as a background HTTP daemon (default port auto-assigned)
+dg start my-project
+
+# Start with a specific port
+dg start my-project --http --port 9000
+
+# Check it's running
+dg status my-project
+```
+
+The daemon runs independently of any IDE — you can close editors, disconnect clients, and the scheduler keeps dreaming. Stop or restart anytime:
+
+```bash
+dg stop my-project
+dg restart my-project
+```
+
+### 4. Connect your IDE
+
+The running daemon exposes a Streamable HTTP endpoint at `http://localhost:<port>/mcp`. Point your MCP client at it:
+
+**VS Code / Cursor** (`.vscode/mcp.json`):
+
+```json
+{
+  "servers": {
+    "dreamgraph": {
+      "type": "http",
+      "url": "http://localhost:8500/mcp"
+    }
+  }
+}
+```
 
 **Claude Desktop** (`claude_desktop_config.json`):
 
@@ -606,114 +647,55 @@ Add a single JSON block to your MCP client configuration.
 {
   "mcpServers": {
     "dreamgraph": {
-      "command": "node",
-      "args": ["/path/to/dreamgraph/dist/index.js"],
-      "env": {
-        "DREAMGRAPH_REPOS": "{\"my-app\": \"/path/to/my-app\"}",
-        "DREAMGRAPH_DEBUG": "true"
-      }
+      "type": "http",
+      "url": "http://localhost:8500/mcp"
     }
   }
 }
 ```
 
-**VS Code / Cursor** (`.vscode/mcp.json` or IDE settings):
-
-```json
-{
-  "servers": {
-    "dreamgraph": {
-      "command": "node",
-      "args": ["/path/to/dreamgraph/dist/index.js"],
-      "env": {
-        "DREAMGRAPH_REPOS": "{\"my-app\": \"/path/to/my-app\"}",
-        "DREAMGRAPH_DEBUG": "true"
-      }
-    }
-  }
-}
-```
-
-**[OpenClaw](https://docs.openclaw.ai/cli/mcp)** — register DreamGraph as an MCP server in one command:
+**[OpenClaw](https://docs.openclaw.ai/cli/mcp)** — register DreamGraph as a remote MCP server:
 
 ```bash
-openclaw mcp set dreamgraph '{"command":"node","args":["/absolute/path/dreamgraph/dist/index.js"]}'
+openclaw mcp set dreamgraph --transport http --url http://localhost:8500/mcp
 ```
 
-Replace `/absolute/path/dreamgraph` with the actual path to your DreamGraph checkout. To pass environment variables, add an `env` key:
+Once registered, every tool, resource, and dream cycle is available through the OpenClaw CLI and agent runtime. See the [OpenClaw MCP docs](https://docs.openclaw.ai/cli/mcp) for details.
 
-```bash
-openclaw mcp set dreamgraph '{"command":"node","args":["/absolute/path/dreamgraph/dist/index.js"],"env":{"DREAMGRAPH_REPOS":"{\"my-app\":\"/path/to/my-app\"}"}}'
-```
+> **Note:** STDIO mode is also supported for legacy setups or single-client scenarios. Use `dg start my-project --foreground` to run in STDIO mode (the MCP client manages the process lifecycle). For HTTP daemon mode (recommended), the server runs independently and multiple clients can connect simultaneously.
 
-Once registered, OpenClaw can talk to DreamGraph directly — every tool, resource, and dream cycle is available through the OpenClaw CLI and agent runtime. See the [OpenClaw MCP docs](https://docs.openclaw.ai/cli/mcp) for more details.
+#### HTTP Endpoint Reference
 
-#### B. Streamable HTTP mode
-
-Start DreamGraph as an HTTP server and connect any MCP-compatible client:
-
-```bash
-# Default port 8100
-dreamgraph --transport http
-
-# Custom port
-dreamgraph --transport http --port 9000
-
-# Or via npm
-npm run start:sse
-```
-
-Clients connect to `http://localhost:<port>/mcp`:
-
-| Method | Purpose |
-|--------|---------|
-| `POST /mcp` | Send JSON-RPC messages |
-| `GET /mcp` | Open SSE stream for server-initiated notifications |
-| `DELETE /mcp` | Close session |
-| `GET /health` | Liveness probe (returns `{status, transport, sessions}`) |
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/mcp` | Send JSON-RPC messages |
+| `GET` | `/mcp` | Open SSE stream for server-initiated notifications |
+| `DELETE` | `/mcp` | Close session |
+| `GET` | `/health` | Liveness probe — returns `{status, transport, sessions}` |
 
 Sessions are isolated — each connecting client gets its own `mcp-session-id` header.
 
-### 3. Introduce your project
+### 5. Dream
 
-Tell the AI:
+Tell the AI to explore your codebase and start dreaming:
 
-> "Here is my codebase. Read it in, build the knowledge graph, and run the first dream cycle."
+> "Read my codebase, build the knowledge graph, and run the first dream cycle."
 
-Then run:
+Or trigger it directly:
 
-- `dream_cycle`
-- `cognitive_status`
-- `get_dream_insights`
-
-That's it. The cognitive engine takes over from there.
-
----
-
-## Installation
-
-DreamGraph ships cross-platform install scripts that build from source, copy the runtime to `~/.dreamgraph/bin/`, and create `dg` / `dreamgraph` shims on your PATH.
-
-### Windows (PowerShell)
-
-```powershell
-.\scripts\install.ps1          # first install
-.\scripts\install.ps1 -Force   # upgrade / reinstall
+```
+dream_cycle(strategy="all", max_dreams=100)
+cognitive_status()
+get_dream_insights(depth="full")
 ```
 
-### Linux / macOS (Bash)
+Schedule recurring autonomous dream cycles:
 
-```bash
-bash scripts/install.sh          # first install
-bash scripts/install.sh --force  # upgrade / reinstall
+```
+schedule_dream(name="nightly", action="dream_cycle", trigger_type="interval", interval_seconds=300, max_runs=50)
 ```
 
-After installation, `dg` and `dreamgraph` are available globally:
-
-```bash
-dg --version          # prints installed version + git hash
-dreamgraph --help     # server entry point
-```
+The cognitive engine takes over from there — dreaming, validating, promoting, and resolving tensions autonomously.
 
 ---
 

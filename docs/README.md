@@ -61,58 +61,50 @@ npm run build
 bash scripts/install.sh
 ```
 
-After global install, `dg --version` and `dreamgraph --help` work from any directory.
+After install, `dg --version` and `dreamgraph --help` work from any directory.
 
-### MCP Configuration
+### Create an Instance and Start the Daemon
 
-DreamGraph supports two transport modes:
+```bash
+# Create a UUID-scoped instance bound to your project
+dg init --name my-project --project /path/to/my-repo
 
-| Mode | Flag | Description |
-|------|------|-------------|
-| **STDIO** (default) | `--transport stdio` | JSON-RPC over stdin/stdout — used by Claude Desktop, VS Code, Cursor |
-| **Streamable HTTP** | `--transport http` | HTTP server on a configurable port — used by web clients, CLI tools, remote agents |
+# Start the HTTP daemon
+dg start my-project
 
-#### STDIO mode (default)
+# Check status
+dg status my-project
+```
+
+### Connect Your IDE
+
+The daemon exposes Streamable HTTP at `http://localhost:<port>/mcp`. Point your MCP client at it:
+
+**VS Code / Cursor** (`.vscode/mcp.json`):
 
 ```json
 {
-  "mcpServers": {
+  "servers": {
     "dreamgraph": {
-      "command": "node",
-      "args": ["path/to/dreamgraph/dist/index.js"],
-      "env": {
-        "DREAMGRAPH_DATA_DIR": "./data"
-      }
+      "type": "http",
+      "url": "http://localhost:8500/mcp"
     }
   }
 }
 ```
 
-#### Streamable HTTP mode
-
-```bash
-# Default port 8100
-node dist/index.js --transport http
-
-# Custom port
-node dist/index.js --transport http --port 9000
-
-# Or via npm script
-npm run start:sse
-```
-
-Clients connect to `http://localhost:<port>/mcp` (POST for JSON-RPC, GET for server-sent events, DELETE to close session).
+> STDIO mode is also available via `dg start my-project --foreground` for single-client setups where the MCP client manages the process.
 
 ### First Dream Cycle
 
 ```
-dream_cycle(strategy="all", max_dreams=20)
+dream_cycle(strategy="all", max_dreams=100)
 ```
 
 ### Schedule Recurring Dreams
 
 ```
-schedule_dream(action="dream_cycle", trigger_type="interval", interval_seconds=3600, strategy="tension_directed")
+schedule_dream(name="nightly", action="dream_cycle", trigger_type="interval", interval_seconds=300, max_runs=50)
 ```
 
 ### Check Status
