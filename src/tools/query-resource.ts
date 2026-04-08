@@ -31,6 +31,7 @@ const URI_TO_FILE: Record<string, string> = {
   "dream://history": "dream_history.json",
   "dream://adrs": "adr_log.json",
   "dream://ui-registry": "ui_registry.json",
+  "ops://api-surface": "api_surface.json",
 };
 
 /** Zod schema for query_resource input */

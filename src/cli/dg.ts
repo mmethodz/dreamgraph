@@ -67,7 +67,7 @@ Run 'dg <command> --help' for command-specific options.
 }
 
 function printVersion(): void {
-  console.log("DreamGraph CLI v6.0.0 (La Catedral)");
+  console.log("DreamGraph CLI v6.2.0 (La Catedral)");
 }
 
 /* ------------------------------------------------------------------ */

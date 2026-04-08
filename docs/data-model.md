@@ -1,6 +1,6 @@
 # DreamGraph Data Model
 
-> All 13 data stores that make up DreamGraph's persistent state.
+> All 14 data stores that make up DreamGraph's persistent state.
 
 ---
 
@@ -21,6 +21,7 @@ graph TB
     ST[("System Story<br/>(narrative)")]
     CAP[("Capabilities<br/>(registry)")]
     SCH[("Schedules<br/>(v5.2 scheduler)")]
+    API[("API Surface<br/>(operational)")]
 
     FG -.->|validates against| DG
     DG -->|feeds into| CE
@@ -34,6 +35,7 @@ graph TB
     SCH -->|triggers| DG
     SCH -->|triggers| TH
     DH -->|after_cycles trigger| SCH
+    API -.->|grounds| DG
 ```
 
 ---
@@ -303,3 +305,64 @@ Persistent store for the Dream Scheduler. All active and completed schedules wit
 | `result_summary` | string | Brief outcome description |
 | `duration_ms` | number | Execution time |
 | `error` | string \| null | Error message if failed |
+
+---
+
+## v6.2: API Surface (`api_surface.json`)
+
+Operational layer store for extracted programmatic API surfaces. Populated by `extract_api_surface`, queried by `query_api_surface`, served as `ops://api-surface` resource. Used by the grounding pipeline to enrich cognitive dreams with structured class/method knowledge.
+
+### Root Object
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `extracted_at` | string | ISO timestamp of last extraction |
+| `repo_root` | string | Absolute path to the repository root |
+| `modules[]` | ApiModule[] | One module per source file |
+
+### ApiModule
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `file_path` | string | Relative path from repo root (forward slashes) |
+| `module_name` | string | Dot-separated module name (e.g. `src.tools.api-surface`) |
+| `language` | string | `typescript` \| `javascript` \| `python` \| `csharp` |
+| `classes[]` | ApiClass[] | Classes and interfaces extracted from this file |
+| `functions[]` | ApiFreeFunction[] | Module-level functions |
+| `platform` | string \| null | Optional platform tag (e.g. `python-port`) |
+| `provenance` | Provenance | Extraction metadata |
+
+### ApiClass
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Class/interface name |
+| `bases` | string[] | Base classes / interfaces |
+| `methods[]` | ApiMethod[] | Methods with full signatures |
+| `properties[]` | ApiProperty[] | Properties with types |
+| `decorators` | string[] | Class-level decorators/attributes |
+| `file_path` | string | Source file path |
+| `line_number` | number | Line where class is declared |
+
+### ApiMethod
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Method name |
+| `parameters[]` | ApiParam[] | Parameters with types and defaults |
+| `return_type` | string \| null | Return type annotation |
+| `signature_text` | string | Full human-readable signature |
+| `is_static` | boolean | Static method flag |
+| `is_async` | boolean | Async method flag |
+| `visibility` | string | `public` \| `protected` \| `private` |
+| `line_number` | number | Line number in source |
+| `decorators` | string[] | Method-level decorators |
+| `defined_in` | string \| null | Origin class for inherited methods |
+
+### Provenance
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `kind` | string | `extracted` \| `pattern_inference` \| `manual` |
+| `source_files` | string[] | Files that contributed to this data |
+| `extracted_at` | string | ISO timestamp of extraction |

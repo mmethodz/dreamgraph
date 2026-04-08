@@ -191,6 +191,115 @@ export interface ToolError {
 export type ToolResponse<T = unknown> = ToolSuccess<T> | ToolError;
 
 // ---------------------------------------------------------------------------
+// Operational Layer — API Surface (v6.2)
+// ---------------------------------------------------------------------------
+
+/** How an operational artifact was produced */
+export interface Provenance {
+  kind: "extracted" | "pattern_inference" | "manual";
+  source_files: string[];
+  extracted_at?: string;
+  inferred_at?: string;
+}
+
+export interface ApiParam {
+  name: string;
+  type?: string;
+  default_value?: string;
+}
+
+export interface ApiProperty {
+  name: string;
+  type?: string;
+  is_readonly: boolean;
+  line_number: number;
+}
+
+export interface ApiMethod {
+  name: string;
+  parameters: ApiParam[];
+  return_type?: string;
+  signature_text?: string;
+  is_static: boolean;
+  is_async: boolean;
+  visibility: "public" | "protected" | "private";
+  line_number: number;
+  decorators: string[];
+  defined_in?: string;
+}
+
+export interface ApiClass {
+  name: string;
+  bases: string[];
+  methods: ApiMethod[];
+  properties: ApiProperty[];
+  decorators: string[];
+  file_path: string;
+  line_number: number;
+}
+
+export interface ApiFreeFunction {
+  name: string;
+  parameters: ApiParam[];
+  return_type?: string;
+  signature_text?: string;
+  is_async: boolean;
+  is_exported: boolean;
+  line_number: number;
+}
+
+export interface ApiModule {
+  file_path: string;
+  module_name?: string;
+  language: string;
+  platform?: string;
+  classes: ApiClass[];
+  functions: ApiFreeFunction[];
+  provenance: Provenance;
+}
+
+export interface ApiSurface {
+  extracted_at: string;
+  repo_root: string;
+  modules: ApiModule[];
+}
+
+export interface ExtractApiSurfaceOutput {
+  repo_root: string;
+  path_scanned: string;
+  files_scanned: number;
+  files_updated: number;
+  files_skipped_incremental: number;
+  classes_found: number;
+  functions_found: number;
+  properties_found: number;
+  warnings: string[];
+  surface_version: string;
+}
+
+export interface QueryApiSurfaceOutput {
+  symbol_name: string;
+  symbol_kind: "class" | "function" | "module";
+  language: string;
+  file_path: string;
+  /** All contributing file paths when a partial class spans multiple files. */
+  file_paths?: string[];
+  line_number?: number;
+  bases?: string[];
+  /** True when the result was assembled from multiple partial class fragments. */
+  is_partial_aggregate?: boolean;
+  methods?: ApiMethod[];
+  properties?: ApiProperty[];
+  parameters?: ApiParam[];
+  return_type?: string;
+  signature_text?: string;
+  is_async?: boolean;
+  is_exported?: boolean;
+  functions?: ApiFreeFunction[];
+  classes?: ApiClass[];
+}
+
+// ---------------------------------------------------------------------------
 // Re-export cognitive types
 // ---------------------------------------------------------------------------
 

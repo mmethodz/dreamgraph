@@ -15,6 +15,8 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { config } from "../config/config.js";
 import { logger } from "./logger.js";
+import { loadJsonData } from "./cache.js";
+import type { ApiSurface, ApiModule, ApiClass } from "../types/index.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -181,6 +183,9 @@ export interface GroundingResult {
  * the most important files. Returns grounding data for the LLM prompt.
  *
  * Budget: reads at most `maxFiles` files total to keep latency bounded.
+ *
+ * When API surface data is available (ops://api-surface), structured
+ * class/function summaries are appended to snippets for richer grounding.
  */
 export async function groundEntities(
   entities: Array<{ id: string; sourceFiles: string[] }>,
@@ -189,6 +194,9 @@ export async function groundEntities(
 ): Promise<GroundingResult[]> {
   const results: GroundingResult[] = [];
   let filesRead = 0;
+
+  // Preload API surface data (best-effort)
+  const surfaceModules = await loadApiSurfaceModules();
 
   for (const entity of entities) {
     if (filesRead >= maxFiles) break;
@@ -200,10 +208,17 @@ export async function groundEntities(
       const snippet = await readSourceFile(file, maxLinesPerFile);
       if (snippet) {
         const changes = await gitRecentChanges(file, 3);
+
+        // Enrich with API surface summary if available
+        const apiSummary = summarizeApiForFile(surfaceModules, file);
+        const enrichedSnippet = apiSummary
+          ? `${snippet}\n\n/* === API Surface (extracted) ===\n${apiSummary}\n*/`
+          : snippet;
+
         results.push({
           entityId: entity.id,
           file,
-          snippet,
+          snippet: enrichedSnippet,
           recentChanges: changes ?? undefined,
         });
         filesRead++;
@@ -213,4 +228,69 @@ export async function groundEntities(
   }
 
   return results;
+}
+
+// ---------------------------------------------------------------------------
+// API surface grounding helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Load all API surface modules from data/api_surface.json.
+ * Returns empty array if the file doesn't exist or is unparseable.
+ */
+async function loadApiSurfaceModules(): Promise<ApiModule[]> {
+  try {
+    const surface = await loadJsonData<ApiSurface>("api_surface.json");
+    return surface?.modules ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Build a compact structured summary for a given file path from API surface data.
+ * Returns null if no data exists for the file.
+ *
+ * Example output:
+ *   class UIStack extends Widget: horizontal(), with_children(children), vertical()
+ *   function buildLayout(root: Widget): LayoutResult
+ */
+function summarizeApiForFile(modules: ApiModule[], filePath: string): string | null {
+  if (modules.length === 0) return null;
+
+  // Normalize the file path for matching (strip leading ./ and normalize separators)
+  const normPath = filePath.replace(/\\/g, "/").replace(/^\.\//, "");
+
+  const mod = modules.find(m => {
+    const modNorm = m.file_path.replace(/\\/g, "/").replace(/^\.\//, "");
+    return modNorm === normPath || normPath.endsWith(modNorm) || modNorm.endsWith(normPath);
+  });
+
+  if (!mod) return null;
+
+  const lines: string[] = [];
+
+  for (const cls of mod.classes) {
+    const bases = cls.bases.length > 0 ? ` extends ${cls.bases.join(", ")}` : "";
+    const methods = cls.methods
+      .filter(m => m.visibility === "public")
+      .map(m => m.signature_text ?? m.name)
+      .slice(0, 10); // cap at 10 methods for brevity
+    const propNames = cls.properties
+      .slice(0, 5)
+      .map(p => p.name + (p.type ? `: ${p.type}` : ""));
+
+    let line = `class ${cls.name}${bases}`;
+    if (methods.length > 0) line += `: ${methods.join(", ")}`;
+    if (propNames.length > 0) line += ` | props: ${propNames.join(", ")}`;
+    lines.push(line);
+  }
+
+  for (const fn of mod.functions) {
+    if (fn.is_exported) {
+      lines.push(fn.signature_text ?? `function ${fn.name}()`);
+    }
+  }
+
+  return lines.length > 0 ? lines.join("\n") : null;
 }

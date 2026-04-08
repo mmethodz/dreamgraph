@@ -79,7 +79,7 @@ export const config = {
   /** Server metadata */
   server: {
     name: "dreamgraph",
-    version: "6.0.0",
+    version: "6.2.0",
   },
 
   /**

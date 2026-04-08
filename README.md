@@ -2,7 +2,7 @@
   <img src="dreamgraph.jpeg" alt="DreamGraph - Autonomous Cognitive Layer" width="400" />
 </p>
 
-# DreamGraph v6.0 "La Catedral" — Autonomous Cognitive Layer for Software Systems
+# DreamGraph v6.2 "La Catedral" — Autonomous Cognitive Layer for Software Systems
 
 Traditional AI systems answer questions. DreamGraph reduces uncertainty over time — it finds, verifies, and resolves problems in your system autonomously.
 
@@ -588,7 +588,7 @@ bash scripts/install.sh
 After installation, `dg` and `dreamgraph` are available globally:
 
 ```bash
-dg --version          # DreamGraph CLI v6.0.0 (La Catedral)
+dg --version          # DreamGraph CLI v6.2.0 (La Catedral)
 dreamgraph --help     # low-level server entry-point (dg wraps this)
 ```
 
@@ -898,7 +898,7 @@ None are required. Without `DREAMGRAPH_REPOS` (and no instance-mode repos), code
 ```
                 +--------------+
                 |   MCP Layer  |
-                | (55 tools)   |
+                | (57 tools)   |
                 +------+-------+
                        |
         +--------------v--------------+
@@ -1015,7 +1015,8 @@ src/
 │   ├── living-docs-exporter.ts # export_living_docs (Markdown generation)
 │   ├── get-workflow.ts     # get_workflow
 │   ├── search-data-model.ts # search_data_model
-│   └── query-resource.ts   # query_resource
+│   ├── query-resource.ts   # query_resource
+│   └── api-surface.ts      # extract/query API surface + ops://api-surface resource
 ├── resources/
 │   └── register.ts          # 6 system:// MCP resources
 ├── config/
@@ -1067,12 +1068,13 @@ data/                                   # Legacy mode (flat) or <instance>/data/
 ├── event_log.json          # [runtime] Cognitive event dispatch log
 ├── system_story.json       # [runtime] Persistent system autobiography
 ├── schedules.json          # [runtime] Dream scheduler persistence (v5.2)
+├── api_surface.json        # [runtime] Operational API surface (classes, methods, signatures)
 └── discipline_sessions/    # [runtime] Discipline session JSON files (v6.0 La Catedral)
 ```
 
 ---
 
-## MCP Tools (54 total)
+## MCP Tools (57 total)
 
 ### Cognitive Tools (23)
 
@@ -1102,7 +1104,7 @@ data/                                   # Legacy mode (flat) or <instance>/data/
 | `delete_schedule` | Permanently remove a schedule |
 | `get_schedule_history` | Retrieve execution history for a schedule or all schedules |
 
-### Sense & Knowledge Tools (15)
+### Sense & Knowledge Tools (17)
 
 | Tool | Description |
 |---|---|
@@ -1121,6 +1123,8 @@ data/                                   # Legacy mode (flat) or <instance>/data/
 | `search_data_model` | Search for a data entity by name |
 | `query_resource` | Query features, workflows, or data model with filters |
 | `query_runtime_metrics` | Fetch and correlate live runtime metrics (OpenTelemetry / Prometheus) |
+| `extract_api_surface` | Extract programmatic API surface from source files (regex-based). Supports Python, TypeScript, JavaScript, C#. Incremental by default |
+| `query_api_surface` | Look up the exact callable surface for a class, function, or module with inheritance resolution |
 
 ### Documentation Intelligence Tools (8)
 
@@ -1149,7 +1153,7 @@ data/                                   # Legacy mode (flat) or <instance>/data/
 | `discipline_verify` | Generate a verification report with regression detection and compliance scoring |
 | `discipline_complete_session` | Complete or abandon the active session with final status |
 
-### MCP Resources (22)
+### MCP Resources (23)
 
 Read-only views the agent can inspect at any time:
 
@@ -1171,6 +1175,7 @@ Read-only views the agent can inspect at any time:
 | Schedules | `dream://schedules` | Active dream schedules with status and next run time (v5.2) |
 | Schedule History | `dream://schedule-history` | Schedule execution history with outcomes (v5.2) |
 | Discipline Manifest | `discipline://manifest` | Tool classifications, phase permissions, data protection rules (v6.0 La Catedral) |
+| API Surface | `ops://api-surface` | Full cached API surface — classes, functions, methods, properties with signatures. Operational layer (v6.2) |
 | System Overview | `system://overview` | High-level system description, repos, tech stack |
 | System Features | `system://features` | All features from fact graph |
 | System Workflows | `system://workflows` | All workflows |

@@ -6,7 +6,7 @@
 
 DreamGraph is a **cognitive dreaming engine** for MCP (Model Context Protocol) knowledge graphs. It speculatively discovers hidden connections, validates them against a fact graph, and builds a persistent, evolving understanding of the systems it observes.
 
-**Version:** 6.0.0 "La Catedral"  
+**Version:** 6.2.0 "La Catedral"  
 **License:** MIT  
 **Runtime:** Node.js (TypeScript, ES2022, Node16 modules)  
 **Transport:** STDIO (default) or Streamable HTTP (`--transport http`)
@@ -60,8 +60,8 @@ Speculative Edge → Normalization → Promotion Gate → Validated Edge
 graph TB
     subgraph "MCP Protocol Layer"
         Server["MCP Server<br/>STDIO / Streamable HTTP"]
-        Tools["55 Tools"]
-        Resources["22 Resources"]
+        Tools["57 Tools"]
+        Resources["23 Resources"]
     end
 
     subgraph "Cognitive Core"
@@ -243,7 +243,8 @@ src/
 │   ├── living-docs-exporter.ts  # Markdown documentation export
 │   ├── get-workflow.ts      # Workflow query tool
 │   ├── search-data-model.ts # Data model search tool
-│   └── query-resource.ts    # Generic URI-based query
+│   ├── query-resource.ts    # Generic URI-based query
+│   └── api-surface.ts       # Operational: extract/query API surface + ops://api-surface resource
 ├── resources/
 │   └── register.ts          # 6 system:// MCP resources
 ├── types/
@@ -290,7 +291,8 @@ data/                                    # Legacy mode (flat) or <instance>/data
 ├── meta_log.json            # Metacognitive analysis audit trail
 ├── event_log.json           # Cognitive event dispatch log
 ├── system_story.json        # Auto-generated narrative (v5.1)
-└── schedules.json           # Dream Scheduler persistence (v5.2)
+├── schedules.json           # Dream Scheduler persistence (v5.2)
+└── api_surface.json         # [runtime] Operational API surface (classes, methods, signatures)
 ```
 
 ### Instance Config Directory

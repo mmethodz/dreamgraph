@@ -1,6 +1,6 @@
 # DreamGraph Tools Reference
 
-> Complete catalog of all 55 MCP tools (23 cognitive + 23 general + 9 discipline) and 22 MCP resources.
+> Complete catalog of all 57 MCP tools (23 cognitive + 25 general + 9 discipline) and 23 MCP resources.
 
 ---
 
@@ -243,9 +243,9 @@ Retrieve execution history for a schedule or all schedules.
 
 ---
 
-## General Tools (22)
+## General Tools (25)
 
-Registered in [src/tools/register.ts](../src/tools/register.ts). These provide I/O, visualization, and documentation capabilities.
+Registered in [src/tools/register.ts](../src/tools/register.ts). These provide I/O, visualization, documentation, and operational knowledge capabilities.
 
 ### Code Senses
 
@@ -552,6 +552,41 @@ Platform migration plan with gap analysis.
 
 ### Living Docs
 
+---
+
+### Operational Knowledge (API Surface)
+
+#### `extract_api_surface`
+
+Extract programmatic API surface from source files and store it as operational knowledge. Regex-based (~90% accuracy). Supports Python, TypeScript, JavaScript, C#. Use when onboarding a repo, after major code changes, or before validation if no API surface exists yet.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `path` | string | — | **Required.** File or directory path relative to repo root |
+| `language` | enum | `"auto"` | `auto`, `python`, `typescript`, `javascript`, `csharp` |
+| `scope` | enum | `"public"` | `public` (exported only) or `all` (all detectable members) |
+| `incremental` | boolean | `true` | Only re-extract changed files (compares mtime). Set `false` to force full rescan |
+| `platform` | string | — | Optional platform tag (e.g., `python-port`, `web`) |
+
+#### `query_api_surface`
+
+Return the exact callable/programmatic surface for a class, function, or module. Use before writing code that calls methods or accesses properties. Supports inheritance resolution with `defined_in` annotations. **Automatically aggregates C# partial classes** — when a class like `GUI` is split across 25 files, the query merges all fragments and returns the full method set with `defined_in` showing each method's source file. The response includes `is_partial_aggregate: true` and `file_paths: [...]` for partial classes.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `symbol_name` | string | — | **Required.** Class, function, or module name (e.g., `UIStack`, `CognitiveEngine`) |
+| `symbol_kind` | enum | `"auto"` | `auto`, `class`, `function`, `module` |
+| `member_name` | string | — | Filter to one specific method or property |
+| `file_path` | string | — | Restrict results to members defined in this file (substring match). Useful for partial classes spanning many files |
+| `include_inherited` | boolean | `true` | Include inherited members with `defined_in` origin annotation |
+| `detail_level` | enum | `"full"` | `summary`, `signatures_only`, `full` |
+| `platform` | string | — | Platform filter (e.g., `python-port`) |
+| `language` | enum | `"any"` | Language filter: `any`, `python`, `typescript`, `javascript`, `csharp` |
+
+---
+
+### Living Docs
+
 #### `export_living_docs`
 
 Export knowledge graph as structured Markdown for documentation sites.
@@ -657,7 +692,7 @@ Complete or abandon the active discipline session.
 
 ---
 
-## MCP Resources (22)
+## MCP Resources (23)
 
 | URI | Description |
 |-----|-------------|
@@ -677,6 +712,12 @@ Complete or abandon the active discipline session.
 | `dream://schedules` | Active dream schedules with status (v5.2) |
 | `dream://schedule-history` | Schedule execution history (v5.2) |
 | `discipline://manifest` | Tool classifications, phase permissions, data protection rules (v6.0 La Catedral) |
+
+Operational resources (registered via [src/tools/api-surface.ts](../src/tools/api-surface.ts)):
+
+| URI | Description |
+|-----|-------------|
+| `ops://api-surface` | Full cached API surface extracted from source files — classes, functions, methods, properties with signatures. Read-only. Populated by `extract_api_surface`, queried by `query_api_surface` |
 
 System resources (registered in [src/resources/register.ts](../src/resources/register.ts)):
 

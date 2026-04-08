@@ -21,6 +21,7 @@ import { registerRuntimeSensesTools } from "./runtime-senses.js";
 import { registerInitGraphTool } from "./init-graph.js";
 import { registerEnrichSeedDataTool } from "./enrich-seed-data.js";
 import { registerScanProjectTool } from "./scan-project.js";
+import { registerApiSurfaceTools } from "./api-surface.js";
 import { logger } from "../utils/logger.js";
 
 export function registerTools(server: McpServer): void {
@@ -40,6 +41,7 @@ export function registerTools(server: McpServer): void {
   registerInitGraphTool(server);
   registerEnrichSeedDataTool(server);
   registerScanProjectTool(server);
+  registerApiSurfaceTools(server);
 
-  logger.info("Registered 23 tools");
+  logger.info("Registered 25 tools");
 }
