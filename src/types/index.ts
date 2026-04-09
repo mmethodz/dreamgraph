@@ -131,11 +131,24 @@ export interface DataModelEntity extends ResourceEntry {
 }
 
 // ---------------------------------------------------------------------------
+// Capability Entity
+// ---------------------------------------------------------------------------
+
+export interface CapabilityEntity extends ResourceEntry {
+  category: string;
+  status: string;
+  tags: string[];
+  domain: string;
+  keywords: string[];
+  links: GraphLink[];
+}
+
+// ---------------------------------------------------------------------------
 // Resource Index
 // ---------------------------------------------------------------------------
 
 export interface IndexEntry {
-  type: "feature" | "workflow" | "data_model";
+  type: "feature" | "workflow" | "data_model" | "capability";
   uri: string;
   name: string;
   source_repo: string;

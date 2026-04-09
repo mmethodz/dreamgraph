@@ -98,6 +98,71 @@ async function getPool(): Promise<InstanceType<typeof Pool>> {
 }
 
 /**
+ * Test a PostgreSQL connection string by connecting and running SELECT 1.
+ * If connectionString is omitted, uses the current config.database value.
+ * Returns { ok, message, latencyMs } — never throws.
+ */
+export async function testDbConnection(
+  connectionString?: string,
+): Promise<{ ok: boolean; message: string; latencyMs: number }> {
+  const connStr = connectionString ?? config.database.connectionString;
+  if (!connStr) {
+    return { ok: false, message: "No connection string configured.", latencyMs: 0 };
+  }
+
+  // Lazy-load pg on first use
+  if (!Pool) {
+    try {
+      const pg = await import("pg");
+      Pool = pg.default.Pool;
+    } catch {
+      return { ok: false, message: "pg module is not installed.", latencyMs: 0 };
+    }
+  }
+
+  const t0 = Date.now();
+  const testPool = new Pool({
+    connectionString: connStr,
+    max: 1,
+    connectionTimeoutMillis: 5_000,
+    idleTimeoutMillis: 1_000,
+    ssl: process.env.DATABASE_SSL === "false" ? false : { rejectUnauthorized: false },
+  });
+
+  try {
+    const client = await testPool.connect();
+    try {
+      const { rows } = await client.query("SELECT 1 AS ok");
+      const latencyMs = Date.now() - t0;
+      if (rows?.[0]?.ok === 1) {
+        return { ok: true, message: "Connection successful.", latencyMs };
+      }
+      return { ok: true, message: "Connected (unexpected result).", latencyMs };
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    const latencyMs = Date.now() - t0;
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, message: msg, latencyMs };
+  } finally {
+    try { await testPool.end(); } catch { /* ignore */ }
+  }
+}
+
+/**
+ * Reset the active DB pool so subsequent queries use the updated config.
+ * Call this after changing config.database.connectionString at runtime.
+ */
+export async function resetDbPool(): Promise<void> {
+  if (pool) {
+    try { await pool.end(); } catch { /* ignore */ }
+    pool = null;
+  }
+  consecutiveFailures = 0;
+}
+
+/**
  * Drain and destroy the current pool, then create a fresh one.
  * Used to recover from persistent failures (dead connections, etc.).
  */

@@ -89,6 +89,14 @@ graph TB
         Scheduler["Dream Scheduler<br/>Policy-Driven Orchestration"]
     end
 
+    subgraph "Web Dashboard (v6.2)"
+        Dashboard["SSR HTML Pages<br/>Zero-Dependency"]
+        DashStatus["/status — Cognitive State"]
+        DashSchedules["/schedules — CRUD + History"]
+        DashConfig["/config — Runtime Settings"]
+        DashDocs["/docs — Knowledge Graph"]
+    end
+
     subgraph "LLM Integration"
         LLM["LLM Provider<br/>Ollama / OpenAI / Sampling"]
     end
@@ -133,6 +141,11 @@ graph TB
     ContinuousNarrative --> Story
     Dreamer -.-> FactGraph
     Normalizer -.-> FactGraph
+    Dashboard --> Engine
+    Dashboard --> Scheduler
+    DashStatus --> Engine
+    DashSchedules --> Scheduler
+    DashConfig --> LLM
 ```
 
 ## Feature Dependencies
@@ -174,7 +187,8 @@ graph LR
 src/
 ├── index.ts                 # Entry point — CLI arg parser + transport launcher
 ├── server/
-│   └── server.ts            # McpServer factory
+│   ├── server.ts            # McpServer factory
+│   └── dashboard.ts         # Web dashboard — /, /status, /schedules, /config, /docs, /health HTML pages
 ├── config/
 │   └── config.ts            # Central configuration + env var parsing
 ├── cognitive/

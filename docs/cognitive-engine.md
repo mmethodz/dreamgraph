@@ -496,6 +496,18 @@ For Ollama, the system falls back to basic `format: "json"` mode, which produces
 
 The normalizer acts as the strict critic regardless of temperature. Higher creativity produces more novel hypotheses; the normalizer's job is to separate genuine insights from hallucinations.
 
+---
+
+## Real-Time Visibility: Web Dashboard
+
+The cognitive engine's full state is exposed through the **web dashboard** (v6.2) — a zero-dependency, server-side-rendered HTML interface.
+
+- **`/status`** — Live cognitive state (AWAKE / REM / NORMALIZING / NIGHTMARE), cycle counts, dream graph size, validation pipeline metrics, active tensions, LLM provider, and promotion & decay configuration.
+- **`/schedules`** — Manage scheduled dream cycles: view active schedules, create new ones with strategy selection, pause/resume/run/delete, and review execution history with per-run strategy tracking.
+- **`/config`** — View and modify runtime settings without restarting the daemon: LLM provider, Dreamer and Normalizer overrides, database connection (with live Test Connection), scheduler tuning, event router, and narrative settings.
+
+This gives observers browser-based insight into the cognitive engine without requiring an MCP client.
+
 ### ⚠️ Cost & Usage Warning
 
 **Every dream cycle with a cloud LLM provider makes an API call.** When combined with scheduled dreaming, this creates continuous, unattended spend.

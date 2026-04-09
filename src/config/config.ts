@@ -143,3 +143,11 @@ export const config = {
   /** v6.0.1 — LLM provider configuration for dream engine */
   llm: parseLlmConfig(),
 } as const;
+
+/**
+ * Update the database connection string at runtime.
+ * Needs a mutable cast because the config object is frozen with `as const`.
+ */
+export function updateDatabaseConnectionString(connectionString: string): void {
+  (config.database as { connectionString: string }).connectionString = connectionString;
+}

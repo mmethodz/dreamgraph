@@ -195,7 +195,8 @@ function isDue(schedule: DreamSchedule, now: number): boolean {
 
 /**
  * Simple cron-like evaluator. Supports: "minute hour day-of-month month day-of-week"
- * Uses "*" for any. Only checks if the CURRENT time matches and not already run this period.
+ * Uses "*" for any. Only checks if the CURRENT UTC time matches and not already run this period.
+ * All comparisons use UTC methods to stay consistent with ISO-string timestamps.
  */
 function isCronDue(cron: string, lastRun: string | null, now: number): boolean {
   const parts = cron.trim().split(/\s+/);
@@ -210,21 +211,21 @@ function isCronDue(cron: string, lastRun: string | null, now: number): boolean {
     return field.split(",").some((v) => parseInt(v, 10) === value);
   };
 
-  if (!matches(minute, date.getMinutes())) return false;
-  if (!matches(hour, date.getHours())) return false;
-  if (!matches(dayOfMonth, date.getDate())) return false;
-  if (!matches(month, date.getMonth() + 1)) return false;
-  if (!matches(dayOfWeek, date.getDay())) return false;
+  if (!matches(minute, date.getUTCMinutes())) return false;
+  if (!matches(hour, date.getUTCHours())) return false;
+  if (!matches(dayOfMonth, date.getUTCDate())) return false;
+  if (!matches(month, date.getUTCMonth() + 1)) return false;
+  if (!matches(dayOfWeek, date.getUTCDay())) return false;
 
-  // Check we haven't already run in this matching window (same minute)
+  // Check we haven't already run in this matching window (same UTC minute)
   if (lastRun) {
     const lastDate = new Date(lastRun);
     if (
-      lastDate.getFullYear() === date.getFullYear() &&
-      lastDate.getMonth() === date.getMonth() &&
-      lastDate.getDate() === date.getDate() &&
-      lastDate.getHours() === date.getHours() &&
-      lastDate.getMinutes() === date.getMinutes()
+      lastDate.getUTCFullYear() === date.getUTCFullYear() &&
+      lastDate.getUTCMonth() === date.getUTCMonth() &&
+      lastDate.getUTCDate() === date.getUTCDate() &&
+      lastDate.getUTCHours() === date.getUTCHours() &&
+      lastDate.getUTCMinutes() === date.getUTCMinutes()
     ) {
       return false;
     }

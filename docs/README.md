@@ -6,7 +6,7 @@
 
 ## What is DreamGraph?
 
-DreamGraph is a **daemon-backed cognitive layer** and dreaming engine for software systems that builds a validated knowledge graph from code, workflows, schemas, and runtime signals, then continuously explores and verifies new relationships.
+DreamGraph is a **daemon-backed cognitive layer** and dreaming engine for software systems that builds a validated knowledge graph from code, workflows, schemas, and runtime signals, then continuously explores and verifies new relationships. It includes a built-in **web dashboard** for browser-based monitoring, schedule management, and runtime configuration.
 
 It thinks in cycles: **dream → validate → learn → repeat** — and now schedules its own cognitive work autonomously.
 
@@ -27,7 +27,7 @@ Complete catalog of all **57 MCP tools** (23 cognitive + 25 general + 9 discipli
 All **13 data stores**: dream graph, candidate edges, validated edges, tension log, dream history, threat log, archetypes, ADR log, UI registry, fact graph, capabilities, system story, and schedules. Full schemas and relationship map.
 
 ### [Workflows](workflows.md)
-Step-by-step flows for all **10 operational processes**: dream cycle, nightmare cycle, normalization pipeline, tension lifecycle, edge promotion, federation, interruption protocol, living docs export, insight solidification, and schedule execution.
+Step-by-step flows for all **14 operational processes**: dream cycle, nightmare cycle, normalization pipeline, tension lifecycle, edge promotion, federation, interruption protocol, living docs export, insight solidification, schedule execution, global install, daemon start, daemon stop, and dashboard request lifecycle.
 
 ### [The DreamGraph Chronicle](narrative.md)
 The system's auto-generated autobiography — 6 chapters covering 60 dream cycles, cumulative statistics, weekly digest, and trend analysis. Written by DreamGraph about itself.
@@ -101,6 +101,10 @@ The daemon exposes Streamable HTTP at `http://localhost:<port>/mcp`. Point your 
 dream_cycle(strategy="all", max_dreams=100)
 ```
 
+### Browse the Web Dashboard
+
+Once the daemon is running, open `http://localhost:<port>/` in your browser to access the web dashboard — live cognitive status, schedule management, runtime configuration, and knowledge graph documentation.
+
 ### Schedule Recurring Dreams
 
 ```
@@ -130,7 +134,7 @@ get_system_narrative(depth="technical")
 | MCP tools | 57 |
 | MCP resources | 23 |
 | Data stores | 19 |
-| Workflows | 13 |
+| Workflows | 14 |
 | Features | 36 |
 | CLI commands | 14 |
 | Promotion threshold | 0.62 confidence |

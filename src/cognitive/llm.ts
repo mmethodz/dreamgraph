@@ -474,6 +474,28 @@ export function getNormalizerLlmConfig(): { model: string; temperature: number; 
   return _normalizerConfig;
 }
 
+/** Update dreamer-specific LLM settings at runtime. */
+export function updateDreamerLlmConfig(
+  partial: Partial<{ model: string; temperature: number; maxTokens: number }>,
+): void {
+  const current = getDreamerLlmConfig();
+  _dreamerConfig = { ...current, ...partial };
+  logger.info(
+    `LLM dreamer config updated: model=${_dreamerConfig.model}, temp=${_dreamerConfig.temperature}, maxTokens=${_dreamerConfig.maxTokens}`,
+  );
+}
+
+/** Update normalizer-specific LLM settings at runtime. */
+export function updateNormalizerLlmConfig(
+  partial: Partial<{ model: string; temperature: number; maxTokens: number }>,
+): void {
+  const current = getNormalizerLlmConfig();
+  _normalizerConfig = { ...current, ...partial };
+  logger.info(
+    `LLM normalizer config updated: model=${_normalizerConfig.model}, temp=${_normalizerConfig.temperature}, maxTokens=${_normalizerConfig.maxTokens}`,
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Singleton — the active LLM provider
 // ---------------------------------------------------------------------------

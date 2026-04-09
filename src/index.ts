@@ -17,6 +17,7 @@
  */
 
 import { createServer } from "./server/server.js";
+import { handleDashboardRoute, setDashboardContext } from "./server/dashboard.js";
 import { resolveInstanceAtStartup, updateInstanceCounters } from "./instance/index.js";
 import { engine } from "./cognitive/engine.js";
 import { initLlmProvider } from "./cognitive/llm.js";
@@ -122,6 +123,9 @@ async function startHTTP(port: number): Promise<void> {
     }
   >();
 
+  // Provide runtime context to dashboard (session count, port)
+  setDashboardContext({ getSessionCount: () => sessions.size, port });
+
   const httpServer = http.createServer(async (req, res) => {
     // --- CORS (allow any origin for local-dev / CLI usage) ----------
     res.setHeader("Access-Control-Allow-Origin", "*");
@@ -189,17 +193,30 @@ async function startHTTP(port: number): Promise<void> {
       return;
     }
 
-    // ---- /health — lightweight liveness probe ----------------------
+    // ---- /health — JSON for programmatic clients, HTML for browsers --
     if (req.method === "GET" && url.pathname === "/health") {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(
-        JSON.stringify({
-          status: "ok",
-          transport: "streamable-http",
-          sessions: sessions.size,
-        }),
-      );
-      return;
+      const accept = req.headers.accept ?? "";
+      const wantsJSON =
+        accept.includes("application/json") ||
+        !accept.includes("text/html");
+      if (wantsJSON) {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            status: "ok",
+            transport: "streamable-http",
+            sessions: sessions.size,
+          }),
+        );
+        return;
+      }
+      // Fall through to dashboard for HTML rendering
+    }
+
+    // ---- Dashboard pages: /, /status, /schedules, /config, /docs, /health --
+    if (req.method === "GET" || (req.method === "POST" && (url.pathname === "/config" || url.pathname === "/config/test-db" || url.pathname === "/schedules" || url.pathname === "/restart"))) {
+      const handled = await handleDashboardRoute(req, res, url.pathname);
+      if (handled) return;
     }
 
     res.writeHead(404, { "Content-Type": "text/plain" });

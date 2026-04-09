@@ -728,6 +728,13 @@ export function updateNarrativeConfig(
 }
 
 /**
+ * Return a snapshot of the current narrative configuration.
+ */
+export function getNarrativeConfig(): NarrativeConfig {
+  return { ...narrativeConfig };
+}
+
+/**
  * Load the persistent system story for resource serving.
  */
 export async function getSystemStory(): Promise<SystemStoryFile> {

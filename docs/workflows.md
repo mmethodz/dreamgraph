@@ -1,6 +1,6 @@
 # DreamGraph Workflows
 
-> Step-by-step flows for all 13 operational processes.
+> Step-by-step flows for all 14 operational processes.
 
 ---
 
@@ -255,3 +255,30 @@ candidate → [normalization] → validated (promoted)
 | 4 | Wait for exit | Poll process status up to timeout (default 10 s). |
 | 5 | Verify shutdown | Check process is gone. Server logs "Shutdown complete" with 200 ms flush. |
 | 6 | Clean metadata | Remove PID and port from instance metadata files. |
+
+---
+
+## 14. Dashboard Request Lifecycle (`dashboard_request_flow`)
+
+**Handle an incoming HTTP request to the web dashboard.**
+
+**Trigger:** Browser navigates to any dashboard route (GET) or submits a form (POST)  
+**Source:** [src/server/dashboard.ts](../src/server/dashboard.ts)
+
+### GET Request (Page Render)
+
+| Step | Name | Description |
+|------|------|-------------|
+| 1 | Route match | `handleDashboardRoute()` matches URL pathname to a known page (`/`, `/status`, `/schedules`, `/config`, `/docs`, `/health`). |
+| 2 | Gather data | Page renderer reads live state: cognitive engine status, schedules, config values, knowledge graph data. |
+| 3 | Render HTML | Server-side renders full HTML page with inlined CSS, navigation bar, and page-specific content. |
+| 4 | Respond | Returns `200 text/html` (or `application/json` for `/health` with JSON Accept header). |
+
+### POST Request (Form Action)
+
+| Step | Name | Description |
+|------|------|-------------|
+| 1 | Parse body | Read URL-encoded form body or JSON body. |
+| 2 | Dispatch action | Route to handler based on path: `/config` → `handleConfigPost()`, `/schedules` → `handleSchedulePost()`, `/config/test-db` → `handleTestDbPost()`. |
+| 3 | Execute mutation | Apply the requested change: update LLM/scheduler/narrative config, toggle/create/delete schedule, or test DB connection. |
+| 4 | Redirect (PRG) | For form POSTs, return `303 See Other` redirecting back to the originating page. For `/config/test-db`, return JSON response directly. |

@@ -97,9 +97,9 @@ export const DATA_PROTECTION_RULES: DataProtectionRule[] = [
   },
   {
     filename: "capabilities.json",
-    tier: "tool_mediated",
-    description: "Solidified cognitive insights",
-    allowed_tools: ["solidify_cognitive_insight"],
+    tier: "seed_data",
+    description: "Capability declarations (enrichable via enrich_seed_data)",
+    allowed_tools: ["init_graph", "enrich_seed_data"],
   },
 
   // ---- Tier 3: SEED DATA (5 files) — writable ONLY by init_graph --------

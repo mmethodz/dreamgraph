@@ -33,6 +33,7 @@ DreamGraph is a cognitive layer for software systems that continuously discovers
 - **Continuous narrative** — persistent, auto-accumulated system autobiography
 - **Dream scheduling** — policy-driven temporal orchestration for autonomous cognitive work
 - **Disciplinary execution** — self-imposed tool/data governance across five cognitive phases (v6.0 La Catedral)
+- **Web dashboard** — zero-dependency browser UI for live cognitive state, schedule management, runtime configuration, and knowledge graph documentation
 
 It is not a chatbot.
 
@@ -127,9 +128,9 @@ Not all ideas are immediately provable. The system retains latent hypotheses tha
 
 ---
 
-## The Eleven Cognitive Capabilities
+## The Twelve Capabilities
 
-DreamGraph's cognitive engine provides eleven advanced features that take the system from "observant" to "truly intelligent."
+DreamGraph provides twelve capabilities that take the system from "observant" to "truly intelligent."
 
 ### 1. Causal Reasoning Engine
 
@@ -321,6 +322,32 @@ Schedules persist to disk and survive restarts.
 
 **Tools:** `schedule_dream`, `list_schedules`, `update_schedule`, `run_schedule_now`, `delete_schedule`, `get_schedule_history`  
 **Resources:** `dream://schedules`, `dream://schedule-history`
+
+### 12. Web Dashboard (v6.2)
+
+DreamGraph ships with a **zero-dependency web dashboard** — a self-contained browser UI served directly by the HTTP daemon. No React, no build tools, no external CSS — every page is server-side rendered with inlined styles in a dark GitHub-inspired theme.
+
+The dashboard provides real-time visibility and control over the cognitive engine without needing an MCP client:
+
+| Page | Path | What it does |
+|---|---|---|
+| **Index** | `/` | Landing page with navigation cards to all pages |
+| **Status** | `/status` | Cognitive state, dream/normalization cycle counts, graph stats, validation pipeline, tensions, LLM provider health, promotion & decay config |
+| **Schedules** | `/schedules` | Active schedules table with pause/resume/run/delete actions, create new schedule form (action, trigger, strategy, max runs), execution history with strategy column |
+| **Config** | `/config` | Instance info (read-only), repos, LLM section (Provider / Dreamer / Normalizer subsections with live-edit forms), Database (editable connection string with Test Connection button), Scheduler, Event Router, Narrative — all editable at runtime |
+| **Docs** | `/docs` | Live documentation generated from the knowledge graph — features, data model, workflows, capabilities |
+| **Health** | `/health` | Liveness/readiness page — HTML for browsers, JSON for programmatic clients (content negotiation via `Accept` header) |
+
+All configuration changes use POST-Redirect-GET (PRG) pattern for safe form submission. Schedule actions (pause, resume, run now, delete, create) are handled via form POSTs with immediate redirect. Database test connection uses async `fetch()` with inline result display.
+
+**Key design principles:**
+- Zero external dependencies — no framework, no CDN, no build step
+- Server-side rendered — works in any browser, no JavaScript required (except DB test button)
+- Dark theme with GitHub-style design tokens
+- Responsive layout — works on mobile
+- All timestamps displayed in UTC for consistency with the scheduler
+
+The dashboard is available at the daemon's HTTP port (same port as `/mcp`).
 
 ---
 
@@ -671,7 +698,15 @@ Once registered, every tool, resource, and dream cycle is available through the 
 | `POST` | `/mcp` | Send JSON-RPC messages |
 | `GET` | `/mcp` | Open SSE stream for server-initiated notifications |
 | `DELETE` | `/mcp` | Close session |
-| `GET` | `/health` | Liveness probe — returns `{status, transport, sessions}` |
+| `GET` | `/health` | Health page — HTML for browsers, JSON for programmatic clients (content negotiation) |
+| `GET` | `/` | Web dashboard — index page with navigation cards to all pages |
+| `GET` | `/status` | Live cognitive state, dream stats, tensions, LLM health, promotion & decay config |
+| `GET` | `/schedules` | Schedule management — view, pause/resume, run now, create, delete, execution history with strategy |
+| `POST` | `/schedules` | Schedule actions at runtime (toggle, run now, delete, create → PRG redirect) |
+| `GET` | `/config` | Active configuration with inline edit forms (LLM Provider/Dreamer/Normalizer, Database with test button, Scheduler, Events, Narrative) |
+| `POST` | `/config` | Apply configuration changes at runtime (form submission → PRG redirect) |
+| `POST` | `/config/test-db` | Test database connection — accepts JSON `{connectionString}`, returns JSON `{ok, message, latencyMs}` |
+| `GET` | `/docs` | Live documentation from the knowledge graph (features, workflows, data model, capabilities) |
 
 Sessions are isolated — each connecting client gets its own `mcp-session-id` header.
 
@@ -698,6 +733,7 @@ init_graph()
 enrich_seed_data(target="features", entries=[...])
 enrich_seed_data(target="workflows", entries=[...])
 enrich_seed_data(target="data_model", entries=[...])
+enrich_seed_data(target="capabilities", entries=[...])
 ```
 
 Then start dreaming:
@@ -943,6 +979,17 @@ None are required. Without `DREAMGRAPH_REPOS` (and no instance-mode repos), code
         |  - Federation (import/      |
         |    export archetypes)       |
         +-----------------------------+
+                       |
+        +--------------v--------------+
+        |      Web Dashboard (v6.2)   |
+        |                             |
+        |  - / (index)                |
+        |  - /status (cognitive state)|
+        |  - /schedules (CRUD)        |
+        |  - /config (live edit)      |
+        |  - /docs (knowledge graph)  |
+        |  - /health (monitoring)     |
+        +-----------------------------+
 ```
 
 ### Source Layout
@@ -1022,7 +1069,8 @@ src/
 ├── config/
 │   └── config.ts            # Environment-driven configuration + env var parsing
 ├── server/
-│   └── server.ts            # McpServer factory (stdio + HTTP, graceful shutdown)
+│   ├── server.ts            # McpServer factory (stdio + HTTP, graceful shutdown)
+│   └── dashboard.ts         # Web dashboard — /, /status, /schedules, /config, /docs, /health HTML pages
 ├── types/
 │   └── index.ts             # Shared TypeScript type definitions
 └── utils/
@@ -1116,7 +1164,7 @@ data/                                   # Legacy mode (flat) or <instance>/data/
 | `query_db_schema` | Live PostgreSQL schema queries (lazy pg import — server starts even without `pg` module) |
 | `fetch_web_page` | Fetch and convert web pages to markdown |
 | `solidify_cognitive_insight` | Persist a validated insight to the knowledge graph |
-| `enrich_seed_data` | Feed curated knowledge (features, workflows, data model) into the fact graph with merge or replace mode |
+| `enrich_seed_data` | Feed curated knowledge (features, workflows, data model, capabilities) into the fact graph with merge or replace mode |
 | `init_graph` | Bootstrap a knowledge graph from source code — scans repos and builds seed data |
 | `scan_project` | Automated project scan with LLM enrichment — populates features, workflows, and data model in one call (merge mode, non-destructive) |
 | `get_workflow` | Retrieve a specific workflow by ID |
@@ -1396,6 +1444,7 @@ This project introduces a cognitive model with the following primitives:
 | **La Catedral** | v6.0 release name — like Escobar's self-built prison, the system constructs its own confinement rules |
 | **LLM Dream** | An LLM-powered creative dream strategy — the LLM proposes connections that no structural algorithm would discover; the normalizer validates them |
 | **Engine Env** | Per-instance configuration file (`config/engine.env`) for LLM provider, API keys, and model settings — overrides global env vars |
+| **Web Dashboard** | Zero-dependency browser UI (v6.2) — server-side rendered HTML pages for cognitive status, schedule management, runtime configuration, and knowledge graph documentation. Served at the HTTP daemon's port alongside `/mcp` |
 
 You can think of DreamGraph as:
 

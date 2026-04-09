@@ -415,7 +415,7 @@ Feed curated knowledge into the fact graph. The LLM reads source code (via code 
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `target` | enum | — | **Required.** `features`, `workflows`, `data_model` |
+| `target` | enum | — | **Required.** `features`, `workflows`, `data_model`, `capabilities` |
 | `entries` | array | — | **Required.** Array of entity objects (min 1). Each must have `id` and `name`. Structure depends on target. |
 | `mode` | enum | `merge` | `merge`: upsert by ID — preserves existing, updates matching, appends new. `replace`: wipe existing and write only incoming entries. |
 
@@ -729,3 +729,35 @@ System resources (registered in [src/resources/register.ts](../src/resources/reg
 | `system://data-model` | Entity definitions and relationships |
 | `system://capabilities` | Server capabilities, strategies & available tools |
 | `system://index` | Central entity index for fast lookup and cross-resource linking |
+
+---
+
+## Web Dashboard HTTP Endpoints (v6.2)
+
+The web dashboard is served by the built-in HTTP transport and provides browser-based monitoring, schedule management, and runtime configuration. All pages are server-side rendered HTML with zero external dependencies.
+
+### GET Pages
+
+| Route | Page | Description |
+|-------|------|-------------|
+| `/` | Index | Navigation hub — links to all dashboard pages |
+| `/status` | Cognitive Status | Live cognitive state, cycle counts, dream graph stats, validation pipeline, active tensions, LLM provider, promotion & decay config |
+| `/schedules` | Schedule Manager | Active schedules table (pause/resume/run/delete), create form (name, action, trigger, strategy, max runs), execution history (last 20) |
+| `/config` | Runtime Config | Instance info, server settings, repos, LLM (Provider + Dreamer + Normalizer), Database (editable + Test Connection), Scheduler, Event Router, Narrative |
+| `/docs` | Knowledge Graph | Auto-generated documentation from the fact graph (features, workflows, data model) |
+| `/health` | Health Check | Liveness probe — returns JSON `{"status":"ok"}` or HTML card depending on Accept header |
+
+### POST Endpoints
+
+| Route | Content-Type | Description |
+|-------|-------------|-------------|
+| `POST /config` | `application/x-www-form-urlencoded` | Update runtime settings. `section` field selects target: `llm`, `dreamer`, `normalizer`, `scheduler`, `events`, `narrative`, `database`. Redirects to `/config` (PRG pattern). |
+| `POST /config/test-db` | `application/json` | Test database connectivity. Request: `{"connectionString":"..."}`. Response: `{"ok":true}` or `{"ok":false,"error":"..."}`. |
+| `POST /schedules` | `application/x-www-form-urlencoded` | Schedule actions. `action` field selects operation: `toggle`, `run_now`, `delete`, `create`. Redirects to `/schedules` (PRG pattern). |
+
+### Design Principles
+
+- **Zero-dependency SSR** — All HTML is generated server-side with inlined CSS. No client-side JS frameworks.
+- **PRG pattern** — All form POSTs redirect via 303 See Other, preventing duplicate submissions on refresh.
+- **Dark theme** — GitHub-inspired dark color scheme with CSS custom properties.
+- **Content negotiation** — `/health` returns JSON for programmatic clients (Accept: application/json) or HTML for browsers.

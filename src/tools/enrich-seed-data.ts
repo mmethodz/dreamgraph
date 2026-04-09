@@ -40,6 +40,7 @@ import type {
   Feature,
   Workflow,
   DataModelEntity,
+  CapabilityEntity,
   IndexEntry,
   ResourceIndex,
   GraphLink,
@@ -168,16 +169,31 @@ const DataModelEntrySchema = z.object({
   links: z.array(GraphLinkLenient).default([]),
 }).passthrough();
 
+const CapabilityEntrySchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  description: z.string().default(""),
+  source_repo: z.string().default(""),
+  source_files: z.array(SourceFileItem).default([]),
+  category: z.string().default("core"),
+  status: z.string().default("active"),
+  tags: z.array(z.string()).default([]),
+  domain: z.string().default("core"),
+  keywords: z.array(z.string()).default([]),
+  links: z.array(GraphLinkLenient).default([]),
+}).passthrough();
+
 // ---------------------------------------------------------------------------
 // Target file mapping
 // ---------------------------------------------------------------------------
 
-type SeedTarget = "features" | "workflows" | "data_model";
+type SeedTarget = "features" | "workflows" | "data_model" | "capabilities";
 
 const TARGET_FILES: Record<SeedTarget, string> = {
   features: "features.json",
   workflows: "workflows.json",
   data_model: "data_model.json",
+  capabilities: "capabilities.json",
 };
 
 // ---------------------------------------------------------------------------
@@ -215,11 +231,12 @@ function mergeById<T>(existing: T[], incoming: T[]): { merged: T[]; inserted: nu
   return { merged: [...map.values()], inserted, updated };
 }
 
-/** Rebuild index.json from all three seed files */
+/** Rebuild index.json from all four seed files */
 async function rebuildIndex(): Promise<number> {
   const features = await loadJsonArray<Feature>("features.json");
   const workflows = await loadJsonArray<Workflow>("workflows.json");
   const dataModel = await loadJsonArray<DataModelEntity>("data_model.json");
+  const capabilities = await loadJsonArray<CapabilityEntity>("capabilities.json");
 
   const entities: Record<string, IndexEntry> = {};
 
@@ -245,6 +262,14 @@ async function rebuildIndex(): Promise<number> {
       uri: `dreamgraph://resource/data_model/${d.id}`,
       name: d.name,
       source_repo: d.source_repo,
+    };
+  }
+  for (const c of stripTemplateStubs(capabilities)) {
+    entities[c.id] = {
+      type: "capability",
+      uri: `dreamgraph://resource/capability/${c.id}`,
+      name: c.name,
+      source_repo: c.source_repo,
     };
   }
 
@@ -285,14 +310,14 @@ export function registerEnrichSeedDataTool(server: McpServer): void {
   server.tool(
     "enrich_seed_data",
     "Feed curated knowledge into the fact graph. Use this after reading source code " +
-    "to populate features, workflows, and data model entities. The server validates " +
+    "to populate features, workflows, data model, and capability entities. The server validates " +
     "structure, merges by ID (upsert), strips template stubs, and rebuilds the " +
     "resource index. Pass structured entity data — the server manages persistence. " +
     "Call once per target or batch multiple entities in a single call. " +
     "Use mode='replace' to do a clean replacement when you have complete knowledge.",
     {
       target: z
-        .enum(["features", "workflows", "data_model"])
+        .enum(["features", "workflows", "data_model", "capabilities"])
         .describe("Which seed data file to enrich"),
       entries: z
         .array(z.record(z.string(), z.unknown()))
@@ -303,6 +328,7 @@ export function registerEnrichSeedDataTool(server: McpServer): void {
           "domain, keywords (string[]), status, tags (string[]), " +
           "links (array of {target, type, relationship, description, strength} — or plain target strings). " +
           "Features additionally: category. " +
+          "Capabilities additionally: category. " +
           "Workflows additionally: trigger, steps (array of {order, name, description} — or plain step-name strings). " +
           "Data model additionally: table_name, storage, " +
           "key_fields (array of {name, type, description} — or plain field-name strings), " +
@@ -327,7 +353,7 @@ export function registerEnrichSeedDataTool(server: McpServer): void {
           const validationErrors: string[] = [];
 
           // ----- Validate entries against the target schema -----
-          let validated: Array<Feature | Workflow | DataModelEntity>;
+          let validated: Array<Feature | Workflow | DataModelEntity | CapabilityEntity>;
 
           switch (target) {
             case "features": {
@@ -380,6 +406,20 @@ export function registerEnrichSeedDataTool(server: McpServer): void {
               }
               break;
             }
+            case "capabilities": {
+              validated = [];
+              for (const raw of entries) {
+                const parsed = CapabilityEntrySchema.safeParse(raw);
+                if (parsed.success) {
+                  validated.push(parsed.data as unknown as CapabilityEntity);
+                } else {
+                  validationErrors.push(
+                    `Capability entry '${(raw as Record<string, unknown>).id ?? "?"}': ${parsed.error.issues.map((i) => i.message).join("; ")}`,
+                  );
+                }
+              }
+              break;
+            }
           }
 
           if (validated.length === 0) {
@@ -390,7 +430,7 @@ export function registerEnrichSeedDataTool(server: McpServer): void {
           }
 
           // ----- Load existing, strip stubs, merge or replace -----
-          type SeedEntity = Feature | Workflow | DataModelEntity;
+          type SeedEntity = Feature | Workflow | DataModelEntity | CapabilityEntity;
 
           let merged: SeedEntity[];
           let inserted: number;

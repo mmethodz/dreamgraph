@@ -166,7 +166,7 @@ export function registerResources(server: McpServer): void {
               "DB Senses (query_db_schema)" + (config.database.connectionString ? " — configured" : " — not configured"),
               "Runtime Senses (query_runtime_metrics)",
               "Knowledge Tools (init_graph, get_workflow, search_data_model, query_resource)",
-              "Enrichment (enrich_seed_data — targets: features, workflows, data_model)",
+              "Enrichment (enrich_seed_data — targets: features, workflows, data_model, capabilities)",
               "Visual Architect (generate_visual_flow)",
               "ADR Historian (record/query/deprecate_architecture_decision)",
               "UI Registry (register/query_ui_elements, generate_ui_migration_plan)",
