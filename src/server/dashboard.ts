@@ -1221,7 +1221,7 @@ interface WorkflowEntry {
   id?: string;
   name?: string;
   description?: string;
-  steps?: Array<{ step: number; action: string; [key: string]: unknown }>;
+  steps?: Array<{ order: number; name: string; description?: string; [key: string]: unknown }>;
   [key: string]: unknown;
 }
 
@@ -1300,8 +1300,8 @@ async function renderDocs(): Promise<string> {
         ${wf.description ? `<p style="color:var(--text-dim);margin:4px 0">${esc(wf.description)}</p>` : ""}
         ${wf.steps && wf.steps.length > 0 ? `
           <table style="margin-top:8px">
-            <tr><th>#</th><th>Action</th></tr>
-            ${wf.steps.map(s => `<tr><td>${s.step}</td><td>${esc(s.action)}</td></tr>`).join("")}
+            <tr><th>#</th><th>Action</th><th>Description</th></tr>
+            ${wf.steps.map(s => `<tr><td>${s.order}</td><td>${esc(s.name)}</td><td style="color:var(--text-dim)">${esc(s.description ?? "")}</td></tr>`).join("")}
           </table>
         ` : ""}
       </div>`;

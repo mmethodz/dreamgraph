@@ -555,10 +555,11 @@ export function registerScanProjectTool(server: McpServer): void {
           "deep: scan up to 10 levels (thorough, recommended for first scan).",
         ),
       targets: z
-        .array(z.enum(["features", "workflows", "data_model"]))
+        .array(z.string())
         .optional()
         .describe(
           "Which seed data targets to populate. Default: all three. " +
+          "Each must be one of: features, workflows, data_model. " +
           "Use to selectively re-scan only features, workflows, or data_model.",
         ),
       repos: z
@@ -569,7 +570,23 @@ export function registerScanProjectTool(server: McpServer): void {
         ),
     },
     async ({ depth, targets, repos }) => {
-      const targetList = targets ?? ["features", "workflows", "data_model"];
+      const VALID_TARGETS = ["features", "workflows", "data_model"];
+      const targetList = targets ?? [...VALID_TARGETS];
+
+      // Validate targets
+      const invalidTargets = targetList.filter(t => !VALID_TARGETS.includes(t));
+      if (invalidTargets.length > 0) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              success: false,
+              error: `Invalid target(s): ${invalidTargets.join(", ")}. Must be one of: ${VALID_TARGETS.join(", ")}`,
+            }),
+          }],
+        };
+      }
+
       logger.info(`scan_project: starting (depth=${depth}, targets=${targetList.join(",")}, repos=${repos?.join(",") ?? "all"})`);
 
       const result = await safeExecute<ScanProjectResult>(async (): Promise<ToolResponse<ScanProjectResult>> => {
@@ -628,7 +645,7 @@ export function registerScanProjectTool(server: McpServer): void {
             for (const target of targetList) {
               try {
                 const messages = buildEnrichmentPrompt(
-                  treeSummary, fileListing, keyFileContents, manifestSummary, target,
+                  treeSummary, fileListing, keyFileContents, manifestSummary, target as "features" | "workflows" | "data_model",
                 );
 
                 logger.info(`scan_project: LLM call for ${target} (${scan.repoName})`);

@@ -59,10 +59,10 @@ import type {
 
 const GraphLinkSchema = z.object({
   target: z.string(),
-  type: z.enum(["feature", "workflow", "data_model"]).default("feature"),
+  type: z.string().default("feature"),
   relationship: z.string().default("related_to"),
   description: z.string().default(""),
-  strength: z.enum(["strong", "moderate", "weak"]).default("moderate"),
+  strength: z.string().default("moderate"),
 }).passthrough();
 
 /** Accept full GraphLink object OR a plain string (coerced to a link target). */
@@ -314,11 +314,18 @@ export function registerEnrichSeedDataTool(server: McpServer): void {
     "structure, merges by ID (upsert), strips template stubs, and rebuilds the " +
     "resource index. Pass structured entity data — the server manages persistence. " +
     "Call once per target or batch multiple entities in a single call. " +
-    "Use mode='replace' to do a clean replacement when you have complete knowledge.",
+    "Use mode='replace' to do a clean replacement when you have complete knowledge. " +
+    "TIP: For links, source_files, steps, key_fields, and relationships arrays, " +
+    "you may pass plain strings instead of objects — they auto-coerce to full objects. " +
+    "Example link: 'other_feature_id' → {target:'other_feature_id', type:'feature', relationship:'related_to'}. " +
+    "Example source_file: 'src/foo.ts'. Example step: 'Build the thing'.",
     {
       target: z
-        .enum(["features", "workflows", "data_model", "capabilities"])
-        .describe("Which seed data file to enrich"),
+        .string()
+        .describe(
+          "Which seed data file to enrich. " +
+          "Must be one of: features, workflows, data_model, capabilities.",
+        ),
       entries: z
         .array(z.record(z.string(), z.unknown()))
         .min(1)
@@ -336,7 +343,7 @@ export function registerEnrichSeedDataTool(server: McpServer): void {
           "Simple string values are auto-coerced to full objects where possible.",
         ),
       mode: z
-        .enum(["merge", "replace"])
+        .string()
         .default("merge")
         .describe(
           "merge (default): upsert by id — preserves existing entries, updates matching ids, appends new ones. " +
@@ -345,11 +352,37 @@ export function registerEnrichSeedDataTool(server: McpServer): void {
         ),
     },
     async ({ target, entries, mode }) => {
+      // ---- Validate target and mode server-side (no client enum caching) ----
+      const VALID_TARGETS = Object.keys(TARGET_FILES);
+      if (!VALID_TARGETS.includes(target)) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              success: false,
+              error: `Invalid target '${target}'. Must be one of: ${VALID_TARGETS.join(", ")}`,
+            }),
+          }],
+        };
+      }
+      const VALID_MODES = ["merge", "replace"];
+      if (!VALID_MODES.includes(mode)) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              success: false,
+              error: `Invalid mode '${mode}'. Must be one of: ${VALID_MODES.join(", ")}`,
+            }),
+          }],
+        };
+      }
+
       logger.info(`enrich_seed_data: ${entries.length} entries for '${target}' (mode=${mode})`);
 
       const result = await safeExecute<EnrichResult>(
         async (): Promise<ToolResponse<EnrichResult>> => {
-          const filename = TARGET_FILES[target];
+          const filename = TARGET_FILES[target as SeedTarget];
           const validationErrors: string[] = [];
 
           // ----- Validate entries against the target schema -----
@@ -420,6 +453,9 @@ export function registerEnrichSeedDataTool(server: McpServer): void {
               }
               break;
             }
+            default:
+              // Should never happen — already validated above
+              validated = [];
           }
 
           if (validated.length === 0) {
@@ -474,9 +510,9 @@ export function registerEnrichSeedDataTool(server: McpServer): void {
               : "");
 
           return success<EnrichResult>({
-            target,
+            target: target as SeedTarget,
             file: filename,
-            mode,
+            mode: mode as "merge" | "replace",
             entries_received: entries.length,
             entries_inserted: inserted,
             entries_updated: updated,

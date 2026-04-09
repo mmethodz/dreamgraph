@@ -23,7 +23,7 @@ import { config } from "../config/config.js";
 import { getActiveScope } from "../instance/lifecycle.js";
 import { loadJsonArray, loadJsonData } from "../utils/cache.js";
 import { dataPath } from "../utils/paths.js";
-import { success, safeExecute } from "../utils/errors.js";
+import { success, error, safeExecute } from "../utils/errors.js";
 import { logger } from "../utils/logger.js";
 import type {
   ExportLivingDocsOutput,
@@ -821,23 +821,14 @@ export function registerLivingDocsTools(server: McpServer): void {
           "Output directory (absolute path, or relative to project root)"
         ),
       sections: z
-        .array(
-          z.enum([
-            "features",
-            "data_model",
-            "workflows",
-            "architecture",
-            "ui_registry",
-            "cognitive_status",
-            "api_reference",
-            "all",
-          ])
-        )
-        .describe("Sections to export"),
+        .array(z.string())
+        .describe(
+          "Sections to export. Each must be one of: features, data_model, workflows, architecture, ui_registry, cognitive_status, api_reference, all."
+        ),
       format: z
-        .enum(["docusaurus", "nextra", "mkdocs", "plain"])
+        .string()
         .optional()
-        .describe("Site framework format (default: plain)"),
+        .describe("Site framework format. Must be one of: docusaurus, nextra, mkdocs, plain. Default: plain."),
       include_diagrams: z
         .boolean()
         .optional()
@@ -856,16 +847,30 @@ export function registerLivingDocsTools(server: McpServer): void {
 
       const result = await safeExecute<ExportLivingDocsOutput>(
         async (): Promise<ToolResponse<ExportLivingDocsOutput>> => {
-          const fmt: LivingDocsFormat = params.format ?? "plain";
+          const fmt = (params.format ?? "plain") as LivingDocsFormat;
           const diagrams = params.include_diagrams !== false; // default true
           const includeCognitive = params.include_cognitive === true;
+
+          // Validate format
+          const VALID_FORMATS: LivingDocsFormat[] = ["docusaurus", "nextra", "mkdocs", "plain"];
+          if (!VALID_FORMATS.includes(fmt)) {
+            return error("INVALID_FORMAT", `Invalid format '${fmt}'. Must be one of: ${VALID_FORMATS.join(", ")}`);
+          }
+
+          // Validate sections
+          const VALID_SECTIONS: LivingDocsSection[] = ["features", "data_model", "workflows", "architecture", "ui_registry", "cognitive_status", "api_reference", "all"];
+          for (const s of params.sections) {
+            if (!VALID_SECTIONS.includes(s as LivingDocsSection)) {
+              return error("INVALID_SECTION", `Invalid section '${s}'. Must be one of: ${VALID_SECTIONS.join(", ")}`);
+            }
+          }
 
           // Resolve output dir against the attached project, not the server source
           const outDir = resolveOutputDir(params.output_dir);
           logger.info(`export_living_docs: output dir resolved to ${outDir}`);
 
           // Expand "all"
-          let wanted = new Set<LivingDocsSection>(params.sections);
+          let wanted = new Set<LivingDocsSection>(params.sections as LivingDocsSection[]);
           if (wanted.has("all")) {
             wanted = new Set<LivingDocsSection>([
               "features",

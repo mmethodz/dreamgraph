@@ -23,6 +23,7 @@ import { withFileLock } from "../utils/mutex.js";
 import type {
   UIRegistryFile,
   SemanticElement,
+  SemanticElementCategory,
   RegisterUIElementOutput,
   QueryUIElementsOutput,
   GenerateUIMigrationOutput,
@@ -113,7 +114,7 @@ function estimateComplexity(
 // Zod enum for categories (shared across tools)
 // ---------------------------------------------------------------------------
 
-const categoryEnum = z.enum([
+const VALID_CATEGORIES = [
   "data_display",
   "data_input",
   "navigation",
@@ -121,7 +122,11 @@ const categoryEnum = z.enum([
   "layout",
   "action",
   "composite",
-]);
+] as const;
+
+const categorySchema = z.string().describe(
+  "Category of UI element. Must be one of: " + VALID_CATEGORIES.join(", ") + "."
+);
 
 // ---------------------------------------------------------------------------
 // Tool Registration
@@ -145,7 +150,7 @@ export function registerUIRegistryTools(server: McpServer): void {
       purpose: z
         .string()
         .describe("The deep intent — what this element exists to do"),
-      category: categoryEnum.describe("Category of UI element"),
+      category: categorySchema,
       inputs: z
         .array(
           z.object({
@@ -266,7 +271,7 @@ export function registerUIRegistryTools(server: McpServer): void {
             // Merge: append implementations (no dup by platform), union used_by, overwrite rest
             existing.name = params.name;
             existing.purpose = params.purpose;
-            existing.category = params.category;
+            existing.category = params.category as SemanticElementCategory;
             existing.data_contract = {
               inputs: params.inputs,
               outputs: params.outputs,
@@ -317,7 +322,7 @@ export function registerUIRegistryTools(server: McpServer): void {
               id: params.id,
               name: params.name,
               purpose: params.purpose,
-              category: params.category,
+              category: params.category as SemanticElementCategory,
               data_contract: {
                 inputs: params.inputs,
                 outputs: params.outputs,
@@ -380,9 +385,9 @@ export function registerUIRegistryTools(server: McpServer): void {
     "query_ui_elements",
     "Search the semantic UI registry by category, purpose, platform, or feature. Returns elements with their full data contracts. Use missing_platform to find elements that need porting to a target platform.",
     {
-      category: categoryEnum
+      category: categorySchema
         .optional()
-        .describe("Filter by element category"),
+        .describe("Filter by element category. Must be one of: " + VALID_CATEGORIES.join(", ") + "."),
       purpose_search: z
         .string()
         .optional()

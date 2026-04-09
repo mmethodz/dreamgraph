@@ -972,9 +972,9 @@ export function registerApiSurfaceTools(server: McpServer): void {
       "Regex-based (~90% accuracy). Supports Python, TypeScript, JavaScript, C#.",
     {
       path: z.string().describe("File or directory path relative to repo root."),
-      language: z.enum(["auto", "python", "typescript", "javascript", "csharp"])
+      language: z.string()
         .default("auto")
-        .describe("Language to extract. Auto-detect from file extension."),
+        .describe("Language to extract. Must be one of: auto, python, typescript, javascript, csharp. Auto-detect from file extension."),
       scope: z.enum(["public", "all"])
         .default("public")
         .describe("Whether to extract only public APIs or all detectable members."),
@@ -1124,9 +1124,9 @@ export function registerApiSurfaceTools(server: McpServer): void {
       symbol_name: z.string().describe(
         "Class, function, or module symbol to look up (e.g., 'UIStack', 'CognitiveEngine', 'ui.layouts')."
       ),
-      symbol_kind: z.enum(["auto", "class", "function", "module"])
+      symbol_kind: z.string()
         .default("auto")
-        .describe("Optional symbol type hint. Auto-detect when omitted."),
+        .describe("Optional symbol type hint. Must be one of: auto, class, function, module. Auto-detect when omitted."),
       member_name: z.string().optional()
         .describe("Optional: filter to one specific method or property."),
       file_path: z.string().optional()
@@ -1139,9 +1139,9 @@ export function registerApiSurfaceTools(server: McpServer): void {
         .describe("summary: name + purpose. signatures_only: method names, params, return types. full: everything."),
       platform: z.string().optional()
         .describe("Optional platform filter (e.g., 'python-port', 'web')."),
-      language: z.enum(["any", "python", "typescript", "javascript", "csharp"])
+      language: z.string()
         .default("any")
-        .describe("Optional language filter for multi-language repos."),
+        .describe("Optional language filter. Must be one of: any, python, typescript, javascript, csharp."),
     },
     async ({ symbol_name, symbol_kind, member_name, file_path: filePathFilter, include_inherited, detail_level, platform, language }) => {
       const result = await safeExecute<QueryApiSurfaceOutput>(async (): Promise<ToolResponse<QueryApiSurfaceOutput>> => {
