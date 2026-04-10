@@ -1,6 +1,6 @@
 # DreamGraph Data Model
 
-> All 14 data stores that make up DreamGraph's persistent state.
+> All 15 data stores that make up DreamGraph's persistent state.
 
 ---
 
@@ -21,6 +21,7 @@ graph TB
     ST[("System Story<br/>(narrative)")]
     CAP[("Capabilities<br/>(registry)")]
     SCH[("Schedules<br/>(v5.2 scheduler)")]
+    LL[("Lucid Log<br/>(interactive)")]
     API[("API Surface<br/>(operational)")]
 
     FG -.->|validates against| DG
@@ -35,6 +36,8 @@ graph TB
     SCH -->|triggers| DG
     SCH -->|triggers| TH
     DH -->|after_cycles trigger| SCH
+    LL -->|promotes to| VE
+    LL -->|may create| TL
     API -.->|grounds| DG
 ```
 
@@ -305,6 +308,33 @@ Persistent store for the Dream Scheduler. All active and completed schedules wit
 | `result_summary` | string | Brief outcome description |
 | `duration_ms` | number | Execution time |
 | `error` | string \| null | Error message if failed |
+
+---
+
+## v5.2: Lucid Log (`lucid_log.json`)
+
+Archive of interactive lucid dream sessions. Each session records the original hypothesis, exploration findings, confidence scores, and which edges were accepted or rejected by the human operator.
+
+### Root Object
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `sessions[]` | LucidSession[] | All completed lucid dream sessions |
+| `metadata.created` | string | ISO timestamp of log creation |
+| `metadata.lastUpdated` | string | ISO timestamp of last session write |
+
+### LucidSession
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Unique session identifier (`lucid-<timestamp>`) |
+| `hypothesis` | LucidHypothesis | Parsed hypothesis with subject, predicate, object, scope |
+| `findings` | LucidFindings | Exploration results: supporting signals, contradicting signals, gaps |
+| `confidence` | number | System-assessed confidence (0–1) |
+| `outcome` | string | `accepted` \| `rejected` \| `refined` \| `abandoned` |
+| `acceptedEdges` | number | Count of edges promoted to validated_edges.json |
+| `startedAt` | string | ISO timestamp of session start |
+| `endedAt` | string | ISO timestamp of session end |
 
 ---
 

@@ -4,7 +4,7 @@
 
 ## Overview
 
-DreamGraph is a **cognitive dreaming engine** for MCP (Model Context Protocol) knowledge graphs. It speculatively discovers hidden connections, validates them against a fact graph, and builds a persistent, evolving understanding of the systems it observes.
+DreamGraph is a **cognitive dreaming engine** and **active Architect agent** for MCP (Model Context Protocol) knowledge graphs. The Architect calls MCP tools directly to build and maintain the knowledge graph, while the cognitive engine speculatively discovers hidden connections, validates them against a fact graph, and builds a persistent, evolving understanding of the systems it observes.
 
 **Version:** 6.2.0 "La Catedral"  
 **License:** MIT  
@@ -23,12 +23,13 @@ DreamGraph maintains two parallel knowledge structures:
 
 ### Cognitive States
 
-The engine operates as a strict state machine with four states:
+The engine operates as a strict state machine with five states:
 
 ```
 AWAKE ──→ REM ──→ NORMALIZING ──→ AWAKE
   │                                  ▲
-  └──→ NIGHTMARE ────────────────────┘
+  ├──→ NIGHTMARE ────────────────────┘
+  └──→ LUCID ───────────────────────┘
 ```
 
 | State | Purpose | What Happens |
@@ -37,6 +38,7 @@ AWAKE ──→ REM ──→ NORMALIZING ──→ AWAKE
 | **REM** | Speculative generation | Dreamer generates hypothetical edges using 10 strategies (incl. LLM dream + PGO wave) |
 | **NORMALIZING** | Validation | Three-outcome classifier: validate, retain, or reject |
 | **NIGHTMARE** | Adversarial scanning | Five security strategies probe for vulnerabilities |
+| **LUCID** | Interactive exploration | Human proposes hypothesis, system explores, co-create validated edges |
 
 ### The Promotion Pipeline
 
@@ -58,11 +60,17 @@ Speculative Edge → Normalization → Promotion Gate → Validated Edge
 
 ```mermaid
 graph TB
+    subgraph "Architect Agent"
+        Architect["DreamGraph Architect<br/>Active Tool-Calling LLM"]
+    end
+
     subgraph "MCP Protocol Layer"
         Server["MCP Server<br/>STDIO / Streamable HTTP"]
-        Tools["57 Tools"]
-        Resources["23 Resources"]
+        Tools["62 Tools"]
+        Resources["25 Resources"]
     end
+
+    Architect --> Server
 
     subgraph "Cognitive Core"
         Engine["Cognitive Engine<br/>State Machine"]
@@ -77,6 +85,8 @@ graph TB
         Intervention["Intervention Planning<br/>Remediation"]
         Narrator["Narrator<br/>System Autobiography"]
         Federation["Federation<br/>Cross-Project Learning"]
+        GraphRAG["Graph RAG<br/>Knowledge Retrieval"]
+        Lucid["Lucid Dreaming<br/>Interactive Exploration"]
     end
 
     subgraph "v5.1 Capabilities"
@@ -98,7 +108,7 @@ graph TB
     end
 
     subgraph "LLM Integration"
-        LLM["LLM Provider<br/>Ollama / OpenAI / Sampling"]
+        LLM["LLM Provider<br/>Ollama / OpenAI / Anthropic / Sampling"]
     end
 
     subgraph "Senses (External I/O)"
@@ -132,6 +142,8 @@ graph TB
     Engine --> EventRouter
     Dreamer --> LLM
     Engine --> Scheduler
+    Engine --> GraphRAG
+    Engine --> Lucid
     Narrator --> ContinuousNarrative
     Scheduler --> Engine
     Dreamer --> DreamGraph
@@ -150,7 +162,7 @@ graph TB
 
 ## Feature Dependencies
 
-The cognitive engine sits at the center, orchestrating all other features:
+The cognitive engine sits at the center of autonomous dream cycles, while the Architect agent drives interactive operations — calling MCP tools to query, enrich, and evolve the knowledge graph:
 
 ```mermaid
 graph LR
@@ -186,6 +198,8 @@ graph LR
 ```
 src/
 ├── index.ts                 # Entry point — CLI arg parser + transport launcher
+├── api/
+│   └── routes.ts            # REST API endpoints for extension / HTTP clients (§8.1)
 ├── server/
 │   ├── server.ts            # McpServer factory
 │   └── dashboard.ts         # Web dashboard — /, /status, /schedules, /config, /docs, /health HTML pages
@@ -194,7 +208,7 @@ src/
 ├── cognitive/
 │   ├── engine.ts            # State machine, tension management, persistence
 │   ├── dreamer.ts           # REM generation — 10 dream strategies (incl. LLM dream + PGO wave)
-│   ├── llm.ts               # LLM provider abstraction — Ollama, OpenAI, MCP Sampling, None
+│   ├── llm.ts               # LLM provider abstraction — Ollama, OpenAI, Anthropic, MCP Sampling, None
 │   ├── normalizer.ts        # Three-outcome classifier (Truth Filter)
 │   ├── adversarial.ts       # NIGHTMARE state — 5 security scan strategies
 │   ├── causal.ts            # Causal chain discovery via BFS
@@ -205,6 +219,8 @@ src/
 │   ├── metacognition.ts     # Metacognitive self-tuning (v5.1)
 │   ├── event-router.ts      # Event-driven dreaming (v5.1)
 │   ├── scheduler.ts         # Dream Scheduler — instance-aware orchestration (v5.2→v6.0)
+│   ├── graph-rag.ts         # Graph RAG Bridge — TF-IDF retrieval, token-budgeted context (v5.2)
+│   ├── lucid.ts             # Lucid Dreaming — interactive hypothesis exploration (v5.2)
 │   ├── types.ts             # All cognitive type definitions
 │   └── register.ts          # Tool/resource registration + post-cycle hooks
 ├── discipline/              # Self-imposed execution governance (v6.0 La Catedral)
@@ -259,6 +275,8 @@ src/
 │   ├── search-data-model.ts # Data model search tool
 │   ├── query-resource.ts    # Generic URI-based query
 │   └── api-surface.ts       # Operational: extract/query API surface + ops://api-surface resource
+├── api/
+│   └── routes.ts            # REST API endpoints for extension / HTTP clients (§8.1)
 ├── resources/
 │   └── register.ts          # 6 system:// MCP resources
 ├── types/
@@ -306,6 +324,7 @@ data/                                    # Legacy mode (flat) or <instance>/data
 ├── event_log.json           # Cognitive event dispatch log
 ├── system_story.json        # Auto-generated narrative (v5.1)
 ├── schedules.json           # Dream Scheduler persistence (v5.2)
+├── lucid_log.json           # Lucid dream session archive (v5.2)
 └── api_surface.json         # [runtime] Operational API surface (classes, methods, signatures)
 ```
 
@@ -340,7 +359,7 @@ The `engine.env` file overrides global environment variables with per-instance v
 | `DREAMGRAPH_RUNTIME_TYPE` | — | Metrics format: `otlp`, `prometheus`, or `custom` |
 | `DREAMGRAPH_REPOS` | `{}` | JSON object mapping repo names to local paths. In instance mode, repos from `mcp.json` are merged automatically and `project_root` is auto-registered as a fallback — this env var becomes optional. |
 | `DREAMGRAPH_SCHEDULER` | `{"enabled":true}` | JSON config for dream scheduler (v5.2): `enabled`, `tick_interval_ms`, `max_runs_per_hour`, `cooldown_ms`, `nightmare_cooldown_ms`, `error_streak_pause_limit` |
-| `DREAMGRAPH_LLM_PROVIDER` | `"ollama"` | LLM provider: `ollama`, `openai`, `sampling`, `none` |
+| `DREAMGRAPH_LLM_PROVIDER` | `"ollama"` | LLM provider: `ollama`, `openai`, `anthropic`, `sampling`, `none` |
 | `DREAMGRAPH_LLM_MODEL` | `"qwen3:8b"` | Model name (provider-dependent default) |
 | `DREAMGRAPH_LLM_URL` | `http://localhost:11434` | API base URL |
 | `DREAMGRAPH_LLM_API_KEY` | — | API key for OpenAI-compatible providers |
@@ -355,4 +374,4 @@ The `engine.env` file overrides global environment variables with per-instance v
 
 > **Per-instance override:** Each instance can have a `config/engine.env` file that overrides the global env vars above. This allows different instances to use different LLM providers and models.
 
-> **⚠️ Cost Warning:** Cloud LLM providers (`openai`) incur API costs on every dream cycle. With scheduled dreaming at 60-second intervals, GPT-4o-mini costs ~$2–4/day; GPT-4o costs ~$30–60/day. Use `DREAMGRAPH_SCHEDULER` `max_runs_per_hour` to cap frequency and monitor your billing dashboard. Use `ollama` for free local dreaming or `none` to disable LLM entirely.
+> **⚠️ Cost Warning:** Cloud LLM providers (`openai`, `anthropic`) incur API costs on every dream cycle. With scheduled dreaming at 60-second intervals, costs can reach $2–60+/day depending on the model. Use `DREAMGRAPH_SCHEDULER` `max_runs_per_hour` to cap frequency and monitor your billing dashboard. Use `ollama` for free local dreaming or `none` to disable LLM entirely.

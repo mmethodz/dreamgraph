@@ -8,6 +8,8 @@
 
 The cognitive engine is a **speculative knowledge discovery system**. It generates hypothetical connections between entities in a fact graph, validates them through a strict three-outcome classifier, and accumulates an evolving understanding over time. The entire process is designed to be **safe by default** — the fact graph is never modified, and all speculative output is quarantined until validated.
 
+The Architect agent drives the interactive enrichment loop by calling MCP tools (`scan_project`, `enrich_seed_data`, `solidify_cognitive_insight`, etc.) during conversations. The cognitive engine handles autonomous discovery cycles independently.
+
 ---
 
 ## State Machine
@@ -17,7 +19,8 @@ The cognitive engine is a **speculative knowledge discovery system**. It generat
            │                                         │
            ▼                                         │
         AWAKE ──────────────────────────► NIGHTMARE ─┘
-           │
+           │ │
+           │ └──────────────────────────► LUCID ──────┘
            ▼
           REM ──────────────────────────►  NORMALIZING ──► AWAKE
                                               │
@@ -33,6 +36,8 @@ The cognitive engine is a **speculative knowledge discovery system**. It generat
 | NORMALIZING → AWAKE | Auto | Promotion gate filters, tensions created/resolved, history recorded |
 | AWAKE → NIGHTMARE | `nightmare_cycle` tool | Adversarial scanner probes for vulnerabilities |
 | NIGHTMARE → AWAKE | Auto | Threat log persisted |
+| AWAKE → LUCID | `lucid_dream` tool | Engine enters interactive exploration mode; hypothesis parsed and scoped |
+| LUCID → AWAKE | `wake_from_lucid` tool or timeout | Accepted edges persisted, session archived to lucid_log.json |
 | Any → AWAKE | `interrupt()` | Emergency safe-return; in-progress data quarantined |
 
 The engine is a **singleton**. Concurrent state transitions are prevented by design — transitions are synchronous method calls that throw if the precondition state is wrong.
@@ -363,7 +368,7 @@ The Dream Scheduler (`scheduler.ts`) adds **policy-driven temporal orchestration
 
 ### Architecture
 
-The scheduler runs **in-process** within the MCP server. It does not spawn external processes — when a scheduled action fires, it calls the same internal engine functions the MCP tools use. This design is intentional: the MCP server needs the AI agent on the other end to interpret dream results, so scheduled work accumulates results that the agent processes on its next interaction.
+The scheduler runs **in-process** within the MCP server. It does not spawn external processes — when a scheduled action fires, it calls the same internal engine functions the MCP tools use. This design is intentional: scheduled work accumulates results that the Architect processes on its next interaction — calling tools to solidify insights, enrich the graph, or trigger follow-up cycles.
 
 ### Trigger Types
 
@@ -435,9 +440,10 @@ Dreams don't work without an LLM. The deterministic strategies find structural p
 | Priority | Provider | When Used |
 |----------|----------|-----------|
 | 1 | **Ollama** (local) | Autonomous daemon dreaming — no API key needed |
-| 2 | **OpenAI-compatible** (cloud) | Anthropic, OpenAI, Groq, etc. — requires API key |
-| 3 | **MCP Sampling** | Ask the connected client's LLM (IDE mode, human-in-the-loop) |
-| 4 | **None** | Structural-only fallback (degraded mode) |
+| 2 | **Anthropic** (cloud) | Native Claude API — requires API key |
+| 3 | **OpenAI-compatible** (cloud) | OpenAI, Groq, etc. — requires API key |
+| 4 | **MCP Sampling** | Ask the connected client's LLM (IDE mode, human-in-the-loop) |
+| 5 | **None** | Structural-only fallback (degraded mode) |
 
 ### Configuration
 
@@ -445,10 +451,10 @@ LLM settings are configured via environment variables or per-instance `config/en
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DREAMGRAPH_LLM_PROVIDER` | `ollama` | Provider type: `ollama`, `openai`, `sampling`, `none` |
+| `DREAMGRAPH_LLM_PROVIDER` | `ollama` | Provider type: `ollama`, `openai`, `anthropic`, `sampling`, `none` |
 | `DREAMGRAPH_LLM_MODEL` | `qwen3:8b` | Model name (provider-dependent) |
 | `DREAMGRAPH_LLM_URL` | `http://localhost:11434` | API base URL |
-| `DREAMGRAPH_LLM_API_KEY` | — | API key (required for `openai` provider) |
+| `DREAMGRAPH_LLM_API_KEY` | — | API key (required for `openai` and `anthropic` providers) |
 | `DREAMGRAPH_LLM_TEMPERATURE` | `0.7` | Creativity parameter (0.0–1.0) |
 | `DREAMGRAPH_LLM_MAX_TOKENS` | `2048` | Max response tokens |
 
@@ -538,3 +544,73 @@ This gives observers browser-based insight into the cognitive engine without req
 > **🚨 Do not leave scheduled cloud LLM dreaming running unattended without billing limits.**
 > A daemon running at 60-second intervals with GPT-4o can accumulate $30–60+/day.
 > Always configure `max_runs_per_hour` and monitor your API provider's usage dashboard.
+
+---
+
+## v5.2: Graph RAG Bridge
+
+**Source:** [src/cognitive/graph-rag.ts](../src/cognitive/graph-rag.ts)
+
+The Graph RAG Bridge provides **knowledge-graph-grounded retrieval** for LLM interactions. Instead of dumping the entire graph into context, it resolves a natural-language query into relevant entities using a three-tier resolution strategy, extracts a BFS sub-graph around the matches, then serializes the result within a configurable token budget.
+
+### Entity Resolution Pipeline
+
+1. **Exact match** — Direct ID or name lookup against the fact graph
+2. **Keyword match** — Compare query tokens against entity keywords (Jaccard similarity)
+3. **TF-IDF fallback** — Full corpus TF-IDF scoring when exact/keyword matches are insufficient
+
+### Retrieval Modes
+
+| Mode | Focus | Best For |
+|------|-------|----------|
+| `entity_focused` | Maximizes entity detail, minimal edge context | Targeted "what is X?" queries |
+| `tension_focused` | Prioritizes open tensions and recent cycles | Understanding current knowledge gaps |
+| `narrative_focused` | Emphasizes dream history and system story | Explaining why the system believes something |
+| `comprehensive` | Balanced blend of all three | General LLM preamble / context injection |
+
+### Token Budget Serialization
+
+The serializer allocates the token budget across sections based on mode weights. If a section overflows its allocation, content is truncated by relevance score. The output includes a `tokenEstimate` so callers can verify it fits their context window.
+
+### Cognitive Preamble
+
+`getCognitivePreamble(maxTokens)` returns a ready-to-inject summary combining:
+- Current cognitive state and cycle count
+- Active tensions (top by recency)
+- Recent dream history events
+- Relevant validated edges
+
+This is also served as the `dream://context` resource (comprehensive mode, 2000 tokens).
+
+---
+
+## v5.2: Lucid Dreaming
+
+**Source:** [src/cognitive/lucid.ts](../src/cognitive/lucid.ts)
+
+Lucid Dreaming is DreamGraph's **interactive co-creation** mode. A human operator proposes a hypothesis (e.g., "PaymentService depends on InventoryService via event bus"), and the system performs scoped exploration to find supporting/contradicting evidence before the human decides what to promote as validated knowledge.
+
+### Session Lifecycle
+
+1. **Enter** — `lucid_dream("hypothesis text")` transitions the engine AWAKE → LUCID
+2. **Explore** — System parses hypothesis into subject/predicate/object, searches the knowledge graph for supporting and contradicting signals
+3. **Interact** — Human reviews findings and calls `lucid_action`:
+   - `accept` — Promote supporting signals to validated edges
+   - `reject` — Discard findings without persisting
+   - `refine` — Provide a new hypothesis and re-explore
+4. **Wake** — `wake_from_lucid()` persists accepted edges, archives the session to `lucid_log.json`, transitions LUCID → AWAKE
+
+### Confidence Assessment
+
+The system computes a confidence score (0–1) based on:
+- Number and strength of supporting vs. contradicting signals
+- Whether signals come from validated edges (high trust), dream graph (medium), or tensions (low)
+- Whether there are significant unexplored gaps
+
+### Timeout Safety
+
+Lucid sessions automatically expire after **10 minutes** (600,000 ms). If the session times out, no edges are persisted and the engine returns to AWAKE state. This prevents the engine from being stuck in LUCID state indefinitely.
+
+### Lucid Log Archive
+
+All completed sessions (accepted, rejected, refined, or timed out) are archived in `data/lucid_log.json` and served via the `dream://lucid` resource. This provides a full audit trail of interactive knowledge creation.

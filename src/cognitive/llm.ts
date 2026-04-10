@@ -7,12 +7,12 @@
  * filters hallucinations from insights.
  *
  * Provider hierarchy (tried in order):
- *   1. Direct API (Ollama / OpenAI-compatible) — autonomous daemon dreaming
+ *   1. Direct API (Ollama / OpenAI-compatible / Anthropic) — autonomous daemon dreaming
  *   2. MCP Sampling — ask the connected client's LLM (human-in-the-loop)
  *   3. None — structural-only fallback (degraded mode)
  *
  * Configuration (env vars):
- *   DREAMGRAPH_LLM_PROVIDER   = "ollama" | "openai" | "sampling" | "none"
+ *   DREAMGRAPH_LLM_PROVIDER   = "ollama" | "openai" | "anthropic" | "sampling" | "none"
  *   DREAMGRAPH_LLM_MODEL      = model name (default: depends on provider)
  *   DREAMGRAPH_LLM_URL        = API base URL (default: http://localhost:11434 for Ollama)
  *   DREAMGRAPH_LLM_API_KEY    = API key for OpenAI-compatible providers
@@ -34,7 +34,7 @@ import { logger } from "../utils/logger.js";
 // Core types
 // ---------------------------------------------------------------------------
 
-export type LlmProviderType = "ollama" | "openai" | "sampling" | "none";
+export type LlmProviderType = "ollama" | "openai" | "anthropic" | "sampling" | "none";
 
 export interface LlmConfig {
   provider: LlmProviderType;
@@ -265,6 +265,99 @@ class OpenAiCompatibleProvider implements LlmProvider {
 }
 
 // ---------------------------------------------------------------------------
+// Anthropic Provider — native Claude API
+// ---------------------------------------------------------------------------
+
+/**
+ * Native Anthropic Messages API provider.
+ * Uses /v1/messages endpoint with x-api-key auth and anthropic-version header.
+ * System messages are extracted and sent as the top-level `system` param.
+ */
+class AnthropicProvider implements LlmProvider {
+  readonly name = "anthropic";
+
+  constructor(
+    private baseUrl: string,
+    private model: string,
+    private apiKey: string,
+    private defaultTemperature: number,
+    private defaultMaxTokens: number,
+  ) {}
+
+  async isAvailable(): Promise<boolean> {
+    // Anthropic doesn't have a lightweight ping endpoint;
+    // just verify we have an API key configured.
+    return !!this.apiKey;
+  }
+
+  async complete(messages: LlmMessage[], options?: LlmCompletionOptions): Promise<LlmResponse> {
+    const temp = options?.temperature ?? this.defaultTemperature;
+    const maxTokens = options?.maxTokens ?? this.defaultMaxTokens;
+    const model = options?.model ?? this.model;
+
+    // Anthropic requires system messages as a top-level param, not in the messages array
+    const systemMessages = messages.filter(m => m.role === "system");
+    const nonSystemMessages = messages.filter(m => m.role !== "system");
+    const systemText = systemMessages.map(m => m.content).join("\n\n") || undefined;
+
+    const body: Record<string, unknown> = {
+      model,
+      max_tokens: maxTokens,
+      temperature: temp,
+      messages: nonSystemMessages.map(m => ({ role: m.role, content: m.content })),
+    };
+
+    if (systemText) {
+      body.system = systemText;
+    }
+
+    // Anthropic doesn't support OpenAI-style structured outputs or json_mode,
+    // but we can hint via a prefill trick: append an assistant message starting with "{"
+    // to encourage JSON output when jsonMode or jsonSchema is requested.
+    if (options?.jsonSchema || options?.jsonMode) {
+      // Add instruction to system message
+      const jsonHint = "\n\nYou MUST respond with valid JSON only. No markdown, no explanation — just the JSON object.";
+      if (body.system) {
+        body.system = (body.system as string) + jsonHint;
+      } else {
+        body.system = jsonHint.trim();
+      }
+    }
+
+    const res = await fetch(`${this.baseUrl}/messages`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": this.apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(120_000),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "unknown");
+      throw new Error(`Anthropic ${res.status}: ${errText}`);
+    }
+
+    const data = await res.json() as {
+      content?: Array<{ type: string; text?: string }>;
+      model?: string;
+      usage?: { output_tokens?: number };
+      stop_reason?: string;
+    };
+
+    const textBlock = data.content?.find(b => b.type === "text");
+    return {
+      text: textBlock?.text ?? "",
+      model: data.model ?? this.model,
+      tokensUsed: data.usage?.output_tokens,
+      stopReason: data.stop_reason,
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // MCP Sampling Provider — uses the connected client's LLM
 // ---------------------------------------------------------------------------
 
@@ -375,7 +468,7 @@ class NullProvider implements LlmProvider {
     throw new Error(
       "LLM provider not configured. Dreams require an LLM. " +
       "Set DREAMGRAPH_LLM_PROVIDER=ollama and ensure Ollama is running, " +
-      "or set DREAMGRAPH_LLM_PROVIDER=openai with DREAMGRAPH_LLM_API_KEY."
+      "or set DREAMGRAPH_LLM_PROVIDER=openai/anthropic with DREAMGRAPH_LLM_API_KEY."
     );
   }
 }
@@ -402,6 +495,11 @@ export function parseLlmConfig(): LlmConfig {
     case "openai":
       model = process.env.DREAMGRAPH_LLM_MODEL ?? "gpt-4o-mini";
       baseUrl = process.env.DREAMGRAPH_LLM_URL ?? "https://api.openai.com/v1";
+      apiKey = process.env.DREAMGRAPH_LLM_API_KEY ?? "";
+      break;
+    case "anthropic":
+      model = process.env.DREAMGRAPH_LLM_MODEL ?? "claude-sonnet-4-20250514";
+      baseUrl = process.env.DREAMGRAPH_LLM_URL ?? "https://api.anthropic.com/v1";
       apiKey = process.env.DREAMGRAPH_LLM_API_KEY ?? "";
       break;
     case "sampling":
@@ -518,6 +616,12 @@ export function initLlmProvider(cfg?: LlmConfig): LlmProvider {
         logger.warn("LLM: OpenAI provider configured but no API key set (DREAMGRAPH_LLM_API_KEY)");
       }
       _provider = new OpenAiCompatibleProvider(c.baseUrl, c.model, c.apiKey, c.temperature, c.maxTokens);
+      break;
+    case "anthropic":
+      if (!c.apiKey) {
+        logger.warn("LLM: Anthropic provider configured but no API key set (DREAMGRAPH_LLM_API_KEY)");
+      }
+      _provider = new AnthropicProvider(c.baseUrl, c.model, c.apiKey, c.temperature, c.maxTokens);
       break;
     case "sampling":
       _samplingProvider = new McpSamplingProvider();

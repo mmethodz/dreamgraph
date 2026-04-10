@@ -451,6 +451,20 @@ export type {
   ScheduleExecution,
   ScheduleFile,
   SchedulerConfig,
+  // v5.2 — Graph RAG Bridge (Knowledge Backbone)
+  EntitySimilarity,
+  TfIdfDocument,
+  GraphRAGMode,
+  GraphRAGQuery,
+  GraphRAGContext,
+  CognitivePreamble,
+  // v5.2 — Lucid Dreaming (Interactive Exploration)
+  LucidHypothesis,
+  LucidSignal,
+  LucidFindings,
+  LucidAction,
+  LucidResult,
+  LucidLogFile,
 } from "../cognitive/types.js";
 
 export {

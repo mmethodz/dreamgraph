@@ -1,10 +1,12 @@
 # DreamGraph Tools Reference
 
-> Complete catalog of all 57 MCP tools (23 cognitive + 25 general + 9 discipline) and 23 MCP resources.
+> Complete catalog of all 62 MCP tools (28 cognitive + 25 general + 9 discipline) and 25 MCP resources.
+
+The DreamGraph Architect actively calls these tools during conversations to build, query, enrich, and maintain the knowledge graph. Any MCP-compatible client can also invoke them directly.
 
 ---
 
-## Cognitive Tools (23)
+## Cognitive Tools (28)
 
 Registered in [src/cognitive/register.ts](../src/cognitive/register.ts). These operate the dream engine itself.
 
@@ -241,6 +243,49 @@ Retrieve execution history for a schedule or all schedules.
 | `schedule_id` | string | no | — | Filter by schedule ID |
 | `last_n` | number | no | 20 | Most recent N executions |
 
+### Knowledge Backbone (v5.2)
+
+#### `graph_rag_retrieve`
+
+Retrieve knowledge-graph context using TF-IDF entity resolution, BFS sub-graph extraction, and token-budgeted serialization.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `query` | string | yes | — | Natural-language query to resolve against the knowledge graph |
+| `mode` | enum | no | `comprehensive` | Retrieval mode: `entity_focused`, `tension_focused`, `narrative_focused`, `comprehensive` |
+| `maxTokens` | number | no | 2000 | Token budget for the serialized context window |
+
+#### `get_cognitive_preamble`
+
+Return a ready-to-inject LLM preamble summarizing the system's current cognitive state, active tensions, and recent dream history.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `maxTokens` | number | no | 2000 | Token budget for the preamble |
+
+#### `lucid_dream`
+
+Start a lucid dream session: propose a hypothesis and receive scoped exploration findings for interactive co-creation.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `hypothesis` | string | yes | Natural-language hypothesis to explore (e.g., "PaymentService depends on InventoryService via event bus") |
+
+#### `lucid_action`
+
+Interact with an active lucid dream session: accept findings as validated edges, reject them, or refine the hypothesis.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `action` | enum | yes | `accept`, `reject`, or `refine` |
+| `refinement` | string | no | New hypothesis text (required when action is `refine`) |
+
+#### `wake_from_lucid`
+
+End an active lucid dream session — persist accepted edges and return to AWAKE state.
+
+*No parameters.*
+
 ---
 
 ## General Tools (25)
@@ -411,7 +456,7 @@ Write a subjective AI insight into cognitive memory. Enters normal decay → nor
 
 #### `enrich_seed_data`
 
-Feed curated knowledge into the fact graph. The LLM reads source code (via code senses) and calls this tool to push structured entity data to the server. The server validates structure, merges by ID (upsert) or replaces entirely, strips template stubs, and rebuilds the resource index.
+Feed curated knowledge into the fact graph. The Architect reads source code (via code senses) and calls this tool to push structured entity data to the server. The server validates structure, merges by ID (upsert) or replaces entirely, strips template stubs, and rebuilds the resource index.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -692,7 +737,7 @@ Complete or abandon the active discipline session.
 
 ---
 
-## MCP Resources (23)
+## MCP Resources (25)
 
 | URI | Description |
 |-----|-------------|
@@ -711,6 +756,8 @@ Complete or abandon the active discipline session.
 | `dream://story` | Persistent system autobiography (v5.1) |
 | `dream://schedules` | Active dream schedules with status (v5.2) |
 | `dream://schedule-history` | Schedule execution history (v5.2) |
+| `dream://context` | Token-budgeted Graph RAG preamble — comprehensive mode, 2 000 tokens (v5.2) |
+| `dream://lucid` | Lucid dream session archive — all past hypotheses, findings, outcomes (v5.2) |
 | `discipline://manifest` | Tool classifications, phase permissions, data protection rules (v6.0 La Catedral) |
 
 Operational resources (registered via [src/tools/api-surface.ts](../src/tools/api-surface.ts)):

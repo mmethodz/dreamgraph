@@ -833,7 +833,7 @@ async function renderConfig(savedSection?: string): Promise<string> {
         <div class="form-row">
           <label>Provider</label>
           <select name="provider">
-            ${(["ollama", "openai", "sampling", "none"] as const).map(p =>
+            ${(["ollama", "openai", "anthropic", "sampling", "none"] as const).map(p =>
               `<option value="${p}" ${llmCfg.provider === p ? "selected" : ""}>${p}</option>`
             ).join("")}
           </select>

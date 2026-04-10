@@ -199,6 +199,22 @@ class CognitiveEngine {
     logger.info("Cognitive state: NIGHTMARE → AWAKE (adversarial scan complete)");
   }
 
+  /** Transition: AWAKE → LUCID (interactive exploration) */
+  enterLucid(): void {
+    this.assertState("awake", "enterLucid");
+    this.state = "lucid";
+    this.lastStateChange = new Date().toISOString();
+    logger.info("Cognitive state: AWAKE → LUCID (interactive exploration begins)");
+  }
+
+  /** Transition: LUCID → AWAKE (exploration complete) */
+  wakeFromLucid(): void {
+    this.assertState("lucid", "wakeFromLucid");
+    this.state = "awake";
+    this.lastStateChange = new Date().toISOString();
+    logger.info("Cognitive state: LUCID → AWAKE (interactive exploration complete)");
+  }
+
   /**
    * INTERRUPTION HANDLER
    *
@@ -215,7 +231,7 @@ class CognitiveEngine {
     logger.warn(`INTERRUPTION: Forcing wake from "${previousState}" state`);
 
     // Quarantine any in-progress dream data
-    if (previousState === "rem" || previousState === "nightmare") {
+    if (previousState === "rem" || previousState === "nightmare" || previousState === "lucid") {
       await this.quarantineDreams();
     }
 

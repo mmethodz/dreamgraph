@@ -1,0 +1,156 @@
+{
+  "name": "dreamgraph-vscode",
+  "displayName": "DreamGraph",
+  "description": "DreamGraph-native development agent — intentional context, architectural discipline, knowledge-grounded AI.",
+  "version": "0.1.0",
+  "publisher": "siteledger",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "categories": [
+    "AI",
+    "Other"
+  ],
+  "activationEvents": [
+    "workspaceContains:.vscode/settings.json",
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "dreamgraph.connect",
+        "title": "DreamGraph: Connect Instance"
+      },
+      {
+        "command": "dreamgraph.reconnect",
+        "title": "DreamGraph: Reconnect"
+      },
+      {
+        "command": "dreamgraph.switchInstance",
+        "title": "DreamGraph: Switch Instance"
+      },
+      {
+        "command": "dreamgraph.showStatus",
+        "title": "DreamGraph: Show Status"
+      },
+      {
+        "command": "dreamgraph.openDashboard",
+        "title": "DreamGraph: Open Dashboard"
+      },
+      {
+        "command": "dreamgraph.startDaemon",
+        "title": "DreamGraph: Start Daemon"
+      },
+      {
+        "command": "dreamgraph.stopDaemon",
+        "title": "DreamGraph: Stop Daemon"
+      },
+      {
+        "command": "dreamgraph.inspectContext",
+        "title": "DreamGraph: Inspect Context"
+      },
+      {
+        "command": "dreamgraph.explainFile",
+        "title": "DreamGraph: Explain File"
+      },
+      {
+        "command": "dreamgraph.checkAdrCompliance",
+        "title": "DreamGraph: Check ADR Compliance"
+      },
+      {
+        "command": "dreamgraph.openChat",
+        "title": "DreamGraph: Open Chat"
+      },
+      {
+        "command": "dreamgraph.setArchitectApiKey",
+        "title": "DreamGraph: Set Architect API Key"
+      }
+    ],
+    "configuration": {
+      "title": "DreamGraph",
+      "properties": {
+        "dreamgraph.instanceUuid": {
+          "type": "string",
+          "description": "UUID of the DreamGraph instance to connect to. Auto-detected from project root if not set."
+        },
+        "dreamgraph.daemonHost": {
+          "type": "string",
+          "default": "127.0.0.1",
+          "description": "DreamGraph daemon host."
+        },
+        "dreamgraph.daemonPort": {
+          "type": "number",
+          "description": "DreamGraph daemon HTTP port. Normally auto-detected from `dg status`; only set this to override."
+        },
+        "dreamgraph.healthCheckInterval": {
+          "type": "number",
+          "default": 10000,
+          "description": "Health check polling interval in milliseconds."
+        },
+        "dreamgraph.autoConnect": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically connect to DreamGraph instance on extension activation."
+        },
+        "dreamgraph.autoStartDaemon": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically start daemon if not running when connecting."
+        },
+        "dreamgraph.masterDir": {
+          "type": "string",
+          "default": "~/.dreamgraph",
+          "description": "Path to the DreamGraph master directory for instance discovery."
+        },
+        "dreamgraph.reconnectInterval": {
+          "type": "number",
+          "default": 30000,
+          "description": "Auto-reconnect interval in milliseconds after connection loss. Set to 0 to disable."
+        },
+        "dreamgraph.architect.provider": {
+          "type": "string",
+          "enum": [
+            "openai",
+            "anthropic",
+            "ollama"
+          ],
+          "description": "LLM provider for the Architect model."
+        },
+        "dreamgraph.architect.model": {
+          "type": "string",
+          "description": "Model name for the Architect (e.g., 'claude-opus-4-6-20250602')."
+        },
+        "dreamgraph.architect.baseUrl": {
+          "type": "string",
+          "description": "Base URL override for the Architect model provider."
+        },
+        "dreamgraph.architect.maxContextTokens": {
+          "type": "number",
+          "default": 16000,
+          "description": "Maximum token budget for Architect context assembly."
+        },
+        "dreamgraph.platform": {
+          "type": "string",
+          "description": "Target platform identifier for multi-platform projects."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p ./tsconfig.json",
+    "watch": "tsc -watch -p ./tsconfig.json",
+    "package": "vsce package",
+    "lint": "eslint src --ext ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.100.0",
+    "@vscode/vsce": "^3.7.1",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.1"
+  }
+}

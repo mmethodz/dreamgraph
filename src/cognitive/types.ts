@@ -27,8 +27,8 @@
 // Cognitive States
 // ---------------------------------------------------------------------------
 
-/** The four cognitive states the system can occupy */
-export type CognitiveStateName = "awake" | "rem" | "normalizing" | "nightmare";
+/** The five cognitive states the system can occupy */
+export type CognitiveStateName = "awake" | "rem" | "normalizing" | "nightmare" | "lucid";
 
 /** Dream generation strategies */
 export type DreamStrategy =
@@ -1822,3 +1822,165 @@ export const DEFAULT_SCHEDULER_CONFIG: SchedulerConfig = {
   max_history: 500,
   max_error_streak: 3,
 };
+
+// ===========================================================================
+// v5.2 — GRAPH RAG BRIDGE (Knowledge Backbone)
+// ===========================================================================
+
+/** Entity similarity result from TF-IDF matching */
+export interface EntitySimilarity {
+  entity_id: string;
+  /** Cosine similarity score (0–1) */
+  score: number;
+  /** Query terms that matched */
+  matched_terms: string[];
+}
+
+/** TF-IDF document entry for the in-memory index */
+export interface TfIdfDocument {
+  entity_id: string;
+  /** Combined text from name, description, keywords, domain */
+  text: string;
+  /** Pre-computed term frequency map */
+  tf: Map<string, number>;
+}
+
+/** Retrieval mode for Graph RAG queries */
+export type GraphRAGMode =
+  | "entity_focused"
+  | "tension_focused"
+  | "narrative_focused"
+  | "comprehensive";
+
+/** Input for the graph_rag_retrieve tool */
+export interface GraphRAGQuery {
+  /** Natural language query or entity reference */
+  query: string;
+  /** Retrieval strategy */
+  mode: GraphRAGMode;
+  /** Max tokens in output (default: 2000) */
+  token_budget: number;
+  /** BFS expansion depth from resolved entities (default: 2) */
+  depth: number;
+  /** Include active tensions in context (default: true) */
+  include_tensions: boolean;
+  /** Include narrative chapters in context (default: true) */
+  include_narrative: boolean;
+}
+
+/** Output of the graph_rag_retrieve tool */
+export interface GraphRAGContext {
+  /** Token-budgeted context string for LLM injection */
+  context_text: string;
+  /** Entity IDs included in context */
+  entities_included: string[];
+  /** Number of edges included */
+  edges_included: number;
+  /** Number of tensions included */
+  tensions_included: number;
+  /** Number of narrative chapters included */
+  narrative_chapters_included: number;
+  /** Approximate token count */
+  token_count: number;
+  /** Which mode was used */
+  retrieval_mode: GraphRAGMode;
+  /** Per-entity relevance scores */
+  relevance_scores: Array<{
+    entity_id: string;
+    score: number;
+  }>;
+}
+
+/** Cognitive preamble — compact system context for LLM injection */
+export interface CognitivePreamble {
+  /** One-paragraph system description from knowledge graph */
+  system_summary: string;
+  /** Top architectural relationships (highest confidence validated edges) */
+  key_architecture: string[];
+  /** Active tensions (top by urgency) */
+  open_questions: string[];
+  /** Recent cognitive activity (latest story chapters, one-liners) */
+  recent_insights: string[];
+  /** Approximate token count */
+  token_count: number;
+}
+
+// ===========================================================================
+// v5.2 — LUCID DREAMING (Interactive Exploration)
+// ===========================================================================
+
+/** A parsed hypothesis from human input */
+export interface LucidHypothesis {
+  id: string;
+  /** Original human input text */
+  raw_text: string;
+  /** Entity IDs extracted from the hypothesis */
+  parsed_entities: string[];
+  /** Inferred relationship type */
+  parsed_relationship: string;
+  created_at: string;
+}
+
+/** A signal discovered during lucid exploration */
+export interface LucidSignal {
+  id: string;
+  /** Whether the signal supports or contradicts the hypothesis */
+  type: "supporting" | "contradicting";
+  /** Where this signal was found */
+  source: "fact_graph" | "dream_graph" | "tension_log" | "causal_chain";
+  description: string;
+  confidence: number;
+  entities: string[];
+  /** What makes this signal valid */
+  evidence: string;
+}
+
+/** Findings from a lucid dream exploration */
+export interface LucidFindings {
+  hypothesis: LucidHypothesis;
+  supporting_signals: LucidSignal[];
+  contradictions: LucidSignal[];
+  related_tensions: TensionSignal[];
+  suggested_connections: DreamEdge[];
+  /** Overall assessment narrative */
+  confidence_assessment: string;
+  /** How many hops were explored */
+  exploration_depth: number;
+}
+
+/** An action the human takes during a lucid dream session */
+export interface LucidAction {
+  type: "dig_deeper" | "dismiss" | "accept" | "refine";
+  /** Signal or edge ID to act on */
+  target_id: string;
+  /** Human reasoning (for dismiss/refine) */
+  reason?: string;
+  /** New hypothesis text (for refine) */
+  refinement?: string;
+}
+
+/** Result of a complete lucid dream session */
+export interface LucidResult {
+  hypothesis: LucidHypothesis;
+  findings: LucidFindings;
+  actions_taken: LucidAction[];
+  /** Edges co-created by human + system */
+  edges_accepted: ValidatedEdge[];
+  contradictions_dismissed: Array<{
+    signal: LucidSignal;
+    human_reason: string;
+  }>;
+  session_duration_ms: number;
+  timestamp: string;
+}
+
+/** Persistent log of all lucid dream sessions */
+export interface LucidLogFile {
+  metadata: {
+    description: string;
+    schema_version: string;
+    total_sessions: number;
+    last_session: string | null;
+  };
+  sessions: LucidResult[];
+}

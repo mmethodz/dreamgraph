@@ -14,6 +14,8 @@
  *   dream://ui-registry— Semantic UI element registry
  *   dream://threats    — Adversarial scan results (threat log)
  *   dream://archetypes — Federated dream archetypes
+ *   dream://context    — Graph RAG knowledge context
+ *   dream://lucid      — Lucid dream session archive
  *
  * Tools (cognitive operations):
  *   dream_cycle               — Full dream → normalize → wake cycle
@@ -30,6 +32,11 @@
  *   import_dream_archetypes     — Federation: import patterns
  *   get_system_narrative        — Dream narrative / system autobiography
  *   get_remediation_plan        — Intervention: concrete fix plans
+ *   graph_rag_retrieve          — Graph RAG: knowledge context retrieval
+ *   get_cognitive_preamble      — Graph RAG: compact system preamble
+ *   lucid_dream                 — Lucid: start interactive exploration
+ *   lucid_action                — Lucid: interact with findings
+ *   wake_from_lucid             — Lucid: end session
  */
 
 import { z } from "zod";
@@ -48,6 +55,8 @@ import { generateNarrative, maybeAutoNarrate, generateDiffChapter, appendToStory
 import { runMetacognitiveAnalysis, getMetaLog } from "./metacognition.js";
 import { dispatchEvent, checkTensionThresholds, getEventLog } from "./event-router.js";
 import { generateRemediationPlans } from "./intervention.js";
+import { graphRagRetrieve, getCognitivePreamble } from "./graph-rag.js";
+import { startLucidDream, handleLucidAction, wakeFromLucid, getLucidLog } from "./lucid.js";
 import { updateInstanceCounters } from "../instance/index.js";
 import {
   createSchedule,
@@ -84,6 +93,11 @@ import type {
   DreamSchedule,
   ScheduleExecution,
   ScheduleFile,
+  GraphRAGContext,
+  CognitivePreamble,
+  LucidFindings,
+  LucidResult,
+  LucidLogFile,
 } from "../types/index.js";
 
 // ---------------------------------------------------------------------------
@@ -459,7 +473,62 @@ export function registerCognitiveResources(server: McpServer): void {
     }
   );
 
-  logger.info("Registered 15 cognitive resources");
+  // dream://context — Graph RAG context (comprehensive, 2000 tokens)
+  server.resource(
+    "dream-context",
+    "dream://context",
+    {
+      description:
+        "Graph RAG Context — token-budgeted knowledge context for LLM injection. Comprehensive mode: balanced mix of architecture overview, top tensions, and recent changes.",
+      mimeType: "application/json",
+    },
+    async (uri) => {
+      logger.debug(`Resource requested: ${uri.href}`);
+      const data = await graphRagRetrieve({
+        query: "system overview",
+        mode: "comprehensive",
+        token_budget: 2000,
+        depth: 2,
+        include_tensions: true,
+        include_narrative: true,
+      });
+      return {
+        contents: [
+          {
+            uri: uri.href,
+            mimeType: "application/json",
+            text: JSON.stringify(data, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  // dream://lucid — Lucid dream session archive
+  server.resource(
+    "dream-lucid",
+    "dream://lucid",
+    {
+      description:
+        "Lucid Dream Archive — all interactive exploration sessions: hypotheses, findings, actions taken, edges accepted, and contradictions dismissed.",
+      mimeType: "application/json",
+    },
+    async (uri) => {
+      logger.debug(`Resource requested: ${uri.href}`);
+      const data = await getLucidLog();
+      return {
+        contents: [
+          {
+            uri: uri.href,
+            mimeType: "application/json",
+            text: JSON.stringify(data, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  logger.info("Registered 17 cognitive resources");
 }
 
 // ---------------------------------------------------------------------------
@@ -2066,5 +2135,226 @@ export function registerCognitiveTools(server: McpServer): void {
     }
   );
 
-  logger.info("Registered 17 cognitive tools + 6 scheduler tools");
+  // =========================================================================
+  // graph_rag_retrieve — Knowledge graph RAG retrieval
+  // =========================================================================
+  server.tool(
+    "graph_rag_retrieve",
+    "Retrieve token-budgeted knowledge context from the DreamGraph for RAG injection. " +
+      "Resolves natural language queries to graph entities via TF-IDF similarity, " +
+      "extracts subgraphs via BFS expansion, ranks by relevance, and serializes " +
+      "within a configurable token budget. Modes: entity_focused (resolve + expand), " +
+      "tension_focused (top tensions + their entities), narrative_focused (recent " +
+      "story chapters + referenced entities), comprehensive (balanced overview).",
+    {
+      query: z
+        .string()
+        .describe("Natural language query or entity reference to retrieve context for."),
+      mode: z
+        .enum(["entity_focused", "tension_focused", "narrative_focused", "comprehensive"])
+        .optional()
+        .describe("Retrieval mode (default: comprehensive)."),
+      token_budget: z
+        .number()
+        .min(100)
+        .max(10000)
+        .optional()
+        .describe("Maximum tokens in output (default: 2000)."),
+      depth: z
+        .number()
+        .min(1)
+        .max(5)
+        .optional()
+        .describe("BFS expansion depth from resolved entities (default: 2)."),
+    },
+    async ({ query, mode, token_budget, depth }) => {
+      logger.info(`graph_rag_retrieve tool called: mode=${mode ?? "comprehensive"}, budget=${token_budget ?? 2000}`);
+
+      const result = await safeExecute<GraphRAGContext>(
+        async (): Promise<ToolResponse<GraphRAGContext>> => {
+          const context = await graphRagRetrieve({
+            query,
+            mode: mode ?? "comprehensive",
+            token_budget: token_budget ?? 2000,
+            depth: depth ?? 2,
+            include_tensions: true,
+            include_narrative: true,
+          });
+          return success(context);
+        }
+      );
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  // =========================================================================
+  // get_cognitive_preamble — Compact system summary for LLM injection
+  // =========================================================================
+  server.tool(
+    "get_cognitive_preamble",
+    "Generate a compact cognitive preamble for automatic LLM pre-prompt injection. " +
+      "Produces a concise system understanding summary: system description, top 5 " +
+      "architectural relationships, top 3 tensions, and recent cognitive insights. " +
+      "Designed for tight token budgets.",
+    {
+      max_tokens: z
+        .number()
+        .min(50)
+        .max(2000)
+        .optional()
+        .describe("Maximum tokens in preamble (default: 500)."),
+    },
+    async ({ max_tokens }) => {
+      logger.info(`get_cognitive_preamble tool called: max_tokens=${max_tokens ?? 500}`);
+
+      const result = await safeExecute<CognitivePreamble>(
+        async (): Promise<ToolResponse<CognitivePreamble>> => {
+          const preamble = await getCognitivePreamble(max_tokens ?? 500);
+          return success(preamble);
+        }
+      );
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  // =========================================================================
+  // lucid_dream — Start interactive exploration with a hypothesis
+  // =========================================================================
+  server.tool(
+    "lucid_dream",
+    "Start a lucid dream: enter the LUCID cognitive state to interactively explore " +
+      "a hypothesis. Parses the hypothesis to extract entity references and relationship " +
+      "types, then runs a scoped exploration — searching validated edges, dream graph, " +
+      "and tension log for supporting and contradicting signals. Returns interactive " +
+      "findings that you can act on with lucid_action. End with wake_from_lucid.",
+    {
+      hypothesis: z
+        .string()
+        .describe(
+          "A hypothesis to explore, e.g. 'payment-processing and notification-engine " +
+            "have an undiscovered dependency through the order lifecycle'."
+        ),
+    },
+    async ({ hypothesis }) => {
+      logger.info(`lucid_dream tool called: "${hypothesis.slice(0, 80)}..."`);
+
+      const result = await safeExecute<LucidFindings>(
+        async (): Promise<ToolResponse<LucidFindings>> => {
+          const findings = await startLucidDream(hypothesis);
+          return success(findings);
+        }
+      );
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  // =========================================================================
+  // lucid_action — Interact with lucid dream findings
+  // =========================================================================
+  server.tool(
+    "lucid_action",
+    "Perform an interactive action during a lucid dream session. " +
+      "Actions: dig_deeper (explore around a signal's entities at greater depth), " +
+      "dismiss (mark a contradiction as dismissed with human reasoning), " +
+      "accept (accept a suggested connection → creates a validated edge with authority 'human+system'), " +
+      "refine (update the hypothesis text and re-explore). " +
+      "Requires an active lucid session (started with lucid_dream).",
+    {
+      type: z
+        .enum(["dig_deeper", "dismiss", "accept", "refine"])
+        .describe("The action to perform on the lucid findings."),
+      target_id: z
+        .string()
+        .describe("ID of the signal, contradiction, or suggested edge to act on."),
+      reason: z
+        .string()
+        .optional()
+        .describe("Human reasoning (required for dismiss, optional for others)."),
+      refinement: z
+        .string()
+        .optional()
+        .describe("New hypothesis text (required for refine action)."),
+    },
+    async ({ type, target_id, reason, refinement }) => {
+      logger.info(`lucid_action tool called: ${type} on ${target_id}`);
+
+      const result = await safeExecute<LucidFindings>(
+        async (): Promise<ToolResponse<LucidFindings>> => {
+          const findings = await handleLucidAction({
+            type,
+            target_id,
+            reason,
+            refinement,
+          });
+          return success(findings);
+        }
+      );
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  // =========================================================================
+  // wake_from_lucid — End lucid dream session
+  // =========================================================================
+  server.tool(
+    "wake_from_lucid",
+    "End the current lucid dream session. Transitions from LUCID → AWAKE state. " +
+      "Persists any accepted edges to validated_edges.json (with authority: 'human+system'). " +
+      "Logs the full session to lucid_log.json. Returns the complete session result " +
+      "including all findings, actions taken, edges accepted, and contradictions dismissed.",
+    {},
+    async () => {
+      logger.info("wake_from_lucid tool called");
+
+      const result = await safeExecute<LucidResult>(
+        async (): Promise<ToolResponse<LucidResult>> => {
+          const lucidResult = await wakeFromLucid();
+          return success(lucidResult);
+        }
+      );
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  logger.info("Registered 17 cognitive tools + 6 scheduler tools + 5 knowledge backbone tools");
 }

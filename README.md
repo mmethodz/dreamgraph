@@ -6,9 +6,9 @@
 
 Traditional AI systems answer questions. DreamGraph reduces uncertainty over time — it finds, verifies, and resolves problems in your system autonomously.
 
-A self-regulating AI cognitive layer that discovers, abstracts, verifies, and resolves system-level insights through structured "dream cycles" — and now dreams adversarially, reasons causally, thinks temporally, narrates its own understanding, proposes concrete fixes, tunes its own thresholds, reacts to events, and writes its own autobiography. 
+A self-regulating AI cognitive layer that discovers, abstracts, verifies, and resolves system-level insights through structured "dream cycles" — and now dreams adversarially, reasons causally, thinks temporally, narrates its own understanding, plans and executes concrete fixes, tunes its own thresholds, reacts to events, and writes its own autobiography. 
 
-DreamGraph builds an abstract representation of system intent—acting as a universal architect capable of autonomous reasoning, system abstraction, and cross-ecosystem transcompilation.
+DreamGraph builds an abstract representation of system intent — powering an **Architect agent** that actively calls MCP tools to reason about, abstract, and maintain software systems.
 
 ---
 
@@ -37,13 +37,13 @@ DreamGraph is a cognitive layer for software systems that continuously discovers
 
 It is not a chatbot.
 
-It is a thinking layer that sits on top of your codebase and continuously:
+It is an active cognitive agent that operates on your codebase and continuously:
 
 ```
 detect → analyze → verify → resolve → learn → forget
 ```
 
-DreamGraph is an [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server. It connects to any MCP-compatible client — Claude Desktop, VS Code Copilot, Cursor, Windsurf, or anything that speaks MCP — and gives AI agents a persistent, evolving knowledge graph of your system.
+DreamGraph is an [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server. It connects to any MCP-compatible client — Claude Desktop, VS Code Copilot, Cursor, Windsurf, or anything that speaks MCP — and gives AI agents a persistent, evolving knowledge graph of your system. The built-in **DreamGraph Architect** is the primary agent: it calls MCP tools directly during conversations to build, enrich, and maintain the knowledge graph.
 
 ---
 
@@ -128,9 +128,9 @@ Not all ideas are immediately provable. The system retains latent hypotheses tha
 
 ---
 
-## The Twelve Capabilities
+## The Fourteen Capabilities
 
-DreamGraph provides twelve capabilities that take the system from "observant" to "truly intelligent."
+DreamGraph provides fourteen capabilities that take the system from "observant" to "truly intelligent."
 
 ### 1. Causal Reasoning Engine
 
@@ -150,6 +150,7 @@ A fourth cognitive state — **NIGHTMARE** — where the system actively tries t
 ```
 AWAKE → NIGHTMARE → AWAKE    (adversarial scan)
 AWAKE → REM → NORMALIZING → AWAKE    (normal dream cycle)
+AWAKE → LUCID → AWAKE    (interactive lucid exploration)
 ```
 
 Five adversarial scan strategies:
@@ -348,6 +349,41 @@ All configuration changes use POST-Redirect-GET (PRG) pattern for safe form subm
 - All timestamps displayed in UTC for consistency with the scheduler
 
 The dashboard is available at the daemon's HTTP port (same port as `/mcp`).
+
+### 13. Graph RAG Bridge (Knowledge Backbone)
+
+DreamGraph builds the most structured, validated representation of a software system in existence. The Graph RAG bridge exposes it as a **retrieval layer** for any LLM interaction — the knowledge graph becomes a universal context source.
+
+- **Entity-focused retrieval** — resolve entities by name or keyword, BFS-expand the neighborhood, return ranked context
+- **Tension-focused retrieval** — top tensions with their entities and relevant edges
+- **Narrative-focused retrieval** — recent story chapters with referenced entities
+- **Comprehensive retrieval** — balanced mix of architecture overview, top tensions, and recent changes
+- **Cognitive Preamble** — compact system understanding summary for automatic pre-prompt injection
+- **TF-IDF similarity** — lightweight entity resolution without external embedding services
+- **Token-budgeted serialization** — context is truncated to fit any LLM context window
+
+**Tools:** `graph_rag_retrieve`, `get_cognitive_preamble`
+**Resource:** `dream://context`
+
+### 14. Lucid Dreaming (Interactive Exploration)
+
+A fifth cognitive state — **LUCID** — where human intuition meets machine pattern-matching. The human proposes a hypothesis, DreamGraph explores it, and they co-create validated understanding.
+
+```
+AWAKE → LUCID → AWAKE    (interactive exploration)
+```
+
+Flow:
+1. Human proposes a hypothesis ("I think payment-processing and notification-engine have an undiscovered dependency")
+2. System enters LUCID state — parses hypothesis, extracts entities, scopes exploration
+3. System presents interactive findings: supporting signals, contradictions, related tensions, suggested connections
+4. Human interacts: `dig_deeper`, `dismiss`, `accept`, or `refine`
+5. System wakes with co-created result — accepted edges become validated with `authority: "human+system"`
+
+Safety: LUCID state cannot modify the fact graph (same isolation as REM). Sessions auto-timeout after 10 minutes. All sessions logged to `lucid_log.json`.
+
+**Tools:** `lucid_dream`, `lucid_action`, `wake_from_lucid`
+**Resource:** `dream://lucid`
 
 ---
 
@@ -584,7 +620,7 @@ The graph knew *what* the app does and *how* its components relate — not *how*
 
 - **Read-only by default** — no automatic code modification unless you enable write tools
 - **External data is non-authoritative** — cannot override internal evidence
-- **All outputs require human validation**
+- **Production changes require human validation** — the Architect enriches the knowledge graph autonomously but never modifies production code without explicit permission
 - **No write access without explicit permission**
 - Strict separation of: facts, hypotheses, and beliefs
 - **NIGHTMARE state** is read-only — adversarial scans identify threats but never modify code
@@ -894,10 +930,10 @@ You can also skip the manual data step entirely and just point the agent at your
 | `DREAMGRAPH_EVENTS` | No | JSON config for the event router: `{"tension_threshold": 0.8, "cooldown_ms": 60000, "max_auto_cycles_per_hour": 10, "runtime_error_threshold": 0.05}` |
 | `DREAMGRAPH_NARRATIVE` | No | JSON config for continuous narrative: `{"auto_narrate": true, "narrative_interval": 10, "digest_interval": 50, "max_chapters": 100}` |
 | `DREAMGRAPH_SCHEDULER` | No | JSON config for the dream scheduler (v5.2): `{"enabled": true, "tick_interval_ms": 30000, "max_runs_per_hour": 30, "cooldown_ms": 10000, "nightmare_cooldown_ms": 300000, "error_streak_pause_limit": 3}` |
-| `DREAMGRAPH_LLM_PROVIDER` | No | LLM provider: `"ollama"`, `"openai"`, `"sampling"`, `"none"` (default: `"ollama"`) |
-| `DREAMGRAPH_LLM_MODEL` | No | Model name (default: `qwen3:8b` for Ollama, `gpt-4o-mini` for OpenAI) |
+| `DREAMGRAPH_LLM_PROVIDER` | No | LLM provider: `"ollama"`, `"openai"`, `"anthropic"`, `"sampling"`, `"none"` (default: `"ollama"`) |
+| `DREAMGRAPH_LLM_MODEL` | No | Model name (default: `qwen3:8b` for Ollama, `gpt-4o-mini` for OpenAI, `claude-sonnet-4-20250514` for Anthropic) |
 | `DREAMGRAPH_LLM_URL` | No | API base URL (default: `http://localhost:11434` for Ollama) |
-| `DREAMGRAPH_LLM_API_KEY` | No | API key for OpenAI-compatible providers |
+| `DREAMGRAPH_LLM_API_KEY` | No | API key for OpenAI/Anthropic providers |
 | `DREAMGRAPH_LLM_TEMPERATURE` | No | Creativity parameter 0.0–1.0 (default: `0.7`). Higher values produce more creative but less predictable dreams. Recommended: `0.9` for cloud models with Structured Outputs. |
 | `DREAMGRAPH_LLM_MAX_TOKENS` | No | Max response tokens per dream cycle (default: `2048`). Higher values allow more edges per cycle but increase cost. |
 | `DREAMGRAPH_LLM_DREAMER_MODEL` | No | Override model for the Dreamer component (falls back to `DREAMGRAPH_LLM_MODEL`) |
@@ -934,7 +970,7 @@ None are required. Without `DREAMGRAPH_REPOS` (and no instance-mode repos), code
 ```
                 +--------------+
                 |   MCP Layer  |
-                | (57 tools)   |
+                | (62 tools)   |
                 +------+-------+
                        |
         +--------------v--------------+
@@ -942,7 +978,8 @@ None are required. Without `DREAMGRAPH_REPOS` (and no instance-mode repos), code
         |                             |
         |  AWAKE ──→ REM ──→ NORM ──→ AWAKE
         |    │                             |
-        |    └──→ NIGHTMARE ──→ AWAKE      |
+        |    ├──→ NIGHTMARE ──→ AWAKE      |
+        |    └──→ LUCID ──→ AWAKE          |
         |                             |
         |  - 10 dream strategies      |
         |  - 5 adversarial scans      |
@@ -998,7 +1035,8 @@ None are required. Without `DREAMGRAPH_REPOS` (and no instance-mode repos), code
 src/
 ├── cognitive/              # The dreaming engine (the core)
 │   ├── engine.ts           # State machine: AWAKE / REM / NORMALIZING / NIGHTMARE
-│   ├── dreamer.ts          # 10 dream strategies for edge generation (incl. LLM dream + PGO wave)\n│   ├── llm.ts              # LLM provider abstraction — Ollama, OpenAI, MCP Sampling, None
+│   ├── dreamer.ts          # 10 dream strategies for edge generation (incl. LLM dream + PGO wave)
+│   ├── llm.ts              # LLM provider abstraction — Ollama, OpenAI, Anthropic, MCP Sampling, None
 │   ├── normalizer.ts       # Three-outcome classifier (validate/latent/reject)
 │   ├── register.ts         # MCP tool + resource registration for cognitive layer
 │   ├── types.ts            # All cognitive type definitions
@@ -1009,9 +1047,11 @@ src/
 │   ├── narrator.ts         # Dream Narratives (system autobiography + continuous story)
 │   ├── intervention.ts     # Intervention Engine (remediation plans)
 │   ├── metacognition.ts    # Metacognitive Self-Tuning Engine
-│   ├── llm.ts              # LLM provider abstraction — Ollama, OpenAI, MCP Sampling, None
+│   ├── llm.ts              # LLM provider abstraction — Ollama, OpenAI, Anthropic, MCP Sampling, None
 │   ├── event-router.ts     # Event-Driven Dreaming (reactive cognition)
-│   └── scheduler.ts        # Dream Scheduler — instance-aware orchestration (v5.2→v6.0)
+│   ├── scheduler.ts        # Dream Scheduler — instance-aware orchestration (v5.2→v6.0)
+│   ├── graph-rag.ts        # Graph RAG Bridge — TF-IDF retrieval, token-budgeted context (v5.2)
+│   └── lucid.ts            # Lucid Dreaming — interactive hypothesis exploration (v5.2)
 ├── discipline/             # Self-imposed execution governance (v6.0 La Catedral)
 │   ├── types.ts            # Phase, tool class, protection, session types
 │   ├── state-machine.ts    # Five-phase state machine with transition rules
@@ -1064,6 +1104,8 @@ src/
 │   ├── search-data-model.ts # search_data_model
 │   ├── query-resource.ts   # query_resource
 │   └── api-surface.ts      # extract/query API surface + ops://api-surface resource
+├── api/
+│   └── routes.ts            # REST API endpoints for extension / HTTP clients (TDD §8.1)
 ├── resources/
 │   └── register.ts          # 6 system:// MCP resources
 ├── config/
@@ -1116,15 +1158,16 @@ data/                                   # Legacy mode (flat) or <instance>/data/
 ├── event_log.json          # [runtime] Cognitive event dispatch log
 ├── system_story.json       # [runtime] Persistent system autobiography
 ├── schedules.json          # [runtime] Dream scheduler persistence (v5.2)
+├── lucid_log.json          # [runtime] Lucid dream session archive (v5.2)
 ├── api_surface.json        # [runtime] Operational API surface (classes, methods, signatures)
 └── discipline_sessions/    # [runtime] Discipline session JSON files (v6.0 La Catedral)
 ```
 
 ---
 
-## MCP Tools (57 total)
+## MCP Tools (62 total)
 
-### Cognitive Tools (23)
+### Cognitive Tools (28)
 
 | Tool | Description |
 |---|---|
@@ -1151,6 +1194,11 @@ data/                                   # Legacy mode (flat) or <instance>/data/
 | `run_schedule_now` | Immediately execute a schedule, bypassing its trigger condition |
 | `delete_schedule` | Permanently remove a schedule |
 | `get_schedule_history` | Retrieve execution history for a schedule or all schedules |
+| `graph_rag_retrieve` | Retrieve token-budgeted knowledge context from the validated graph for LLM injection. Four modes: entity_focused, tension_focused, narrative_focused, comprehensive |
+| `get_cognitive_preamble` | Generate a compact system understanding summary — top architecture, open questions, recent insights — for automatic pre-prompt injection |
+| `lucid_dream` | Enter LUCID state with a hypothesis. System explores it and returns interactive findings: supporting signals, contradictions, suggested connections |
+| `lucid_action` | Interact during a lucid dream session: dig_deeper, dismiss, accept, or refine a finding |
+| `wake_from_lucid` | End the lucid dream session. Returns co-created results: accepted edges, dismissed contradictions, full session log |
 
 ### Sense & Knowledge Tools (17)
 
@@ -1201,7 +1249,7 @@ data/                                   # Legacy mode (flat) or <instance>/data/
 | `discipline_verify` | Generate a verification report with regression detection and compliance scoring |
 | `discipline_complete_session` | Complete or abandon the active session with final status |
 
-### MCP Resources (23)
+### MCP Resources (25)
 
 Read-only views the agent can inspect at any time:
 
@@ -1222,6 +1270,8 @@ Read-only views the agent can inspect at any time:
 | Story | `dream://story` | Persistent system autobiography — diff chapters, weekly digests, health trends |
 | Schedules | `dream://schedules` | Active dream schedules with status and next run time (v5.2) |
 | Schedule History | `dream://schedule-history` | Schedule execution history with outcomes (v5.2) |
+| Graph RAG Context | `dream://context` | Token-budgeted knowledge context for LLM injection — comprehensive mode (v5.2) |
+| Lucid Log | `dream://lucid` | Lucid dream session archive — hypotheses, findings, actions, results (v5.2) |
 | Discipline Manifest | `discipline://manifest` | Tool classifications, phase permissions, data protection rules (v6.0 La Catedral) |
 | API Surface | `ops://api-surface` | Full cached API surface — classes, functions, methods, properties with signatures. Operational layer (v6.2) |
 | System Overview | `system://overview` | High-level system description, repos, tech stack |
@@ -1256,33 +1306,33 @@ Strategies adapt over time. After 3 consecutive zero-yield cycles, a strategy is
 
 ## The Cognitive State Machine
 
-DreamGraph operates through four cognitive states with strict transition rules:
+DreamGraph operates through five cognitive states with strict transition rules:
 
 ```
-                    ┌──────────────────────────────────┐
-                    │                                  │
-                    ▼                                  │
-              ┌──────────┐                             │
-              │  AWAKE   │─────────────┐               │
-              └──────────┘             │               │
-                    │                  │               │
-              enterRem()         enterNightmare()      │
-                    │                  │               │
-                    ▼                  ▼               │
-              ┌──────────┐      ┌───────────┐         │
-              │   REM    │      │ NIGHTMARE │         │
-              └──────────┘      └───────────┘         │
-                    │                  │               │
-          enterNormalizing()   wakeFromNightmare()     │
-                    │                  │               │
-                    ▼                  │               │
-              ┌──────────────┐        │               │
-              │ NORMALIZING  │────────┘               │
-              └──────────────┘                        │
-                    │                                  │
-                  wake()                               │
-                    │                                  │
-                    └──────────────────────────────────┘
+                    ┌──────────────────────────────────────────┐
+                    │                                          │
+                    ▼                                          │
+              ┌──────────┐                                     │
+              │  AWAKE   │─────────────┐──────────┐            │
+              └──────────┘             │          │            │
+                    │                  │          │            │
+              enterRem()       enterNightmare() enterLucid()   │
+                    │                  │          │            │
+                    ▼                  ▼          ▼            │
+              ┌──────────┐    ┌───────────┐  ┌───────┐        │
+              │   REM    │    │ NIGHTMARE │  │ LUCID │        │
+              └──────────┘    └───────────┘  └───────┘        │
+                    │                │           │            │
+          enterNormalizing()  wakeFromN()  wakeFromLucid()    │
+                    │                │           │            │
+                    ▼                │           │            │
+              ┌──────────────┐       │           │            │
+              │ NORMALIZING  │───────┴───────────┘            │
+              └──────────────┘                                │
+                    │                                          │
+                  wake()                                       │
+                    │                                          │
+                    └──────────────────────────────────────────┘
 ```
 
 | State | Purpose | Safety |
@@ -1291,6 +1341,7 @@ DreamGraph operates through four cognitive states with strict transition rules:
 | **REM** | Speculative dreaming — generates candidate edges | Cannot modify fact graph |
 | **NORMALIZING** | Truth Filter — validates, promotes, or rejects dreams | Strict scoring gates |
 | **NIGHTMARE** | Adversarial scanning — actively tries to find vulnerabilities | Read-only threat analysis |
+| **LUCID** | Interactive hypothesis exploration — human + system co-creation | Same isolation as REM; human controls acceptance |
 
 An **interrupt** from any state returns safely to AWAKE with in-progress data quarantined.
 
@@ -1390,7 +1441,7 @@ After longer runs:
 
 ## What This Is NOT
 
-- Not a general AI agent
+- Not a general-purpose AI agent — the Architect is a specialized agent focused on knowledge graph construction, not arbitrary task execution
 - Not a replacement for developers
 - Not autonomous production code modification
 - Not always correct (requires human validation)
@@ -1407,7 +1458,7 @@ Core principles:
 - **Curiosity with limits** — explores broadly but respects the active tension cap
 - **Speculation with discipline** — dreams freely but validates with evidence
 - **Memory with forgetting** — retains what matters, decays what doesn't
-- **Autonomy with control** — runs independently but defers all decisions to humans
+- **Autonomy with control** — the Architect reasons and acts autonomously within tool boundaries, but defers final validation and production changes to humans
 - **Adversarial honesty** — actively tries to break its own conclusions
 - **Narrative coherence** — understanding should tell a story, not just accumulate data
 
@@ -1445,6 +1496,10 @@ This project introduces a cognitive model with the following primitives:
 | **LLM Dream** | An LLM-powered creative dream strategy — the LLM proposes connections that no structural algorithm would discover; the normalizer validates them |
 | **Engine Env** | Per-instance configuration file (`config/engine.env`) for LLM provider, API keys, and model settings — overrides global env vars |
 | **Web Dashboard** | Zero-dependency browser UI (v6.2) — server-side rendered HTML pages for cognitive status, schedule management, runtime configuration, and knowledge graph documentation. Served at the HTTP daemon's port alongside `/mcp` |
+| **Graph RAG** | Retrieval-Augmented Generation using the validated knowledge graph — token-budgeted context injection for any LLM interaction |
+| **Cognitive Preamble** | A compact system understanding summary (architecture + tensions + recent insights) for automatic pre-prompt injection |
+| **Lucid Dream** | An interactive exploration session where human and system co-create validated understanding from a hypothesis |
+| **Lucid Log** | Archive of all lucid dream sessions — hypotheses, findings, actions taken, and co-created results |
 
 You can think of DreamGraph as:
 

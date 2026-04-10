@@ -18,6 +18,7 @@
 
 import { createServer } from "./server/server.js";
 import { handleDashboardRoute, setDashboardContext } from "./server/dashboard.js";
+import { handleApiRoute } from "./api/routes.js";
 import { resolveInstanceAtStartup, updateInstanceCounters } from "./instance/index.js";
 import { engine } from "./cognitive/engine.js";
 import { initLlmProvider } from "./cognitive/llm.js";
@@ -211,6 +212,12 @@ async function startHTTP(port: number): Promise<void> {
         return;
       }
       // Fall through to dashboard for HTML rendering
+    }
+
+    // ---- /api/* — REST API endpoints for extension / HTTP clients ----
+    if (url.pathname.startsWith("/api/")) {
+      const handled = await handleApiRoute(req, res, url.pathname);
+      if (handled) return;
     }
 
     // ---- Dashboard pages: /, /status, /schedules, /config, /docs, /health --
