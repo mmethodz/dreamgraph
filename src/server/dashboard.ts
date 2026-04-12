@@ -1,5 +1,5 @@
 /**
- * DreamGraph v6.2 — Web Dashboard.
+ * DreamGraph v7.0 — Web Dashboard.
  *
  * Self-contained HTTP route handlers that render status, config,
  * and live documentation pages as HTML.  Zero external dependencies —
@@ -13,11 +13,14 @@
  *   POST /schedules  — Schedule actions (toggle, run, delete)
  *   GET  /config     — Active configuration with inline edit forms
  *   POST /config     — Apply configuration changes at runtime
- *   GET  /docs       — Live documentation from the knowledge graph
+ *   GET  /docs       — Native markdown viewer for docs/ folder
+ *   GET  /docs/:slug — Render a specific docs/*.md file
  *   GET  /health     — HTML health page (JSON available via Accept header)
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { readFile, readdir } from "node:fs/promises";
+import { resolve, basename, extname } from "node:path";
 import { config, updateDatabaseConnectionString } from "../config/config.js";
 import { engine } from "../cognitive/engine.js";
 import { getActiveScope, isInstanceMode, getToolCallCount } from "../instance/lifecycle.js";
@@ -127,7 +130,7 @@ function shell(title: string, body: string, activeTab: string): string {
   </nav>
   <main>${body}</main>
   <footer>
-    <span>${BRAND} v${VERSION} "La Catedral"</span>
+    <span>${BRAND} v${VERSION} "El Alarife"</span>
     <span>Instance: ${isInstanceMode() ? getActiveScope()!.uuid : "legacy"}</span>
     <span>Generated: ${new Date().toISOString()}</span>
   </footer>
@@ -310,7 +313,7 @@ async function renderIndex(): Promise<string> {
       </a>
       <a class="index-card" href="/docs">
         <h3>📖 Docs</h3>
-        <p>Live documentation from the knowledge graph — features, data model, workflows, capabilities.</p>
+        <p>Project documentation — architecture, cognitive engine, tools reference, data model, workflows.</p>
       </a>
       <a class="index-card" href="/health">
         <h3>💚 Health</h3>
@@ -1391,190 +1394,274 @@ async function handleRestartPost(res: ServerResponse): Promise<void> {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Route: GET /docs                                                  */
+/*  Route: GET /docs — Native Markdown Viewer                         */
 /* ------------------------------------------------------------------ */
 
-interface FeatureEntry {
-  id?: string;
-  name?: string;
-  category?: string;
-  description?: string;
-  status?: string;
-  [key: string]: unknown;
+/** Resolve the project-root docs/ directory from the active instance */
+function docsDir(): string {
+  const scope = getActiveScope();
+  if (scope?.projectRoot) {
+    return resolve(scope.projectRoot, "docs");
+  }
+  // Legacy / fallback: dataDir is typically <project>/data, so go up one level
+  return resolve(config.dataDir, "..", "docs");
 }
 
-interface WorkflowEntry {
-  id?: string;
-  name?: string;
-  description?: string;
-  steps?: Array<{ order: number; name: string; description?: string; [key: string]: unknown }>;
-  [key: string]: unknown;
+/**
+ * Zero-dependency Markdown → HTML converter.
+ * Handles: headings, paragraphs, fenced code blocks, inline code,
+ * bold, italic, links, images, unordered/ordered lists, tables,
+ * blockquotes, horizontal rules, and line breaks.
+ */
+function markdownToHtml(md: string): string {
+  const lines = md.split(/\r?\n/);
+  const out: string[] = [];
+  let i = 0;
+  let inList: "ul" | "ol" | null = null;
+
+  function closeList(): void {
+    if (inList) { out.push(`</${inList}>`); inList = null; }
+  }
+
+  function inline(text: string): string {
+    return text
+      // Images (must come before links)
+      .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img alt="$1" src="$2" style="max-width:100%">')
+      // Links
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
+      // Bold+italic
+      .replace(/\*\*\*(.+?)\*\*\*/g, "<strong><em>$1</em></strong>")
+      // Bold
+      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/__(.+?)__/g, "<strong>$1</strong>")
+      // Italic
+      .replace(/\*(.+?)\*/g, "<em>$1</em>")
+      .replace(/_(.+?)_/g, "<em>$1</em>")
+      // Inline code
+      .replace(/`([^`]+)`/g, "<code>$1</code>")
+      // Line break (two trailing spaces)
+      .replace(/  $/, "<br>");
+  }
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // Fenced code block
+    if (line.startsWith("```")) {
+      closeList();
+      const lang = line.slice(3).trim();
+      const codeLines: string[] = [];
+      i++;
+      while (i < lines.length && !lines[i].startsWith("```")) {
+        codeLines.push(lines[i]);
+        i++;
+      }
+      i++; // skip closing ```
+      const langAttr = lang ? ` data-lang="${esc(lang)}"` : "";
+      const langLabel = lang ? `<span class="code-lang">${esc(lang)}</span>` : "";
+      out.push(`<div class="code-block">${langLabel}<pre${langAttr}><code>${esc(codeLines.join("\n"))}</code></pre></div>`);
+      continue;
+    }
+
+    // Horizontal rule
+    if (/^(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
+      closeList();
+      out.push("<hr>");
+      i++;
+      continue;
+    }
+
+    // Heading
+    const headingMatch = line.match(/^(#{1,6})\s+(.+)$/);
+    if (headingMatch) {
+      closeList();
+      const level = headingMatch[1].length;
+      const text = headingMatch[2].replace(/\s+#+\s*$/, ""); // strip trailing #
+      const id = text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+      out.push(`<h${level} id="${id}">${inline(text)}</h${level}>`);
+      i++;
+      continue;
+    }
+
+    // Table (detect header row + separator)
+    if (i + 1 < lines.length && /^\|(.+)\|$/.test(line.trim()) && /^\|[-:\s|]+\|$/.test(lines[i + 1].trim())) {
+      closeList();
+      const parseRow = (row: string): string[] =>
+        row.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map(c => c.trim());
+      const headers = parseRow(line);
+      i += 2; // skip header + separator
+      out.push("<table><thead><tr>");
+      for (const h of headers) out.push(`<th>${inline(h)}</th>`);
+      out.push("</tr></thead><tbody>");
+      while (i < lines.length && /^\|(.+)\|$/.test(lines[i].trim())) {
+        const cells = parseRow(lines[i]);
+        out.push("<tr>");
+        for (let c = 0; c < headers.length; c++) {
+          out.push(`<td>${inline(cells[c] ?? "")}</td>`);
+        }
+        out.push("</tr>");
+        i++;
+      }
+      out.push("</tbody></table>");
+      continue;
+    }
+
+    // Blockquote
+    if (line.startsWith("> ") || line === ">") {
+      closeList();
+      const quoteLines: string[] = [];
+      while (i < lines.length && (lines[i].startsWith("> ") || lines[i] === ">")) {
+        quoteLines.push(lines[i].replace(/^>\s?/, ""));
+        i++;
+      }
+      out.push(`<blockquote>${markdownToHtml(quoteLines.join("\n"))}</blockquote>`);
+      continue;
+    }
+
+    // Unordered list
+    if (/^[-*+]\s+/.test(line)) {
+      if (inList !== "ul") { closeList(); out.push("<ul>"); inList = "ul"; }
+      out.push(`<li>${inline(line.replace(/^[-*+]\s+/, ""))}</li>`);
+      i++;
+      continue;
+    }
+
+    // Ordered list
+    if (/^\d+[.)]\s+/.test(line)) {
+      if (inList !== "ol") { closeList(); out.push("<ol>"); inList = "ol"; }
+      out.push(`<li>${inline(line.replace(/^\d+[.)]\s+/, ""))}</li>`);
+      i++;
+      continue;
+    }
+
+    // Blank line
+    if (line.trim() === "") {
+      closeList();
+      i++;
+      continue;
+    }
+
+    // Paragraph — collect consecutive non-empty lines
+    closeList();
+    const paraLines: string[] = [];
+    while (i < lines.length && lines[i].trim() !== "" && !lines[i].startsWith("#") && !lines[i].startsWith("```") && !lines[i].startsWith("> ") && !/^[-*+]\s+/.test(lines[i]) && !/^\d+[.)]\s+/.test(lines[i]) && !/^(-{3,}|\*{3,}|_{3,})\s*$/.test(lines[i]) && !/^\|(.+)\|$/.test(lines[i])) {
+      paraLines.push(lines[i]);
+      i++;
+    }
+    if (paraLines.length > 0) {
+      out.push(`<p>${paraLines.map(l => inline(l)).join("\n")}</p>`);
+    }
+  }
+
+  closeList();
+  return out.join("\n");
 }
 
-interface CapabilityEntry {
-  id?: string;
-  name?: string;
-  description?: string;
-  [key: string]: unknown;
+/** Additional CSS for the markdown viewer */
+const MD_CSS = `
+  .docs-layout { display: grid; grid-template-columns: 220px 1fr; gap: 32px; }
+  .docs-sidebar { position: sticky; top: 80px; align-self: start; }
+  .docs-sidebar a {
+    display: block; padding: 6px 12px; border-radius: 6px;
+    color: var(--text-dim); font-size: 13px; transition: all .15s;
+  }
+  .docs-sidebar a:hover { color: var(--text); background: var(--border); text-decoration: none; }
+  .docs-sidebar a.active { color: var(--accent); background: rgba(88,166,255,.1); font-weight: 600; }
+  .docs-content { min-width: 0; }
+  .docs-content h1 { font-size: 28px; margin-bottom: 8px; }
+  .docs-content h2 { font-size: 20px; margin: 28px 0 10px; }
+  .docs-content h3 { font-size: 16px; margin: 20px 0 8px; color: var(--text); }
+  .docs-content h4 { font-size: 14px; margin: 16px 0 6px; color: var(--text-dim); }
+  .docs-content p { margin: 8px 0; line-height: 1.65; }
+  .docs-content ul, .docs-content ol { margin: 8px 0 8px 24px; }
+  .docs-content li { margin: 4px 0; line-height: 1.6; }
+  .docs-content blockquote {
+    border-left: 3px solid var(--accent); margin: 12px 0; padding: 8px 16px;
+    background: rgba(88,166,255,.05); color: var(--text-dim);
+  }
+  .docs-content hr { border: none; border-top: 1px solid var(--border); margin: 24px 0; }
+  .docs-content table { margin: 12px 0; }
+  .docs-content img { border-radius: 6px; margin: 8px 0; }
+  .code-block { position: relative; margin: 12px 0; }
+  .code-block pre { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 14px; overflow-x: auto; font-size: 12px; }
+  .code-lang {
+    position: absolute; top: 4px; right: 8px; font-size: 10px;
+    color: var(--text-dim); text-transform: uppercase; letter-spacing: .05em;
+  }
+  @media (max-width: 720px) {
+    .docs-layout { grid-template-columns: 1fr; }
+    .docs-sidebar { position: static; display: flex; flex-wrap: wrap; gap: 4px; }
+  }
+`;
+
+/** Friendly display name from filename */
+function docTitle(filename: string): string {
+  const name = basename(filename, extname(filename));
+  if (name === "README") return "Overview";
+  return name
+    .replace(/-/g, " ")
+    .replace(/\b\w/g, c => c.toUpperCase());
+}
+
+/** Sort order for doc files — README first, then alphabetical */
+function docOrder(a: string, b: string): number {
+  if (a === "README.md") return -1;
+  if (b === "README.md") return 1;
+  return a.localeCompare(b);
+}
+
+async function getDocFiles(): Promise<string[]> {
+  try {
+    const entries = await readdir(docsDir());
+    return entries
+      .filter(f => f.endsWith(".md"))
+      .sort(docOrder);
+  } catch {
+    return [];
+  }
 }
 
 async function renderDocs(): Promise<string> {
-  // loadJsonArray handles missing files, wrapper objects, and non-array shapes
-  const features     = await loadJsonArray<FeatureEntry>("features.json");
-  const workflows    = await loadJsonArray<WorkflowEntry>("workflows.json");
-  const capabilities = await loadJsonArray<CapabilityEntry>("capabilities.json");
-  const dataModel    = await safeAsync<Record<string, unknown>>(
-    () => loadJsonData("data_model.json"),
-    {},
-  );
-
-  let body = `<h1>Live Documentation</h1>
-  <p style="color:var(--text-dim);margin-bottom:24px">
-    Generated from the running instance's knowledge graph. Read-only view of fact-layer data stores.
-  </p>`;
-
-  // ---- Capabilities ----
-  body += `<h2>Capabilities (${capabilities.length})</h2>`;
-  if (capabilities.length === 0) {
-    body += `<p class="empty">No capabilities in knowledge graph. Run <code>init_graph</code> or <code>enrich_seed_data</code>.</p>`;
-  } else {
-    body += `<table>
-      <tr><th>ID</th><th>Name</th><th>Description</th></tr>
-      ${capabilities.map(c => `<tr>
-        <td><code>${esc(c.id)}</code></td>
-        <td>${esc(c.name)}</td>
-        <td style="color:var(--text-dim)">${esc(c.description ?? "")}</td>
-      </tr>`).join("")}
-    </table>`;
+  const files = await getDocFiles();
+  if (files.length === 0) {
+    return shell("Docs", `<h1>Documentation</h1><p class="empty">No markdown files found in docs/ directory.</p>`, "docs");
   }
-
-  // ---- Features ----
-  body += `<h2>Features (${features.length})</h2>`;
-  if (features.length === 0) {
-    body += `<p class="empty">No features registered.</p>`;
-  } else {
-    // Group by category
-    const byCategory = new Map<string, FeatureEntry[]>();
-    for (const f of features) {
-      const cat = f.category || "uncategorized";
-      if (!byCategory.has(cat)) byCategory.set(cat, []);
-      byCategory.get(cat)!.push(f);
-    }
-    for (const [cat, items] of byCategory) {
-      body += `<h3>${esc(cat)} (${items.length})</h3>
-      <table>
-        <tr><th>ID</th><th>Name</th><th>Status</th><th>Description</th></tr>
-        ${items.map(f => `<tr>
-          <td><a href="/docs/feature?id=${escAttr(String(f.id ?? ""))}"><code>${esc(f.id)}</code></a></td>
-          <td><a href="/docs/feature?id=${escAttr(String(f.id ?? ""))}">${esc(f.name)}</a></td>
-          <td>${f.status ? statusBadge(f.status) : "—"}</td>
-          <td style="color:var(--text-dim)">${esc(truncate(f.description ?? "", 120))}</td>
-        </tr>`).join("")}
-      </table>`;
-    }
-  }
-
-  // ---- Workflows ----
-  body += `<h2>Workflows (${workflows.length})</h2>`;
-  if (workflows.length === 0) {
-    body += `<p class="empty">No workflows defined.</p>`;
-  } else {
-    for (const wf of workflows) {
-      body += `<div class="card" style="margin-bottom:12px">
-        <div class="card-title"><a href="/docs/workflow/${escAttr(String(wf.id ?? ""))}">${esc(wf.id)}</a></div>
-        <strong><a href="/docs/workflow/${escAttr(String(wf.id ?? ""))}">${esc(wf.name)}</a></strong>
-        ${wf.description ? `<p style="color:var(--text-dim);margin:4px 0">${esc(wf.description)}</p>` : ""}
-        ${wf.steps && wf.steps.length > 0 ? `
-          <table style="margin-top:8px">
-            <tr><th>#</th><th>Action</th><th>Description</th></tr>
-            ${wf.steps.map(s => `<tr><td>${s.order}</td><td>${esc(s.name)}</td><td style="color:var(--text-dim)">${esc(s.description ?? "")}</td></tr>`).join("")}
-          </table>
-        ` : ""}
-      </div>`;
-    }
-  }
-
-  // ---- Data Model ----
-  const modelEntries = Object.entries(dataModel);
-  body += `<h2>Data Model (${modelEntries.length} entries)</h2>`;
-  if (modelEntries.length === 0) {
-    body += `<p class="empty">No data model entries.</p>`;
-  } else {
-    // Link to each entity-specific view for inspection
-    body += `<table>
-      <tr><th>Entity</th><th>Inspect</th></tr>
-      ${modelEntries.map(([name]) => `<tr>
-        <td><code>${esc(name)}</code></td>
-        <td><a href="/docs/data-model/${escAttr(String(name))}">Open</a></td>
-      </tr>`).join("")}
-    </table>`;
-  }
-
-  return shell("Docs", body, "docs");
+  // Default to README.md
+  return renderDocFile(files[0], files);
 }
 
-/* ---- Detail views (link targets) ---------------------------------- */
+async function renderDocFile(filename: string, files?: string[]): Promise<string> {
+  if (!files) files = await getDocFiles();
 
-async function renderFeatureDetail(id: string): Promise<string> {
-  const features = await loadJsonArray<FeatureEntry>("features.json");
-  const f = features.find(x => String(x.id) === id);
-  if (!f) {
-    return shell("Feature Not Found", `<h1>Feature not found</h1><p>No feature with id <code>${esc(id)}</code>.</p><p><a href="/docs">Back to Docs</a></p>`, "docs");
+  // Security: only allow .md files from the docs dir
+  const safeName = basename(filename);
+  if (!safeName.endsWith(".md") || safeName.includes("..")) {
+    return shell("Not Found", `<h1>Not Found</h1><p><a href="/docs">Back to Docs</a></p>`, "docs");
   }
-  const srcs: string[] = Array.isArray((f as any).source_files) ? (f as any).source_files as string[] : [];
-  const rels: any[] = Array.isArray((f as any).relationships) ? (f as any).relationships as any[] : [];
-  let body = `<h1>Feature: ${esc(f.name ?? f.id)}</h1>
-  <p style="color:var(--text-dim)">${esc(f.description ?? "")}</p>
-  <table>
-    <tr><th>ID</th><td><code>${esc(f.id)}</code></td></tr>
-    <tr><th>Category</th><td>${esc((f as any).category ?? "—")}</td></tr>
-    <tr><th>Status</th><td>${(f as any).status ? statusBadge(String((f as any).status)) : "—"}</td></tr>
-  </table>`;
-  if (srcs.length > 0) {
-    body += `<h3>Source files</h3><ul>${srcs.map(s => `<li><code>${esc(s)}</code></li>`).join("")}</ul>`;
-  }
-  if (rels.length > 0) {
-    body += `<h3>Relationships</h3><pre><code>${esc(JSON.stringify(rels, null, 2))}</code></pre>`;
-  }
-  body += `<p style="margin-top:16px"><a href="/docs">Back to Docs</a></p>`;
-  return shell(`Feature: ${esc(String(f.id))}`, body, "docs");
-}
 
-async function renderWorkflowDetail(id: string): Promise<string> {
-  const workflows = await loadJsonArray<WorkflowEntry>("workflows.json");
-  const wf = workflows.find(x => String(x.id) === id);
-  if (!wf) {
-    return shell("Workflow Not Found", `<h1>Workflow not found</h1><p>No workflow with id <code>${esc(id)}</code>.</p><p><a href="/docs">Back to Docs</a></p>`, "docs");
+  let content: string;
+  try {
+    content = await readFile(resolve(docsDir(), safeName), "utf-8");
+  } catch {
+    return shell("Not Found", `<h1>File not found</h1><p><code>${esc(safeName)}</code> does not exist.</p><p><a href="/docs">Back to Docs</a></p>`, "docs");
   }
-  let body = `<h1>Workflow: ${esc(wf.name ?? wf.id)}</h1>
-  ${wf.description ? `<p style=\"color:var(--text-dim)\">${esc(wf.description)}</p>` : ""}
-  <table>
-    <tr><th>ID</th><td><code>${esc(wf.id)}</code></td></tr>
-  </table>`;
-  if (wf.steps && wf.steps.length > 0) {
-    body += `<h3>Steps</h3>
-      <table>
-        <tr><th>#</th><th>Name</th><th>Description</th></tr>
-        ${wf.steps.map(s => `<tr><td>${s.order}</td><td>${esc(s.name)}</td><td style=\"color:var(--text-dim)\">${esc(s.description ?? "")}</td></tr>`).join("")}
-      </table>`;
-  }
-  body += `<p style="margin-top:16px"><a href="/docs">Back to Docs</a></p>`;
-  return shell(`Workflow: ${esc(String(wf.id))}`, body, "docs");
-}
 
-async function renderDataModelEntity(name: string): Promise<string> {
-  const dataModel = await safeAsync<Record<string, unknown>>(
-    () => loadJsonData("data_model.json"),
-    {},
-  );
-  const entity = (dataModel as any)[name];
-  if (!entity) {
-    return shell("Entity Not Found", `<h1>Data Model entity not found</h1><p>No entity named <code>${esc(name)}</code>.</p><p><a href="/docs">Back to Docs</a></p>`, "docs");
-  }
-  const body = `<h1>Data Model: ${esc(name)}</h1>
-    <pre><code>${esc(JSON.stringify(entity, null, 2))}</code></pre>
-    <p style="margin-top:16px"><a href="/docs">Back to Docs</a></p>`;
-  return shell(`Data Model: ${esc(name)}`, body, "docs");
+  const sidebar = files.map(f => {
+    const active = f === safeName ? " active" : "";
+    return `<a href="/docs/${encodeURIComponent(basename(f, ".md"))}\" class="${active}">${docTitle(f)}</a>`;
+  }).join("\n");
+
+  const rendered = markdownToHtml(content);
+  const title = docTitle(safeName);
+
+  const body = `
+    <style>${MD_CSS}</style>
+    <div class="docs-layout">
+      <nav class="docs-sidebar">${sidebar}</nav>
+      <article class="docs-content">${rendered}</article>
+    </div>`;
+
+  return shell(`Docs: ${title}`, body, "docs");
 }
 
 /* ------------------------------------------------------------------ */
@@ -1635,31 +1722,18 @@ export async function handleDashboardRoute(
       case "/docs":
         html = await renderDocs();
         break;
-      case "/docs/feature": {
-        const url = new URL(req.url ?? "/", "http://localhost");
-        const id = url.searchParams.get("id");
-        if (!id) { html = shell("Feature", `<p>Missing id</p>`, "docs"); break; }
-        html = await renderFeatureDetail(id);
-        break;
-      }
-      case "/docs/workflow": {
-        const url = new URL(req.url ?? "/", "http://localhost");
-        const id = url.searchParams.get("id");
-        if (!id) { html = shell("Workflow", `<p>Missing id</p>`, "docs"); break; }
-        html = await renderWorkflowDetail(id);
-        break;
-      }
-      case "/docs/data-model": {
-        const url = new URL(req.url ?? "/", "http://localhost");
-        const name = url.searchParams.get("name");
-        if (!name) { html = shell("Data Model", `<p>Missing name</p>`, "docs"); break; }
-        html = await renderDataModelEntity(name);
-        break;
-      }
       case "/health":
         html = await renderHealth();
         break;
       default:
+        // /docs/:slug — render a specific markdown file
+        if (pathname.startsWith("/docs/")) {
+          const slug = decodeURIComponent(pathname.slice(6));
+          if (slug && !slug.includes("/") && !slug.includes("..")) {
+            html = await renderDocFile(`${slug}.md`);
+            break;
+          }
+        }
         return false;
     }
   } catch (err) {
