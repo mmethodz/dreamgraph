@@ -1465,8 +1465,8 @@ async function renderDocs(): Promise<string> {
       <table>
         <tr><th>ID</th><th>Name</th><th>Status</th><th>Description</th></tr>
         ${items.map(f => `<tr>
-          <td><code>${esc(f.id)}</code></td>
-          <td>${esc(f.name)}</td>
+          <td><a href="/docs/feature?id=${escAttr(String(f.id ?? ""))}"><code>${esc(f.id)}</code></a></td>
+          <td><a href="/docs/feature?id=${escAttr(String(f.id ?? ""))}">${esc(f.name)}</a></td>
           <td>${f.status ? statusBadge(f.status) : "—"}</td>
           <td style="color:var(--text-dim)">${esc(truncate(f.description ?? "", 120))}</td>
         </tr>`).join("")}
@@ -1481,8 +1481,8 @@ async function renderDocs(): Promise<string> {
   } else {
     for (const wf of workflows) {
       body += `<div class="card" style="margin-bottom:12px">
-        <div class="card-title">${esc(wf.id)}</div>
-        <strong>${esc(wf.name)}</strong>
+        <div class="card-title"><a href="/docs/workflow/${escAttr(String(wf.id ?? ""))}">${esc(wf.id)}</a></div>
+        <strong><a href="/docs/workflow/${escAttr(String(wf.id ?? ""))}">${esc(wf.name)}</a></strong>
         ${wf.description ? `<p style="color:var(--text-dim);margin:4px 0">${esc(wf.description)}</p>` : ""}
         ${wf.steps && wf.steps.length > 0 ? `
           <table style="margin-top:8px">
@@ -1500,10 +1500,81 @@ async function renderDocs(): Promise<string> {
   if (modelEntries.length === 0) {
     body += `<p class="empty">No data model entries.</p>`;
   } else {
-    body += `<pre><code>${esc(JSON.stringify(dataModel, null, 2))}</code></pre>`;
+    // Link to each entity-specific view for inspection
+    body += `<table>
+      <tr><th>Entity</th><th>Inspect</th></tr>
+      ${modelEntries.map(([name]) => `<tr>
+        <td><code>${esc(name)}</code></td>
+        <td><a href="/docs/data-model/${escAttr(String(name))}">Open</a></td>
+      </tr>`).join("")}
+    </table>`;
   }
 
   return shell("Docs", body, "docs");
+}
+
+/* ---- Detail views (link targets) ---------------------------------- */
+
+async function renderFeatureDetail(id: string): Promise<string> {
+  const features = await loadJsonArray<FeatureEntry>("features.json");
+  const f = features.find(x => String(x.id) === id);
+  if (!f) {
+    return shell("Feature Not Found", `<h1>Feature not found</h1><p>No feature with id <code>${esc(id)}</code>.</p><p><a href="/docs">Back to Docs</a></p>`, "docs");
+  }
+  const srcs: string[] = Array.isArray((f as any).source_files) ? (f as any).source_files as string[] : [];
+  const rels: any[] = Array.isArray((f as any).relationships) ? (f as any).relationships as any[] : [];
+  let body = `<h1>Feature: ${esc(f.name ?? f.id)}</h1>
+  <p style="color:var(--text-dim)">${esc(f.description ?? "")}</p>
+  <table>
+    <tr><th>ID</th><td><code>${esc(f.id)}</code></td></tr>
+    <tr><th>Category</th><td>${esc((f as any).category ?? "—")}</td></tr>
+    <tr><th>Status</th><td>${(f as any).status ? statusBadge(String((f as any).status)) : "—"}</td></tr>
+  </table>`;
+  if (srcs.length > 0) {
+    body += `<h3>Source files</h3><ul>${srcs.map(s => `<li><code>${esc(s)}</code></li>`).join("")}</ul>`;
+  }
+  if (rels.length > 0) {
+    body += `<h3>Relationships</h3><pre><code>${esc(JSON.stringify(rels, null, 2))}</code></pre>`;
+  }
+  body += `<p style="margin-top:16px"><a href="/docs">Back to Docs</a></p>`;
+  return shell(`Feature: ${esc(String(f.id))}`, body, "docs");
+}
+
+async function renderWorkflowDetail(id: string): Promise<string> {
+  const workflows = await loadJsonArray<WorkflowEntry>("workflows.json");
+  const wf = workflows.find(x => String(x.id) === id);
+  if (!wf) {
+    return shell("Workflow Not Found", `<h1>Workflow not found</h1><p>No workflow with id <code>${esc(id)}</code>.</p><p><a href="/docs">Back to Docs</a></p>`, "docs");
+  }
+  let body = `<h1>Workflow: ${esc(wf.name ?? wf.id)}</h1>
+  ${wf.description ? `<p style=\"color:var(--text-dim)\">${esc(wf.description)}</p>` : ""}
+  <table>
+    <tr><th>ID</th><td><code>${esc(wf.id)}</code></td></tr>
+  </table>`;
+  if (wf.steps && wf.steps.length > 0) {
+    body += `<h3>Steps</h3>
+      <table>
+        <tr><th>#</th><th>Name</th><th>Description</th></tr>
+        ${wf.steps.map(s => `<tr><td>${s.order}</td><td>${esc(s.name)}</td><td style=\"color:var(--text-dim)\">${esc(s.description ?? "")}</td></tr>`).join("")}
+      </table>`;
+  }
+  body += `<p style="margin-top:16px"><a href="/docs">Back to Docs</a></p>`;
+  return shell(`Workflow: ${esc(String(wf.id))}`, body, "docs");
+}
+
+async function renderDataModelEntity(name: string): Promise<string> {
+  const dataModel = await safeAsync<Record<string, unknown>>(
+    () => loadJsonData("data_model.json"),
+    {},
+  );
+  const entity = (dataModel as any)[name];
+  if (!entity) {
+    return shell("Entity Not Found", `<h1>Data Model entity not found</h1><p>No entity named <code>${esc(name)}</code>.</p><p><a href="/docs">Back to Docs</a></p>`, "docs");
+  }
+  const body = `<h1>Data Model: ${esc(name)}</h1>
+    <pre><code>${esc(JSON.stringify(entity, null, 2))}</code></pre>
+    <p style="margin-top:16px"><a href="/docs">Back to Docs</a></p>`;
+  return shell(`Data Model: ${esc(name)}`, body, "docs");
 }
 
 /* ------------------------------------------------------------------ */
@@ -1564,6 +1635,27 @@ export async function handleDashboardRoute(
       case "/docs":
         html = await renderDocs();
         break;
+      case "/docs/feature": {
+        const url = new URL(req.url ?? "/", "http://localhost");
+        const id = url.searchParams.get("id");
+        if (!id) { html = shell("Feature", `<p>Missing id</p>`, "docs"); break; }
+        html = await renderFeatureDetail(id);
+        break;
+      }
+      case "/docs/workflow": {
+        const url = new URL(req.url ?? "/", "http://localhost");
+        const id = url.searchParams.get("id");
+        if (!id) { html = shell("Workflow", `<p>Missing id</p>`, "docs"); break; }
+        html = await renderWorkflowDetail(id);
+        break;
+      }
+      case "/docs/data-model": {
+        const url = new URL(req.url ?? "/", "http://localhost");
+        const name = url.searchParams.get("name");
+        if (!name) { html = shell("Data Model", `<p>Missing name</p>`, "docs"); break; }
+        html = await renderDataModelEntity(name);
+        break;
+      }
       case "/health":
         html = await renderHealth();
         break;

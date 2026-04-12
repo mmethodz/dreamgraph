@@ -114,8 +114,14 @@ class CognitiveEngine {
       if (graph.metadata.total_cycles > 0) {
         this.totalDreamCycles = graph.metadata.total_cycles;
         this.lastDreamCycle = graph.metadata.last_dream_cycle;
+      }
+      if (graph.metadata.total_normalization_cycles > 0) {
+        this.totalNormalizationCycles = graph.metadata.total_normalization_cycles;
+        this.lastNormalization = graph.metadata.last_normalization;
+      }
+      if (this.totalDreamCycles > 0 || this.totalNormalizationCycles > 0) {
         logger.info(
-          `Cognitive engine hydrated: ${this.totalDreamCycles} prior dream cycles`
+          `Cognitive engine hydrated: ${this.totalDreamCycles} dream cycles, ${this.totalNormalizationCycles} normalization cycles`
         );
       }
     } catch {
@@ -335,6 +341,8 @@ class CognitiveEngine {
         schema_version: "1.0.0",
         last_dream_cycle: null,
         total_cycles: this.totalDreamCycles,
+        last_normalization: null,
+        total_normalization_cycles: this.totalNormalizationCycles,
         created_at: new Date().toISOString(),
       },
       nodes: [],
@@ -343,6 +351,10 @@ class CognitiveEngine {
   }
 
   async saveDreamGraph(data: DreamGraphFile): Promise<void> {
+    // Always sync both lifecycle counters into metadata before persisting
+    data.metadata.total_cycles = this.totalDreamCycles;
+    data.metadata.total_normalization_cycles = this.totalNormalizationCycles;
+    if (this.lastNormalization) data.metadata.last_normalization = this.lastNormalization;
     await writeFile(dreamGraphPath(), JSON.stringify(data, null, 2), "utf-8");
     logger.debug("Dream graph saved to disk");
   }

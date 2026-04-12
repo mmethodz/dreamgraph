@@ -535,6 +535,34 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
           if (isLocalTool(tc.name)) {
             // Local extension tool — execute directly in the VS Code host
             resultText = await executeLocalTool(tc.name, tc.input as Record<string, unknown>);
+
+            // ---- Detect local tool failures (they return JSON, never throw) ----
+            try {
+              const parsed = JSON.parse(resultText);
+              if (parsed.success === false) {
+                // Explicit failure (read_local_file ENOENT, modify_entity not found, etc.)
+                isError = true;
+                const errMsg = String(parsed.error ?? 'Unknown error');
+                if (errMsg.includes('not found') || errMsg.includes('ENOENT') || errMsg.includes('no such file')) {
+                  errorType = 'not_found';
+                } else if (errMsg.includes('permission') || errMsg.includes('EACCES')) {
+                  errorType = 'permission';
+                } else {
+                  errorType = 'unknown';
+                }
+                provenance.errors.push({ tool: tc.name, type: errorType, message: errMsg });
+              } else if (parsed.data?.timedOut) {
+                // run_command killed by timeout
+                isError = true;
+                errorType = 'timeout';
+                provenance.errors.push({ tool: tc.name, type: 'timeout', message: `Command timed out (exit ${parsed.data.exitCode})` });
+              } else if (tc.name === 'run_command' && parsed.data?.exitCode != null && parsed.data.exitCode !== 0) {
+                // Non-zero exit: mark as error so the LLM knows the command failed
+                isError = true;
+                errorType = 'command_failed';
+                provenance.errors.push({ tool: tc.name, type: 'command_failed', message: `exit ${parsed.data.exitCode}` });
+              }
+            } catch { /* result is not JSON — proceed as-is */ }
           } else {
             const result = await mcp.callTool(
               tc.name,
@@ -646,7 +674,8 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
             (errorType === 'timeout' ? `> **Suggestion:** Try with smaller scope or shallower depth\n` : '') +
             (errorType === 'not_found' ? `> **Suggestion:** Check file/entity path; use list_directory or search_data_model first\n` : '') +
             (errorType === 'ambiguity' ? `> **Suggestion:** Be more specific — use entity mode or provide exact file path\n` : '') +
-            (errorType === 'parsing' ? `> **Suggestion:** Check JSON format; the tool result may need different input\n` : '');
+            (errorType === 'parsing' ? `> **Suggestion:** Check JSON format; the tool result may need different input\n` : '') +
+            (errorType === 'command_failed' ? `> **Suggestion:** Check exit code; verify the command is valid for this OS\n` : '');
           aggregatedText += errorReport;
           emit(errorReport);
         } else {
@@ -911,9 +940,18 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       // run_command: summarise exit code + tail of relevant output
       if (toolName === 'run_command' && obj) {
         const exit = obj.exitCode ?? '?';
-        const out = (exit !== 0 && obj.stderr) ? String(obj.stderr) : String(obj.stdout ?? '');
+        const timedOut = obj.timedOut ? ' [TIMED OUT]' : '';
+        const out = (exit !== 0 && obj.stderr) ? String(obj.stderr) : String(obj.relevant ?? obj.stdout ?? '');
         const tail = out.split('\n').filter((l: string) => l.trim()).slice(-8).join('\n');
-        return `exit ${exit}${tail ? ' — ' + tail.slice(0, max - 20) : ''}`;
+        return `exit ${exit}${timedOut}${tail ? ' — ' + tail.slice(0, max - 30) : ''}`;
+      }
+
+      // read_local_file: show full file path and line range
+      if (toolName === 'read_local_file' && obj?.filePath) {
+        const fp = String(obj.filePath);
+        const range = obj.range ? ` L${obj.range}` : '';
+        const lines = obj.totalLines ? ` (${obj.totalLines} lines)` : '';
+        return `${fp}${range}${lines}`.slice(0, max);
       }
 
       // modify_entity / write_file: show result message
@@ -950,7 +988,7 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
 
       // Fallback: first 5 keys as key=value
       const keys = Object.keys(obj).slice(0, 5);
-      return keys.map(k => `${k}: ${JSON.stringify(obj[k]).slice(0, 60)}`).join(' · ').slice(0, max);
+      return keys.map(k => `${k}: ${JSON.stringify(obj[k]).slice(0, 120)}`).join(' · ').slice(0, max);
     } catch {
       // Not JSON — just trim the raw text
       return raw.length > max ? raw.slice(0, max) + '…' : raw;

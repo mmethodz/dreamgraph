@@ -302,6 +302,8 @@ export interface DreamGraphMetadata {
   schema_version: string;
   last_dream_cycle: string | null;
   total_cycles: number;
+  last_normalization: string | null;
+  total_normalization_cycles: number;
   created_at: string;
 }
 
