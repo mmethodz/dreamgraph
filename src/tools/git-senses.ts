@@ -224,9 +224,10 @@ export function registerGitSensesTools(server: McpServer): void {
           const { root } = resolved;
 
           // Build git args
+          // Note: --no-pager is a global git flag, not a log subcommand flag.
+          // Since we use execFile (no TTY), git won't paginate anyway.
           const args = [
             "log",
-            "--no-pager",
             "--format=" + LOG_FORMAT,
             "-n",
             String(limit),

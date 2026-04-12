@@ -188,6 +188,13 @@ export interface EditorContextEnvelope {
     activeTensions: number;
     cognitiveState: string;
     apiSurface: object | null;
+
+    /** Deep graph signals — the knowledge advantage over generic AI */
+    tensions: Array<{ id: string; description: string; severity: string; domain?: string }>;
+    dreamInsights: Array<{ type: string; insight: string; confidence: number; source?: string }>;
+    causalChains: Array<{ from: string; to: string; relationship: string; confidence: number }>;
+    temporalPatterns: Array<{ pattern: string; frequency: string; last_seen?: string }>;
+    dataModelEntities: Array<{ id: string; name: string; storage: string }>;
   } | null;
 
   intentMode: IntentMode;

@@ -2,7 +2,7 @@
   <img src="dreamgraph.jpeg" alt="DreamGraph - Autonomous Cognitive Layer" width="400" />
 </p>
 
-# DreamGraph v6.2 "La Catedral" — Autonomous Cognitive Layer for Software Systems
+# DreamGraph v7.0 "El Alarife" — Autonomous Cognitive Layer for Software Systems
 
 Traditional AI systems answer questions. DreamGraph reduces uncertainty over time — it finds, verifies, and resolves problems in your system autonomously.
 
@@ -44,6 +44,27 @@ detect → analyze → verify → resolve → learn → forget
 ```
 
 DreamGraph is an [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server. It connects to any MCP-compatible client — Claude Desktop, VS Code Copilot, Cursor, Windsurf, or anything that speaks MCP — and gives AI agents a persistent, evolving knowledge graph of your system. The built-in **DreamGraph Architect** is the primary agent: it calls MCP tools directly during conversations to build, enrich, and maintain the knowledge graph.
+
+---
+
+## Why DreamGraph — Not Another Coding Agent
+
+Generic AI coding agents read files and guess. DreamGraph reasons over a **knowledge graph** of features, workflows, data models, ADRs, UI elements, and validated relationships — then uses that understanding to enforce guard rails and execute changes safely.
+
+| | Generic coding agent | DreamGraph |
+|---|---|---|
+| **Source of truth** | Ad-hoc file reads | Knowledge graph (features, workflows, data models, ADRs, validated edges) |
+| **Reasoning** | Stateless per-prompt | Tension-driven: tracks gaps, risks, contradictions across sessions; promotes only evidence-backed connections |
+| **Guard rails** | None — does what you ask | ADR constraints, data-protection tiers, phase permissions — proposes compliant alternatives instead of violating architecture |
+| **Code operations** | File-wide string replace | Entity-specific reads/writes (`read_source_code(entity=...)`, `edit_entity`) — targeted, auditable, reversible |
+| **Memory** | Resets every conversation | Persistent graph + scheduled dream cycles + living documentation — context compounds over time |
+| **Scope** | Single file / function | System-level: cross-feature relationships, workflow dependencies, data-model evolution |
+
+**What this means in practice:**
+
+- **Better answers faster** — It doesn't re-derive context each prompt. The graph already encodes the relationships and constraints.
+- **Safer automation** — Guard rails + tensions + validated edges prevent speculative changes and surface real risks early.
+- **Less drift** — Every meaningful change updates the graph and the docs, so reasoning and documentation reflect reality.
 
 ---
 
@@ -634,14 +655,14 @@ The graph knew *what* the app does and *how* its components relate — not *how*
 Clone and install DreamGraph globally:
 
 ```bash
-git clone https://github.com/mikajussila/dreamgraph.git
+git clone https://github.com/mmethodz/dreamgraph.git
 cd dreamgraph
 npm install
 npm run build
 ```
 
 ```powershell
-# Windows — installs dg + dreamgraph shims to PATH
+# Windows -- installs dg + dreamgraph shims to PATH
 .\scripts\install.ps1
 
 # Linux / macOS
@@ -651,11 +672,13 @@ bash scripts/install.sh
 After installation, `dg` and `dreamgraph` are available globally:
 
 ```bash
-dg --version          # DreamGraph CLI v6.2.0 (La Catedral)
+dg --version          # DreamGraph CLI v7.0.0 (El Alarife)
 dreamgraph --help     # low-level server entry-point (dg wraps this)
 ```
 
 To upgrade later: `.\scripts\install.ps1 -Force` (Windows) or `bash scripts/install.sh --force` (Linux/macOS).
+
+> See [INSTALL.md](INSTALL.md) for detailed options, troubleshooting, uninstall, and custom install locations.
 
 ### 2. Create an instance
 
@@ -970,7 +993,7 @@ None are required. Without `DREAMGRAPH_REPOS` (and no instance-mode repos), code
 ```
                 +--------------+
                 |   MCP Layer  |
-                | (62 tools)   |
+                | (67 tools)   |
                 +------+-------+
                        |
         +--------------v--------------+
@@ -1087,11 +1110,11 @@ src/
 │       ├── stop.ts         # dg stop — graceful/forced shutdown
 │       └── restart.ts      # dg restart — atomic stop → start
 ├── tools/                  # MCP tools (senses)
-│   ├── code-senses.ts      # list_directory, read_source_code, create_file
+│   ├── code-senses.ts      # list_directory, read_source_code, create_file, edit_file, delete_file, rename_file
 │   ├── git-senses.ts       # git_log, git_blame
 │   ├── web-senses.ts       # fetch_web_page
 │   ├── db-senses.ts        # query_db_schema (lazy pg import for resilience)
-│   ├── runtime-senses.ts   # query_runtime_metrics (OpenTelemetry / Prometheus)
+│   ├── runtime-senses.ts   # query_runtime_metrics, query_self_metrics
 │   ├── solidify-insight.ts # solidify_cognitive_insight
 │   ├── enrich-seed-data.ts # enrich_seed_data (merge/replace seed data)
 │   ├── init-graph.ts       # init_graph (bootstrap knowledge graph from source)
@@ -1103,11 +1126,11 @@ src/
 │   ├── get-workflow.ts     # get_workflow
 │   ├── search-data-model.ts # search_data_model
 │   ├── query-resource.ts   # query_resource
-│   └── api-surface.ts      # extract/query API surface + ops://api-surface resource
+│   └── api-surface.ts      # extract/query/modify API surface + ops://api-surface resource
 ├── api/
 │   └── routes.ts            # REST API endpoints for extension / HTTP clients (TDD §8.1)
 ├── resources/
-│   └── register.ts          # 6 system:// MCP resources
+│   └── register.ts          # 7 system:// + ops:// MCP resources
 ├── config/
 │   └── config.ts            # Environment-driven configuration + env var parsing
 ├── server/
@@ -1121,6 +1144,7 @@ src/
     ├── errors.ts            # Error handling + response factories
     ├── logger.ts            # Stderr logger (protects STDIO stream)
     ├── mutex.ts             # Async file mutex with instance-aware key resolver
+    ├── metrics.ts           # Runtime instrumentation — tool calls, failures, symbol misses, file hotspots
     └── paths.ts             # Lazy dataPath() utility for instance-aware paths
 scripts/
 ├── install.ps1              # Windows PowerShell global installer
@@ -1165,7 +1189,7 @@ data/                                   # Legacy mode (flat) or <instance>/data/
 
 ---
 
-## MCP Tools (62 total)
+## MCP Tools (67 total)
 
 ### Cognitive Tools (28)
 
@@ -1200,13 +1224,16 @@ data/                                   # Legacy mode (flat) or <instance>/data/
 | `lucid_action` | Interact during a lucid dream session: dig_deeper, dismiss, accept, or refine a finding |
 | `wake_from_lucid` | End the lucid dream session. Returns co-created results: accepted edges, dismissed contradictions, full session log |
 
-### Sense & Knowledge Tools (17)
+### Sense & Knowledge Tools (21)
 
 | Tool | Description |
 |---|---|
 | `list_directory` | Browse source code directories in configured repos |
 | `read_source_code` | Read source files with optional line range |
 | `create_file` | Create or overwrite files inside configured repos (auto-creates parent directories) |
+| `edit_file` | Find-and-replace in existing files. Matches exactly one occurrence of `old_text` |
+| `delete_file` | Delete a file inside a configured repository |
+| `rename_file` | Move or rename a file within a configured repository |
 | `git_log` | Commit history for a file or directory |
 | `git_blame` | Per-line authorship for a file |
 | `query_db_schema` | Live PostgreSQL schema queries (lazy pg import — server starts even without `pg` module) |
@@ -1219,8 +1246,10 @@ data/                                   # Legacy mode (flat) or <instance>/data/
 | `search_data_model` | Search for a data entity by name |
 | `query_resource` | Query features, workflows, or data model with filters |
 | `query_runtime_metrics` | Fetch and correlate live runtime metrics (OpenTelemetry / Prometheus) |
+| `query_self_metrics` | DreamGraph's own runtime instrumentation: tool call counts, failures, symbol misses, file-read hotspots |
 | `extract_api_surface` | Extract programmatic API surface from source files (regex-based). Supports Python, TypeScript, JavaScript, C#. Incremental by default |
-| `query_api_surface` | Look up the exact callable surface for a class, function, or module with inheritance resolution |
+| `query_api_surface` | Look up the exact callable surface for a class, function, or module with inheritance resolution. Use `include_source=true` to get actual code inline (replaces `read_source_code`) |
+| `modify_api_surface` | Insert, update, or delete an API surface entry (class, function, method, property) with module auto-creation. Pull → modify → push workflow |
 
 ### Documentation Intelligence Tools (8)
 

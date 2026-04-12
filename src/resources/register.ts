@@ -19,6 +19,7 @@ import type {
   Capabilities,
   ResourceIndex,
 } from "../types/index.js";
+import { getMetricsSnapshot } from "../utils/metrics.js";
 
 export function registerResources(server: McpServer): void {
   // -----------------------------------------------------------------------
@@ -263,4 +264,34 @@ export function registerResources(server: McpServer): void {
   );
 
   logger.info("Registered 6 resources");
+
+  // -----------------------------------------------------------------------
+  // ops://metrics — Runtime instrumentation snapshot
+  // -----------------------------------------------------------------------
+  server.resource(
+    "runtime-metrics",
+    "ops://metrics",
+    {
+      description:
+        "Live runtime instrumentation snapshot: tool call counts, failure rates, " +
+        "symbol lookup misses, file-read hotspots, dream strategy performance. " +
+        "Resets on server restart.",
+      mimeType: "application/json",
+    },
+    async (uri) => {
+      logger.debug(`Resource requested: ${uri.href}`);
+      const snapshot = getMetricsSnapshot();
+      return {
+        contents: [
+          {
+            uri: uri.href,
+            mimeType: "application/json",
+            text: JSON.stringify(snapshot, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  logger.info("Registered 7 resources (including ops://metrics)");
 }

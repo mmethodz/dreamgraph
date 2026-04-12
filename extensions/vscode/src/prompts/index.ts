@@ -74,7 +74,7 @@ function formatContextBlock(envelope: EditorContextEnvelope): string {
     parts.push(`- **Unsaved files:** ${envelope.changedFiles.join(", ")}`);
   }
 
-  // Graph context
+  // Graph context — the core knowledge advantage
   if (envelope.graphContext) {
     const gc = envelope.graphContext;
     parts.push("");
@@ -93,11 +93,62 @@ function formatContextBlock(envelope: EditorContextEnvelope): string {
     if (gc.uiPatterns.length > 0) {
       parts.push(`- **UI patterns:** ${gc.uiPatterns.join(", ")}`);
     }
-    if (gc.activeTensions > 0) {
-      parts.push(`- **Active tensions:** ${gc.activeTensions}`);
-    }
     if (gc.apiSurface) {
       parts.push(`- **API surface:** available`);
+    }
+
+    // ---- Deep Graph Signals ----
+    // These are the knowledge edges that make DreamGraph superior to generic AI.
+    // The Architect starts the conversation already knowing the tensions,
+    // insights, and causal relationships around the current code.
+
+    if (gc.tensions && gc.tensions.length > 0) {
+      parts.push("");
+      parts.push("### Active Tensions");
+      parts.push("*(Architectural or design conflicts the graph has detected)*");
+      for (const t of gc.tensions.slice(0, 5)) {
+        const sev = t.severity === "high" ? "🔴" : t.severity === "medium" ? "🟡" : "🟢";
+        parts.push(`- ${sev} **[${t.severity}]** ${t.description}${t.domain ? ` _(${t.domain})_` : ""}`);
+      }
+      if (gc.tensions.length > 5) {
+        parts.push(`- _(${gc.tensions.length - 5} more tensions)_`);
+      }
+    }
+
+    if (gc.dreamInsights && gc.dreamInsights.length > 0) {
+      parts.push("");
+      parts.push("### Dream Insights");
+      parts.push("*(Discoveries from cognitive dream cycles — patterns, risks, opportunities)*");
+      for (const i of gc.dreamInsights.slice(0, 5)) {
+        const conf = (i.confidence * 100).toFixed(0);
+        parts.push(`- 💡 **[${i.type}]** ${i.insight} _(${conf}% confidence${i.source ? `, source: ${i.source}` : ""})_`);
+      }
+    }
+
+    if (gc.causalChains && gc.causalChains.length > 0) {
+      parts.push("");
+      parts.push("### Causal Chains");
+      parts.push("*(Known cause-effect relationships in the system)*");
+      for (const c of gc.causalChains.slice(0, 8)) {
+        parts.push(`- \`${c.from}\` → *${c.relationship}* → \`${c.to}\` (${(c.confidence * 100).toFixed(0)}%)`);
+      }
+    }
+
+    if (gc.temporalPatterns && gc.temporalPatterns.length > 0) {
+      parts.push("");
+      parts.push("### Temporal Patterns");
+      parts.push("*(Recurring patterns the graph has observed over time)*");
+      for (const p of gc.temporalPatterns.slice(0, 5)) {
+        parts.push(`- 🔄 ${p.pattern} — frequency: ${p.frequency}${p.last_seen ? ` (last: ${p.last_seen})` : ""}`);
+      }
+    }
+
+    if (gc.dataModelEntities && gc.dataModelEntities.length > 0) {
+      parts.push("");
+      parts.push("### Related Data Model Entities");
+      for (const e of gc.dataModelEntities.slice(0, 5)) {
+        parts.push(`- \`${e.id}\`: ${e.name} (${e.storage})`);
+      }
     }
   }
 

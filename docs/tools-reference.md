@@ -1,6 +1,6 @@
 # DreamGraph Tools Reference
 
-> Complete catalog of all 62 MCP tools (28 cognitive + 25 general + 9 discipline) and 25 MCP resources.
+> Complete catalog of all 67 MCP tools (28 cognitive + 30 general + 9 discipline) and 26 MCP resources.
 
 The DreamGraph Architect actively calls these tools during conversations to build, query, enrich, and maintain the knowledge graph. Any MCP-compatible client can also invoke them directly.
 
@@ -288,7 +288,7 @@ End an active lucid dream session — persist accepted edges and return to AWAKE
 
 ---
 
-## General Tools (25)
+## General Tools (30)
 
 Registered in [src/tools/register.ts](../src/tools/register.ts). These provide I/O, visualization, documentation, and operational knowledge capabilities.
 
@@ -322,6 +322,36 @@ Create or overwrite a file. Auto-creates parent directories.
 |-----------|------|----------|-------------|
 | `filePath` | string | yes | File path |
 | `content` | string | yes | File content |
+| `repo` | string | no | Repo name |
+
+#### `edit_file`
+
+Find-and-replace in an existing file. `old_text` must match exactly one location.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `filePath` | string | yes | File path |
+| `old_text` | string | yes | Exact text to find (include context for uniqueness) |
+| `new_text` | string | yes | Replacement text (empty string = delete) |
+| `repo` | string | no | Repo name |
+
+#### `delete_file`
+
+Delete a file inside a configured repository.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `filePath` | string | yes | File path |
+| `repo` | string | no | Repo name |
+
+#### `rename_file`
+
+Move or rename a file. Auto-creates destination parent directories.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `oldPath` | string | yes | Current file path |
+| `newPath` | string | yes | New file path |
 | `repo` | string | no | Repo name |
 
 ---
@@ -390,6 +420,14 @@ Live observability metrics. Requires `DREAMGRAPH_RUNTIME_ENDPOINT`.
 |-----------|------|---------|-------------|
 | `entity_filter` | string | — | Specific entity ID |
 | `include_correlations` | boolean | true | Behavioral correlation analysis |
+
+#### `query_self_metrics`
+
+DreamGraph's own runtime instrumentation: tool call counts, failure rates, symbol lookup misses, file-read hotspots, dream strategy performance. No external endpoint needed.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `flush_to_disk` | boolean | false | Persist snapshot to `data/metrics_snapshot.json` |
 
 ---
 
@@ -627,6 +665,21 @@ Return the exact callable/programmatic surface for a class, function, or module.
 | `detail_level` | enum | `"full"` | `summary`, `signatures_only`, `full` |
 | `platform` | string | — | Platform filter (e.g., `python-port`) |
 | `language` | enum | `"any"` | Language filter: `any`, `python`, `typescript`, `javascript`, `csharp` |
+| `include_source` | boolean | `false` | When true, attach actual source code snippets (~2 KB each) for every method/function. Eliminates the need for separate `read_source_code` calls |
+
+#### `modify_api_surface`
+
+Insert, update, or delete an entry in the API surface. Use to inject hand-curated knowledge, correct extraction errors, or add entries that regex extraction missed. Entries are addressed by `module_path` + `entry_type` + `entry_name` (+ `class_name` for methods/properties). Modules are auto-created when upserting into a path that doesn't exist yet.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `action` | enum | — | **Required.** `upsert` (insert-or-replace) or `delete` |
+| `module_path` | string | — | **Required.** File path relative to repo root (e.g., `src/tools/api-surface.ts`) |
+| `entry_type` | enum | — | **Required.** `class`, `function`, `method`, or `property` |
+| `entry_name` | string | — | **Required.** Name of entity to modify |
+| `class_name` | string | — | Required when `entry_type` is `method` or `property` — the owning class |
+| `entry_data` | string (JSON) | — | JSON object representing the entity. Required for `upsert`. Schema depends on `entry_type` |
+| `language` | string | `"typescript"` | Language tag for auto-created modules |
 
 ---
 
@@ -737,7 +790,7 @@ Complete or abandon the active discipline session.
 
 ---
 
-## MCP Resources (25)
+## MCP Resources (26)
 
 | URI | Description |
 |-----|-------------|
@@ -764,7 +817,8 @@ Operational resources (registered via [src/tools/api-surface.ts](../src/tools/ap
 
 | URI | Description |
 |-----|-------------|
-| `ops://api-surface` | Full cached API surface extracted from source files — classes, functions, methods, properties with signatures. Read-only. Populated by `extract_api_surface`, queried by `query_api_surface` |
+| `ops://api-surface` | Full cached API surface extracted from source files — classes, functions, methods, properties with signatures. Read-only. Populated by `extract_api_surface`, modified by `modify_api_surface`, queried by `query_api_surface` |
+| `ops://metrics` | Live runtime instrumentation snapshot: tool call counts, failure rates, symbol lookup misses, file-read hotspots, dream strategy performance. Resets on server restart |
 
 System resources (registered in [src/resources/register.ts](../src/resources/register.ts)):
 

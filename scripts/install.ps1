@@ -1,4 +1,4 @@
-#!/usr/bin/env pwsh
+﻿#!/usr/bin/env pwsh
 <#
 .SYNOPSIS
     Install DreamGraph globally to ~/.dreamgraph/bin/
@@ -28,18 +28,18 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# ── Config ──────────────────────────────────────────────────────────
+# -- Config ----------------------------------------------------------
 $DGHome         = if ($env:DREAMGRAPH_MASTER_DIR) { $env:DREAMGRAPH_MASTER_DIR } else { Join-Path $env:USERPROFILE ".dreamgraph" }
 $BinDir         = Join-Path $DGHome "bin"
 $DistTarget     = Join-Path $BinDir "dist"
 $TemplateTarget = Join-Path $DGHome "templates"
 
-# ── Helpers ─────────────────────────────────────────────────────────
+# -- Helpers ---------------------------------------------------------
 function Write-Step([string]$msg) { Write-Host "`n$msg" -ForegroundColor Cyan }
-function Write-Ok([string]$msg)   { Write-Host "  $msg `u{2713}" -ForegroundColor Green }
+function Write-Ok([string]$msg)   { Write-Host "  $msg (ok)" -ForegroundColor Green }
 function Write-Warn([string]$msg) { Write-Host "  WARNING: $msg" -ForegroundColor Yellow }
 
-# ── Prerequisites ───────────────────────────────────────────────────
+# -- Prerequisites ---------------------------------------------------
 Write-Step "Checking prerequisites..."
 
 $nodeVersion = & node --version 2>$null
@@ -61,7 +61,7 @@ if (-not $npmVersion) {
 }
 Write-Ok "npm $npmVersion"
 
-# ── Validate source ────────────────────────────────────────────────
+# -- Validate source ------------------------------------------------
 $packageJsonPath = Join-Path $SourceDir "package.json"
 if (-not (Test-Path $packageJsonPath)) {
     Write-Error "No package.json found at $SourceDir. Is this the DreamGraph repo?"
@@ -76,7 +76,7 @@ if ($pkg.name -ne "dreamgraph") {
 $version = $pkg.version
 Write-Ok "DreamGraph v$version source at $SourceDir"
 
-# ── Check existing install ─────────────────────────────────────────
+# -- Check existing install -----------------------------------------
 if ((Test-Path $DistTarget) -and -not $Force) {
     $existingVersion = "unknown"
     $versionFile = Join-Path $BinDir "version.json"
@@ -91,7 +91,7 @@ if ((Test-Path $DistTarget) -and -not $Force) {
     }
 }
 
-# ── Build ──────────────────────────────────────────────────────────
+# -- Build ----------------------------------------------------------
 Write-Step "Building DreamGraph..."
 Push-Location $SourceDir
 try {
@@ -114,7 +114,7 @@ if (-not (Test-Path $SourceDist)) {
     exit 1
 }
 
-# ── Deploy ─────────────────────────────────────────────────────────
+# -- Deploy ---------------------------------------------------------
 Write-Step "Deploying to $BinDir..."
 
 # Create bin directory
@@ -171,7 +171,7 @@ try {
     Pop-Location
 }
 
-# ── Templates ─────────────────────────────────────────────────────
+# -- Templates -----------------------------------------------------
 $sourceTemplates = Join-Path $SourceDir "templates"
 if (Test-Path $sourceTemplates) {
     if (-not (Test-Path $TemplateTarget)) {
@@ -182,7 +182,79 @@ if (Test-Path $sourceTemplates) {
     }
 }
 
-# ── Version file ───────────────────────────────────────────────────
+# -- VS Code Extension ----------------------------------------------
+$codeCmd = Get-Command code -ErrorAction SilentlyContinue
+if ($codeCmd) {
+    Write-Step "Installing VS Code extension..."
+    $ExtSourceDir = Join-Path $SourceDir "extensions\vscode"
+    $ExtPkgJson  = Join-Path $ExtSourceDir "package.json"
+    if (Test-Path $ExtPkgJson) {
+        $extPkg  = Get-Content $ExtPkgJson -Raw | ConvertFrom-Json
+        $extId   = "$($extPkg.publisher).$($extPkg.name)-$($extPkg.version)"
+        $ExtDest = Join-Path $env:USERPROFILE ".vscode\extensions\$extId"
+
+        Push-Location $ExtSourceDir
+        try {
+            # Install all dependencies (vsce is a devDependency)
+            $prevPref = $ErrorActionPreference
+            $ErrorActionPreference = "SilentlyContinue"
+            & npm install 2>&1 | Out-Null
+            & npm run build 2>&1 | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
+            $ErrorActionPreference = $prevPref
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warn "Extension build failed -- skipping VS Code extension install"
+            } else {
+                Write-Ok "Extension built"
+
+                # Try VSIX package + code --install-extension (instant activation)
+                $vsixInstalled = $false
+                $vscePath = Join-Path $ExtSourceDir "node_modules\.bin\vsce.cmd"
+                $prevPref2 = $ErrorActionPreference
+                $ErrorActionPreference = "SilentlyContinue"
+                if (Test-Path $vscePath) {
+                    & $vscePath package --no-dependencies 2>&1 | Where-Object { $_ -match 'DONE|Packaged' } | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
+                    $vsix = Get-ChildItem -Filter "*.vsix" -Path $ExtSourceDir | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+                    if ($vsix) {
+                        & code --install-extension $vsix.FullName --force 2>&1 | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
+                        if ($LASTEXITCODE -eq 0) {
+                            $vsixInstalled = $true
+                            Write-Ok "Extension installed via VSIX"
+                            # Install runtime deps into the deployed extension directory
+                            Push-Location $ExtDest
+                            & npm install --omit=dev 2>&1 | Out-Null
+                            Pop-Location
+                            Write-Ok "Runtime dependencies installed"
+                        }
+                        Remove-Item $vsix.FullName -Force -ErrorAction SilentlyContinue
+                    }
+                }
+
+                # Fallback: manual deploy to extensions directory
+                if (-not $vsixInstalled) {
+                    New-Item -ItemType Directory -Path "$ExtDest\dist" -Force | Out-Null
+                    Copy-Item -Path "dist\*" -Destination "$ExtDest\dist\" -Recurse -Force
+                    Copy-Item -Path "package.json" -Destination "$ExtDest\package.json" -Force
+                    # Copy node_modules for runtime dependencies (@modelcontextprotocol/sdk)
+                    & npm install --omit=dev 2>&1 | Out-Null
+                    if (Test-Path "node_modules") {
+                        Copy-Item -Path "node_modules" -Destination "$ExtDest\node_modules" -Recurse -Force
+                    }
+                    Write-Ok "Extension deployed to $ExtDest"
+                    Write-Warn "Reload VS Code (Ctrl+Shift+P > Reload Window) to activate"
+                }
+                $ErrorActionPreference = $prevPref2
+            }
+        } finally {
+            Pop-Location
+        }
+    } else {
+        Write-Warn "Extension source not found at $ExtSourceDir -- skipping"
+    }
+} else {
+    Write-Host "  VS Code not found in PATH -- skipping extension install" -ForegroundColor DarkGray
+}
+
+# -- Version file ---------------------------------------------------
 $versionInfo = [ordered]@{
     version      = $version
     installed_at = (Get-Date -Format o)
@@ -191,7 +263,7 @@ $versionInfo = [ordered]@{
 } | ConvertTo-Json
 Set-Content -Path (Join-Path $BinDir "version.json") -Value $versionInfo -Encoding UTF8
 
-# ── Create shims ──────────────────────────────────────────────────
+# -- Create shims --------------------------------------------------
 Write-Step "Creating command shims..."
 
 # .cmd shims for CMD.exe
@@ -222,7 +294,7 @@ Set-Content -Path (Join-Path $BinDir "dreamgraph.ps1") -Value $serverPs1 -Encodi
 
 Write-Ok "Shims created (dg.cmd, dg.ps1, dreamgraph.cmd, dreamgraph.ps1)"
 
-# ── PATH setup ────────────────────────────────────────────────────
+# -- PATH setup ----------------------------------------------------
 Write-Step "Configuring PATH..."
 
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
@@ -241,7 +313,7 @@ if ($userPath -notlike "*$BinDir*") {
 # Update current session so verify works
 $env:Path = "$BinDir;$env:Path"
 
-# ── Verify ─────────────────────────────────────────────────────────
+# -- Verify ---------------------------------------------------------
 Write-Step "Verifying installation..."
 try {
     $output = & node (Join-Path $DistTarget "cli/dg.js") --version 2>&1
@@ -250,7 +322,7 @@ try {
     Write-Warn "Verification failed: $_"
 }
 
-# ── Summary ─────────────────────────────────────────────────────────
+# -- Summary ---------------------------------------------------------
 Write-Host ""
 Write-Host ("=" * 50) -ForegroundColor Green
 Write-Host " DreamGraph v$version installed successfully!" -ForegroundColor Green

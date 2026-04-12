@@ -36,6 +36,7 @@ import { updateConfig as updateEventConfig, getConfig as getEventConfig } from "
 import { updateNarrativeConfig, getNarrativeConfig } from "../cognitive/narrator.js";
 import { testDbConnection, resetDbPool } from "../tools/db-senses.js";
 import { loadJsonData, loadJsonArray } from "../utils/cache.js";
+import { writeEngineEnv } from "../utils/engine-env.js";
 import { logger } from "../utils/logger.js";
 
 /* ------------------------------------------------------------------ */
@@ -48,6 +49,46 @@ interface DashboardContext {
 }
 
 let _ctx: DashboardContext = { getSessionCount: () => 0, port: 8100 };
+
+/**
+ * Persist the current LLM configuration (base + dreamer + normalizer)
+ * to the instance's engine.env so it survives daemon restarts.
+ */
+function persistLlmEngineEnv(): void {
+  const scope = getActiveScope();
+  if (!scope) {
+    logger.warn("persistLlmEngineEnv: no active scope — config not persisted");
+    return;
+  }
+
+  const base = getLlmConfig();
+  const dreamer = getDreamerLlmConfig();
+  const normalizer = getNormalizerLlmConfig();
+
+  // For API key: check both in-memory config and process.env (engine.env loader).
+  // This prevents the key from being lost when the provider changes (e.g. ollama→openai).
+  const effectiveApiKey = base.apiKey || process.env.DREAMGRAPH_LLM_API_KEY || "";
+
+  const vars: Record<string, string> = {
+    // Base provider
+    DREAMGRAPH_LLM_PROVIDER: base.provider,
+    DREAMGRAPH_LLM_MODEL: base.model,
+    DREAMGRAPH_LLM_URL: base.baseUrl,
+    DREAMGRAPH_LLM_API_KEY: effectiveApiKey,
+    DREAMGRAPH_LLM_TEMPERATURE: String(base.temperature),
+    DREAMGRAPH_LLM_MAX_TOKENS: String(base.maxTokens),
+    // Dreamer overrides
+    DREAMGRAPH_LLM_DREAMER_MODEL: dreamer.model,
+    DREAMGRAPH_LLM_DREAMER_TEMPERATURE: String(dreamer.temperature),
+    DREAMGRAPH_LLM_DREAMER_MAX_TOKENS: String(dreamer.maxTokens),
+    // Normalizer overrides
+    DREAMGRAPH_LLM_NORMALIZER_MODEL: normalizer.model,
+    DREAMGRAPH_LLM_NORMALIZER_TEMPERATURE: String(normalizer.temperature),
+    DREAMGRAPH_LLM_NORMALIZER_MAX_TOKENS: String(normalizer.maxTokens),
+  };
+
+  writeEngineEnv(scope.engineEnvPath, vars);
+}
 
 /**
  * Provide runtime context that only index.ts knows (sessions, port).
@@ -87,7 +128,7 @@ function shell(title: string, body: string, activeTab: string): string {
   <main>${body}</main>
   <footer>
     <span>${BRAND} v${VERSION} "La Catedral"</span>
-    <span>Instance: ${isInstanceMode() ? getActiveScope()!.uuid.slice(0, 8) + "…" : "legacy"}</span>
+    <span>Instance: ${isInstanceMode() ? getActiveScope()!.uuid : "legacy"}</span>
     <span>Generated: ${new Date().toISOString()}</span>
   </footer>
 </body>
@@ -192,6 +233,12 @@ const CSS = `
   .config-form input:focus, .config-form select:focus { border-color: var(--accent); outline: none; }
   .config-form .form-actions { padding-top: 12px; display: flex; gap: 8px; }
   .config-form .unit { color: var(--text-dim); font-size: 11px; min-width: 30px; }
+  .api-key-wrap { display: flex; align-items: center; flex: 1; max-width: 320px; gap: 6px; }
+  .api-key-wrap input { flex: 1; max-width: none; }
+  .api-key-toggle { background: var(--bg); border: 1px solid var(--border); color: var(--text-dim);
+    border-radius: 4px; padding: 4px 8px; font-size: 11px; cursor: pointer; white-space: nowrap; }
+  .api-key-toggle:hover { border-color: var(--accent); color: var(--text); }
+  .api-key-mask { font-family: var(--mono); font-size: 11px; color: var(--text-dim); margin-left: 4px; }
   .btn {
     padding: 6px 16px; border: 1px solid var(--border); border-radius: 6px;
     font-size: 12px; font-weight: 600; cursor: pointer; transition: all .15s;
@@ -244,7 +291,7 @@ async function renderIndex(): Promise<string> {
       <h1>🧠 ${BRAND}</h1>
       <p>Autonomous Cognitive Layer for Software Systems</p>
       <p style="margin-top: 4px">${isInstanceMode()
-        ? `Instance <code>${scope!.uuid.slice(0, 8)}…</code> · Project: <strong>${esc(projectName)}</strong>`
+        ? `Instance <code style="user-select:all">${scope!.uuid}</code> · Project: <strong>${esc(projectName)}</strong>`
         : "Running in legacy mode (no instance isolation)"
       }</p>
     </div>
@@ -305,7 +352,7 @@ async function renderStatus(): Promise<string> {
     <div class="card">
       <div class="card-title">Tool Calls</div>
       <div class="card-value">${getToolCallCount()}</div>
-      <div class="card-sub">${isInstanceMode() ? `Instance ${scope!.uuid.slice(0, 8)}…` : "Legacy mode"}</div>
+      <div class="card-sub" style="user-select:all;font-size:11px">${isInstanceMode() ? scope!.uuid : "Legacy mode"}</div>
     </div>
   </div>`;
 
@@ -332,7 +379,54 @@ async function renderStatus(): Promise<string> {
 
   // ---- Validation Stats ----
   const vs = status.validated_stats;
-  body += `<h2>Validation Pipeline</h2>
+  const ts = status.tension_stats;
+
+  // Pie chart data: validated, tensions, rejected
+  const pieValidated = vs.validated ?? 0;
+  const pieTensions  = ts.unresolved ?? 0;
+  const pieRejected  = vs.rejected ?? 0;
+  const pieTotal     = pieValidated + pieTensions + pieRejected;
+
+  // Build conic-gradient stops (percentages)
+  let pieChart = "";
+  if (pieTotal > 0) {
+    const pctV = (pieValidated / pieTotal) * 100;
+    const pctT = (pieTensions  / pieTotal) * 100;
+    // pctR is the remainder
+    const stopV = pctV;
+    const stopT = stopV + pctT;
+    pieChart = `
+    <div style="display:flex;align-items:center;gap:32px;margin:16px 0 8px">
+      <div style="
+        width:140px;height:140px;border-radius:50%;flex-shrink:0;
+        background:conic-gradient(
+          var(--green) 0% ${stopV.toFixed(1)}%,
+          var(--yellow) ${stopV.toFixed(1)}% ${stopT.toFixed(1)}%,
+          var(--red) ${stopT.toFixed(1)}% 100%
+        );
+        -webkit-mask:radial-gradient(circle,transparent 45%,#000 46%);
+        mask:radial-gradient(circle,transparent 45%,#000 46%);
+      "></div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="width:12px;height:12px;border-radius:2px;background:var(--green);display:inline-block"></span>
+          <span>Validated <strong>${pieValidated}</strong> <span style="color:var(--text-dim)">(${pctV.toFixed(0)}%)</span></span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="width:12px;height:12px;border-radius:2px;background:var(--yellow);display:inline-block"></span>
+          <span>Tensions <strong>${pieTensions}</strong> <span style="color:var(--text-dim)">(${pctT.toFixed(0)}%)</span></span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="width:12px;height:12px;border-radius:2px;background:var(--red);display:inline-block"></span>
+          <span>Rejected <strong>${pieRejected}</strong> <span style="color:var(--text-dim)">(${(100 - pctV - pctT).toFixed(0)}%)</span></span>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  body += `<h2>Validation Pipeline</h2>`;
+  body += pieChart;
+  body += `
   <div class="grid">
     <div class="card"><div class="card-title">Validated</div><div class="card-value" style="color:var(--green)">${vs.validated}</div></div>
     <div class="card"><div class="card-title">Latent</div><div class="card-value" style="color:var(--yellow)">${vs.latent}</div></div>
@@ -340,7 +434,6 @@ async function renderStatus(): Promise<string> {
   </div>`;
 
   // ---- Tensions ----
-  const ts = status.tension_stats;
   body += `<h2>Tensions</h2>`;
   if (ts.total === 0) {
     body += `<p class="empty">No tensions recorded yet.</p>`;
@@ -412,7 +505,7 @@ async function renderHealth(): Promise<string> {
     { name: "Cognitive Engine", ok: true, detail: status.current_state.toUpperCase() },
     { name: "HTTP Sessions", ok: true, detail: `${sessions} active` },
     { name: "LLM Provider", ok: status.llm?.available ?? false, detail: `${llmCfg.provider} / ${llmCfg.model || "—"}` },
-    { name: "Instance", ok: isInstanceMode(), detail: isInstanceMode() ? getActiveScope()!.uuid.slice(0, 8) + "…" : "legacy" },
+    { name: "Instance", ok: isInstanceMode(), detail: isInstanceMode() ? getActiveScope()!.uuid : "legacy" },
   ];
 
   const allOk = checks.every(c => c.ok);
@@ -822,6 +915,21 @@ async function renderConfig(savedSection?: string): Promise<string> {
   }
 
   // ---- LLM (combined — Provider / Dreamer / Normalizer) ----
+
+  // Pre-compute API key HTML — avoids nested template literal issues
+  const effectiveApiKey = llmCfg.apiKey || process.env.DREAMGRAPH_LLM_API_KEY || "";
+  const hasApiKey = effectiveApiKey.length > 0;
+  const maskedApiKey = hasApiKey
+    ? effectiveApiKey.length > 8
+      ? effectiveApiKey.slice(0, 5) + "\u2022\u2022\u2022" + effectiveApiKey.slice(-4)
+      : "\u2022\u2022\u2022\u2022" + effectiveApiKey.slice(-4)
+    : "";
+  const apiKeyBadge = hasApiKey
+    ? '<span class="badge badge-green" style="margin-left:8px">set</span>'
+      + '<span class="api-key-mask">' + esc(maskedApiKey) + '</span>'
+    : '<span class="badge badge-red" style="margin-left:8px">not set</span>';
+  const apiKeyPlaceholder = hasApiKey ? "(set \u2014 leave blank to keep)" : "sk-... or API key";
+
   body += `<h2>LLM</h2>
   <div class="section-group">
 
@@ -842,6 +950,14 @@ async function renderConfig(savedSection?: string): Promise<string> {
           <label>Base URL</label>
           <input name="baseUrl" value="${escAttr(llmCfg.baseUrl)}" placeholder="e.g. http://localhost:11434">
         </div>
+        <div class="form-row">
+          <label>API Key</label>
+          <div class="api-key-wrap">
+            <input id="apiKeyInput" name="apiKey" type="password" value="" placeholder="${escAttr(apiKeyPlaceholder)}">
+            <button type="button" class="api-key-toggle" onclick="var i=document.getElementById('apiKeyInput');if(i.type==='password'){i.type='text';this.textContent='Hide'}else{i.type='password';this.textContent='Show'}">Show</button>
+          </div>
+          ${apiKeyBadge}
+        </div>
         <div class="form-actions">
           <button type="submit" class="btn btn-primary">Save Provider</button>
         </div>
@@ -856,7 +972,12 @@ async function renderConfig(savedSection?: string): Promise<string> {
         <input type="hidden" name="_section" value="dreamer">
         <div class="form-row">
           <label>Model</label>
-          <input name="model" value="${escAttr(dreamerCfg.model)}" placeholder="e.g. qwen3:8b">
+          <div style="display:flex;gap:8px;flex:1;align-items:center">
+            <select id="dreamer-preset" style="flex:0 0 auto;min-width:140px" onchange="if(this.value){document.getElementById('dreamer-model').value=this.value}">
+              <option value="">— preset —</option>
+            </select>
+            <input id="dreamer-model" name="model" value="${escAttr(dreamerCfg.model)}" placeholder="select or type model" style="flex:1">
+          </div>
         </div>
         <div class="form-row">
           <label>Temperature</label>
@@ -880,7 +1001,12 @@ async function renderConfig(savedSection?: string): Promise<string> {
         <input type="hidden" name="_section" value="normalizer">
         <div class="form-row">
           <label>Model</label>
-          <input name="model" value="${escAttr(normalizerCfg.model)}" placeholder="e.g. gpt-5.4-nano">
+          <div style="display:flex;gap:8px;flex:1;align-items:center">
+            <select id="normalizer-preset" style="flex:0 0 auto;min-width:140px" onchange="if(this.value){document.getElementById('normalizer-model').value=this.value}">
+              <option value="">— preset —</option>
+            </select>
+            <input id="normalizer-model" name="model" value="${escAttr(normalizerCfg.model)}" placeholder="select or type model" style="flex:1">
+          </div>
         </div>
         <div class="form-row">
           <label>Temperature</label>
@@ -895,6 +1021,49 @@ async function renderConfig(savedSection?: string): Promise<string> {
         </div>
       </form>
     </div>
+
+    <!-- Model preset JS -->
+    <script>
+    (function() {
+      const MODEL_PRESETS = {
+        openai: [
+          'gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano',
+          'o4-mini', 'o3', 'o3-mini', 'o1', 'o1-mini',
+        ],
+        anthropic: [
+          'claude-sonnet-4-20250514', 'claude-opus-4-20250514',
+          'claude-3-7-sonnet-20250219', 'claude-3-5-sonnet-20241022',
+          'claude-3-5-haiku-20241022', 'claude-3-haiku-20240307',
+        ],
+        ollama: [
+          'qwen3:8b', 'qwen3:4b', 'qwen3:1.7b', 'qwen3:32b',
+          'llama3.1:8b', 'llama3.3:70b', 'mistral:7b',
+          'deepseek-r1:8b', 'deepseek-r1:32b', 'gemma3:12b',
+          'phi4:14b', 'codellama:13b',
+        ],
+        sampling: [],
+        none: [],
+      };
+      const provider = '${llmCfg.provider}';
+      const models = MODEL_PRESETS[provider] || [];
+      ['dreamer-preset', 'normalizer-preset'].forEach(function(id) {
+        const sel = document.getElementById(id);
+        if (!sel) return;
+        models.forEach(function(m) {
+          const opt = document.createElement('option');
+          opt.value = m;
+          opt.textContent = m;
+          sel.appendChild(opt);
+        });
+        // Pre-select if current value matches a preset
+        const inputId = id.replace('-preset', '-model');
+        const input = document.getElementById(inputId);
+        if (input && models.includes(input.value)) {
+          sel.value = input.value;
+        }
+      });
+    })();
+    </script>
 
   </div>`;
 
@@ -1069,16 +1238,31 @@ async function handleConfigPost(
   try {
     switch (section) {
       case "llm": {
+        // Resolve API key: if user sent a real value use it, otherwise preserve existing.
+        // Check BOTH in-memory config and process.env — the latter survives provider switches
+        // (ollama→openai) where the in-memory LlmConfig.apiKey was "" for ollama.
+        const sentKey = body.apiKey ?? "";
+        const isPlaceholder = sentKey === "" || sentKey === "••••••••";
+        const resolvedKey = isPlaceholder
+          ? (getLlmConfig().apiKey || process.env.DREAMGRAPH_LLM_API_KEY || "")
+          : sentKey;
+
+        // Persist to process.env so the key survives in-memory config switches
+        if (resolvedKey) {
+          process.env.DREAMGRAPH_LLM_API_KEY = resolvedKey;
+        }
+
         const newCfg: LlmConfig = {
           provider: (body.provider ?? "none") as LlmConfig["provider"],
           model: getLlmConfig().model, // preserve — edited via dreamer/normalizer sections
-          baseUrl: body.baseUrl ?? "",
-          apiKey: getLlmConfig().apiKey, // preserve API key — not editable via web
+          baseUrl: body.baseUrl ?? getLlmConfig().baseUrl,
+          apiKey: resolvedKey,
           temperature: getLlmConfig().temperature,
           maxTokens: getLlmConfig().maxTokens,
         };
         initLlmProvider(newCfg);
-        logger.info("Dashboard: LLM provider config updated via web UI");
+        logger.info(`Dashboard: LLM provider config updated via web UI (provider=${newCfg.provider}, apiKey=${resolvedKey ? "set" : "NOT SET"})`);
+        persistLlmEngineEnv();
         break;
       }
       case "dreamer": {
@@ -1088,6 +1272,7 @@ async function handleConfigPost(
           maxTokens: parseInt(body.maxTokens ?? "4096", 10),
         });
         logger.info("Dashboard: Dreamer LLM config updated via web UI");
+        persistLlmEngineEnv();
         break;
       }
       case "normalizer": {
@@ -1097,6 +1282,7 @@ async function handleConfigPost(
           maxTokens: parseInt(body.maxTokens ?? "1024", 10),
         });
         logger.info("Dashboard: Normalizer LLM config updated via web UI");
+        persistLlmEngineEnv();
         break;
       }
       case "scheduler": {

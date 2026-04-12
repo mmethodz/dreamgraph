@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ═══════════════════════════════════════════════════════════════════
+# ===================================================================
 # DreamGraph Global Installer (Linux / macOS)
 #
 # Builds the project, deploys compiled files to ~/.dreamgraph/bin/,
@@ -13,9 +13,9 @@ set -euo pipefail
 #
 # After installation, `dg` and `dreamgraph` are available from any
 # terminal session.
-# ═══════════════════════════════════════════════════════════════════
+# ===================================================================
 
-# ── Defaults ────────────────────────────────────────────────────────
+# -- Defaults --------------------------------------------------------
 SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FORCE=false
 
@@ -40,7 +40,7 @@ BIN_DIR="$DG_HOME/bin"
 DIST_TARGET="$BIN_DIR/dist"
 TEMPLATE_TARGET="$DG_HOME/templates"
 
-# ── Colors ───────────────────────────────────────────────────────────
+# -- Colors -----------------------------------------------------------
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 CYAN='\033[0;36m'
@@ -49,11 +49,11 @@ BOLD='\033[1m'
 NC='\033[0m'
 
 step()  { echo -e "\n${CYAN}${BOLD}$*${NC}"; }
-ok()    { echo -e "  ${GREEN}$* ✓${NC}"; }
-warn()  { echo -e "  ${YELLOW}⚠ $*${NC}"; }
+ok()    { echo -e "  ${GREEN}$* [ok]${NC}"; }
+warn()  { echo -e "  ${YELLOW}[!] $*${NC}"; }
 fail()  { echo -e "${RED}Error: $*${NC}" >&2; exit 1; }
 
-# ── Prerequisites ───────────────────────────────────────────────────
+# -- Prerequisites ---------------------------------------------------
 step "Checking prerequisites..."
 
 NODE_VERSION=$(node --version 2>/dev/null || true)
@@ -66,7 +66,7 @@ NPM_VERSION=$(npm --version 2>/dev/null || true)
 [[ -z "$NPM_VERSION" ]] && fail "npm is required but not found."
 ok "npm $NPM_VERSION"
 
-# ── Validate source ────────────────────────────────────────────────
+# -- Validate source ------------------------------------------------
 PACKAGE_JSON="$SOURCE_DIR/package.json"
 [[ ! -f "$PACKAGE_JSON" ]] && fail "No package.json at $SOURCE_DIR. Is this the DreamGraph repo?"
 
@@ -76,7 +76,7 @@ PKG_NAME=$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('
 VERSION=$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('$PACKAGE_JSON','utf8')).version)")
 ok "DreamGraph v$VERSION source at $SOURCE_DIR"
 
-# ── Check existing install ─────────────────────────────────────────
+# -- Check existing install -----------------------------------------
 if [[ -d "$DIST_TARGET" ]] && [[ "$FORCE" != "true" ]]; then
     EXISTING="unknown"
     if [[ -f "$BIN_DIR/version.json" ]]; then
@@ -87,7 +87,7 @@ if [[ -d "$DIST_TARGET" ]] && [[ "$FORCE" != "true" ]]; then
     [[ "$confirm" != "y" && "$confirm" != "Y" ]] && { echo "Aborted."; exit 0; }
 fi
 
-# ── Build ──────────────────────────────────────────────────────────
+# -- Build ----------------------------------------------------------
 step "Building DreamGraph..."
 (cd "$SOURCE_DIR" && npm run build)
 ok "Build complete"
@@ -95,7 +95,7 @@ ok "Build complete"
 SOURCE_DIST="$SOURCE_DIR/dist"
 [[ ! -d "$SOURCE_DIST" ]] && fail "dist/ not found after build"
 
-# ── Deploy ─────────────────────────────────────────────────────────
+# -- Deploy ---------------------------------------------------------
 step "Deploying to $BIN_DIR..."
 
 mkdir -p "$BIN_DIR"
@@ -129,7 +129,7 @@ echo -e "  ${CYAN}Installing dependencies...${NC}"
 (cd "$BIN_DIR" && npm install --omit=dev --loglevel=warn 2>&1 | tail -1)
 ok "Dependencies installed"
 
-# ── Templates ─────────────────────────────────────────────────────
+# -- Templates -----------------------------------------------------
 if [[ -d "$SOURCE_DIR/templates" ]]; then
     if [[ ! -d "$TEMPLATE_TARGET" ]]; then
         cp -r "$SOURCE_DIR/templates" "$TEMPLATE_TARGET"
@@ -139,7 +139,70 @@ if [[ -d "$SOURCE_DIR/templates" ]]; then
     fi
 fi
 
-# ── Version file ───────────────────────────────────────────────────
+# -- VS Code Extension ----------------------------------------------
+if command -v code &>/dev/null; then
+    step "Installing VS Code extension..."
+    EXT_SOURCE="$SOURCE_DIR/extensions/vscode"
+    EXT_PKG="$EXT_SOURCE/package.json"
+    if [[ -f "$EXT_PKG" ]]; then
+        EXT_PUBLISHER=$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('$EXT_PKG','utf8')).publisher)")
+        EXT_NAME=$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('$EXT_PKG','utf8')).name)")
+        EXT_VER=$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('$EXT_PKG','utf8')).version)")
+        EXT_ID="${EXT_PUBLISHER}.${EXT_NAME}-${EXT_VER}"
+        EXT_DEST="$HOME/.vscode/extensions/$EXT_ID"
+
+        # Build the extension (install all deps including devDeps for vsce)
+        (
+            cd "$EXT_SOURCE"
+            npm install 2>/dev/null
+            npm run build 2>&1
+        )
+        if [[ $? -ne 0 ]]; then
+            warn "Extension build failed -- skipping VS Code extension install"
+        else
+            ok "Extension built"
+
+            # Try VSIX package + code --install-extension (instant activation)
+            VSIX_INSTALLED=false
+            VSCE_BIN="$EXT_SOURCE/node_modules/.bin/vsce"
+            if [[ -x "$VSCE_BIN" ]]; then
+                ( cd "$EXT_SOURCE" && "$VSCE_BIN" package --no-dependencies 2>&1 ) | grep -E 'DONE|Packaged'
+                VSIX=$(ls -t "$EXT_SOURCE"/*.vsix 2>/dev/null | head -1)
+                if [[ -n "$VSIX" ]]; then
+                    code --install-extension "$VSIX" --force 2>&1
+                    if [[ $? -eq 0 ]]; then
+                        VSIX_INSTALLED=true
+                        ok "Extension installed via VSIX"
+                        # Install runtime deps into the deployed extension directory
+                        ( cd "$EXT_DEST" && npm install --omit=dev 2>/dev/null )
+                        ok "Runtime dependencies installed"
+                    fi
+                    rm -f "$VSIX"
+                fi
+            fi
+
+            # Fallback: manual deploy to extensions directory
+            if [[ "$VSIX_INSTALLED" != "true" ]]; then
+                mkdir -p "$EXT_DEST/dist"
+                cp -r "$EXT_SOURCE/dist/"* "$EXT_DEST/dist/"
+                cp "$EXT_SOURCE/package.json" "$EXT_DEST/package.json"
+                # Re-install production-only deps for runtime
+                ( cd "$EXT_SOURCE" && npm install --omit=dev 2>/dev/null )
+                if [[ -d "$EXT_SOURCE/node_modules" ]]; then
+                    cp -r "$EXT_SOURCE/node_modules" "$EXT_DEST/node_modules"
+                fi
+                ok "Extension deployed to $EXT_DEST"
+                warn "Reload VS Code to activate the extension"
+            fi
+        fi
+    else
+        warn "Extension source not found at $EXT_SOURCE -- skipping"
+    fi
+else
+    echo "  VS Code not found in PATH -- skipping extension install"
+fi
+
+# -- Version file ---------------------------------------------------
 node -e "
   require('fs').writeFileSync('$BIN_DIR/version.json', JSON.stringify({
     version: '$VERSION',
@@ -149,7 +212,7 @@ node -e "
   }, null, 2));
 "
 
-# ── Symlinks / Shims ─────────────────────────────────────────────
+# -- Symlinks / Shims ---------------------------------------------
 step "Creating command shims..."
 
 # Determine link target directory (prefer /usr/local/bin if writable)
@@ -159,7 +222,7 @@ if [[ -d "/usr/local/bin" ]] && [[ -w "/usr/local/bin" ]]; then
 fi
 mkdir -p "$LINK_DIR"
 
-# Resolve DG_HOME for shim scripts — use env var if set, else hardcode home path
+# Resolve DG_HOME for shim scripts -- use env var if set, else hardcode home path
 if [[ -n "${DREAMGRAPH_MASTER_DIR:-}" ]]; then
     SHIM_BIN_DIR="\${DREAMGRAPH_MASTER_DIR:-$DG_HOME}/bin"
 else
@@ -195,16 +258,16 @@ if ! echo "$PATH" | tr ':' '\n' | grep -qx "$LINK_DIR"; then
     echo "    export PATH=\"$LINK_DIR:\$PATH\""
 fi
 
-# ── Verify ─────────────────────────────────────────────────────────
+# -- Verify ---------------------------------------------------------
 step "Verifying installation..."
 OUTPUT=$(node "$DIST_TARGET/cli/dg.js" --version 2>&1 || true)
 ok "$OUTPUT"
 
-# ── Summary ─────────────────────────────────────────────────────────
+# -- Summary ---------------------------------------------------------
 echo ""
-echo -e "${GREEN}${BOLD}═══════════════════════════════════════════════${NC}"
+echo -e "${GREEN}${BOLD}===============================================${NC}"
 echo -e "${GREEN}${BOLD} DreamGraph v$VERSION installed successfully!${NC}"
-echo -e "${GREEN}${BOLD}═══════════════════════════════════════════════${NC}"
+echo -e "${GREEN}${BOLD}===============================================${NC}"
 echo ""
 echo " Binary:  $BIN_DIR"
 echo " Links:   $LINK_DIR/dg, $LINK_DIR/dreamgraph"

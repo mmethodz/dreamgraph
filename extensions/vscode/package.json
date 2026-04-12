@@ -18,6 +18,53 @@
   ],
   "main": "./dist/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "dreamgraph-sidebar",
+          "title": "DreamGraph",
+          "icon": "media/dreamgraph-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "dreamgraph-sidebar": [
+        {
+          "type": "webview",
+          "id": "dreamgraph.chatView",
+          "name": "Chat"
+        },
+        {
+          "type": "webview",
+          "id": "dreamgraph.dashboardView",
+          "name": "Dashboard"
+        },
+        {
+          "id": "dreamgraph.changedFiles",
+          "name": "Files Changed"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "dreamgraph.clearChangedFiles",
+          "when": "view == dreamgraph.changedFiles",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "dreamgraph.changedFiles.copyPath",
+          "when": "viewItem == changedFileItem",
+          "group": "inline"
+        },
+        {
+          "command": "dreamgraph.changedFiles.revealInExplorer",
+          "when": "viewItem == changedFileItem"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "dreamgraph.connect",
@@ -66,6 +113,31 @@
       {
         "command": "dreamgraph.setArchitectApiKey",
         "title": "DreamGraph: Set Architect API Key"
+      },
+      {
+        "command": "dreamgraph.showGraphSignal",
+        "title": "DreamGraph: Show Graph Context"
+      },
+      {
+        "command": "dreamgraph.clearChangedFiles",
+        "title": "Clear All",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "dreamgraph.changedFiles.copyPath",
+        "title": "Copy Path"
+      },
+      {
+        "command": "dreamgraph.changedFiles.revealInExplorer",
+        "title": "Reveal in File Explorer"
+      },
+      {
+        "command": "dreamgraph.runCommand",
+        "title": "DreamGraph: Run Command"
+      },
+      {
+        "command": "dreamgraph.runBuild",
+        "title": "DreamGraph: Run Build Script"
       }
     ],
     "configuration": {

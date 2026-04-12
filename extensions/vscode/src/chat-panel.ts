@@ -4,1165 +4,1436 @@
  * Owns all chat state (messages, streaming, model selection).
  * The webview is a dumb renderer — the extension host is the single source of truth.
  *
- * @see TDD §7.1.1 (Webview Architecture), §7.2 (Model Selector), §7.3 (Chat Message),
- *      §7.4 (Chat Flow)
+ * Chat history is persisted in ChatMemory and re-hydrated whenever the webview
+ * is recreated or becomes visible again, so switching to another tool tab does
+ * not erase the conversation.
  */
 
-import * as vscode from "vscode";
+import * as vscode from 'vscode';
+import type { ChatMemory, PersistedMessage } from './chat-memory';
+import type { GraphSignalProvider } from './graph-signal';
 import {
-  ArchitectLlm,
   ANTHROPIC_MODELS,
   OPENAI_MODELS,
+  type ArchitectLlm,
   type ArchitectMessage,
   type ArchitectProvider,
   type ToolDefinition,
-  type ToolUseRequest,
-  type ArchitectToolResponse,
-} from "./architect-llm.js";
-import { ContextBuilder } from "./context-builder.js";
-import { assemblePrompt, inferTask, type ArchitectTask } from "./prompts/index.js";
-import type { McpClient } from "./mcp-client.js";
-import type { EditorContextEnvelope, IntentMode } from "./types.js";
+} from './architect-llm';
+import type { McpClient } from './mcp-client';
+import type { ContextBuilder } from './context-builder';
+import type { ChangedFilesView, ChangeType } from './changed-files-view';
+import { LOCAL_TOOL_DEFINITIONS, isLocalTool, executeLocalTool } from './local-tools.js';
+import { assemblePrompt, inferTask } from './prompts/index.js';
 
-/* ------------------------------------------------------------------ */
-/*  Chat message type (§7.3)                                          */
-/* ------------------------------------------------------------------ */
+type ChatRole = 'user' | 'assistant' | 'system';
 
-export interface ChatMessage {
-  role: "user" | "assistant" | "system";
+interface ChatMessage {
+  role: ChatRole;
   content: string;
-  timestamp: Date;
-  metadata?: {
-    toolsUsed: { name: string; duration_ms: number; result_summary: string }[];
-    resourcesRead: string[];
-    intentMode: IntentMode;
-    confidence?: number;
-    warnings: { severity: "info" | "warning" | "error"; message: string; source: string }[];
-    fileReferences: { path: string; line?: number; description: string }[];
-    reasoningBasis: {
-      features: string[];
-      adrs: string[];
-      workflows: string[];
-      uiElements: string[];
-      tensions: string[];
-      summary: string;
-    };
-    proposedChanges: { path: string; description: string }[];
-  };
+  timestamp: string;
 }
 
 /* ------------------------------------------------------------------ */
-/*  Message protocol (§7.1.1)                                         */
+/*  Message protocol                                                  */
 /* ------------------------------------------------------------------ */
 
 type ExtensionToWebviewMessage =
-  | { type: "addMessage"; message: SerializedChatMessage }
-  | { type: "streamChunk"; content: string; messageId: string }
-  | { type: "streamEnd"; messageId: string }
-  | { type: "setLoading"; loading: boolean }
-  | { type: "updateModels"; providers: string[]; models: string[]; current: { provider: string; model: string } }
-  | { type: "error"; message: string };
+  | { type: 'addMessage'; message: ChatMessage }
+  | { type: 'stream-start' }
+  | { type: 'stream-chunk'; chunk: string }
+  | { type: 'stream-end'; done: boolean }
+  | { type: 'state'; state: { messages: ChatMessage[] } }
+  | { type: 'updateModels'; providers: string[]; models: string[]; current: { provider: string; model: string } }
+  | { type: 'error'; error: string }
+  | { type: 'restoreDraft'; text: string };
 
 type WebviewToExtensionMessage =
-  | { type: "sendMessage"; content: string }
-  | { type: "changeProvider"; provider: string }
-  | { type: "changeModel"; model: string }
-  | { type: "openFile"; filePath: string; line?: number }
-  | { type: "setApiKey" }
-  | { type: "ready" };
+  | { type: 'ready' }
+  | { type: 'send'; text: string }
+  | { type: 'clear' }
+  | { type: 'stop' }
+  | { type: 'changeProvider'; provider: string }
+  | { type: 'changeModel'; model: string }
+  | { type: 'setApiKey' }
+  | { type: 'saveDraft'; text: string };
 
-/** JSON-safe version of ChatMessage */
-interface SerializedChatMessage {
-  role: string;
-  content: string;
-  timestamp: string;
-  metadata?: ChatMessage["metadata"];
-}
+export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable {
+  public static readonly viewType = 'dreamgraph.chatView';
 
-/* ------------------------------------------------------------------ */
-/*  Chat Panel Controller                                             */
-/* ------------------------------------------------------------------ */
+  private view: vscode.WebviewView | undefined;
+  private readonly disposables: vscode.Disposable[] = [];
+  private readonly messages: ChatMessage[] = [];
+  private memory?: ChatMemory;
+  private graphSignal?: GraphSignalProvider;
+  private architectLlm?: ArchitectLlm;
+  private contextBuilder?: ContextBuilder;
+  private mcpClient?: McpClient;
+  private changedFilesView?: ChangedFilesView;
+  private currentInstanceId = 'default';
+  private streaming = false;
+  private abortController: AbortController | null = null;
 
-export class ChatPanel implements vscode.Disposable {
-  private _panel: vscode.WebviewPanel | null = null;
-  private _messages: ChatMessage[] = [];
-  private _disposables: vscode.Disposable[] = [];
-  private _isStreaming = false;
-  private _streamAbort: AbortController | null = null;
-  private _mcpTools: ToolDefinition[] = [];
+  /** Content accumulated during the current streaming response (for tab-switch recovery). */
+  private streamingContent = '';
 
-  /**
-   * Hard cap on characters fed back to the Architect per tool result.
-   * ~1500 chars ≈ ~400 tokens. The daemon's small models do the heavy
-   * lifting; the Architect only needs a status summary.
-   */
-  private static readonly TOOL_RESULT_MAX_CHARS = 1500;
+  /** Queued steering prompts sent by user during agentic loop execution. */
+  private steeringQueue: string[] = [];
 
-  constructor(
-    private readonly _extensionUri: vscode.Uri,
-    private readonly _architectLlm: ArchitectLlm,
-    private readonly _contextBuilder: ContextBuilder,
-    private readonly _mcpClient: McpClient,
-  ) {}
+  /** Draft text in the prompt input — persisted across tab switches & webview recreations. */
+  private draftText = '';
 
-  get isVisible(): boolean {
-    return this._panel?.visible ?? false;
+  /** Per-tool-category character caps for tool results sent back to the Architect. */
+  private static readonly TOOL_RESULT_LIMITS: Record<string, number> = {
+    // Code-reading tools need generous limits so the Architect can see full entities
+    read_source_code: 12_000,
+    read_local_file: 12_000,
+    query_api_surface: 10_000,
+    // Command output — errors can be verbose
+    run_command: 8_000,
+    // Edit results — usually short, but include verification detail
+    edit_entity: 6_000,
+    edit_file: 6_000,
+    modify_entity: 6_000,
+    write_file: 4_000,
+    // Graph / cognitive — summaries are fine
+    _default: 4_000,
+  };
+
+  private static _toolResultLimit(toolName: string): number {
+    return ChatPanel.TOOL_RESULT_LIMITS[toolName] ?? ChatPanel.TOOL_RESULT_LIMITS._default;
   }
 
-  /* ---- Panel lifecycle ---- */
+  constructor(private readonly context: vscode.ExtensionContext) {}
 
-  /**
-   * Open or reveal the chat panel.
-   */
-  open(): void {
-    if (this._panel) {
-      this._panel.reveal(vscode.ViewColumn.Beside);
+  public setGraphSignal(provider: GraphSignalProvider): void {
+    this.graphSignal = provider;
+  }
+
+  public setMemory(memory: ChatMemory): void {
+    this.memory = memory;
+  }
+
+  public setArchitectLlm(llm: ArchitectLlm): void {
+    this.architectLlm = llm;
+  }
+
+  public setContextBuilder(cb: ContextBuilder): void {
+    this.contextBuilder = cb;
+  }
+
+  public setMcpClient(mcp: McpClient): void {
+    this.mcpClient = mcp;
+  }
+
+  public setChangedFilesProvider(provider: ChangedFilesView): void {
+    this.changedFilesView = provider;
+  }
+
+  public setInstance(instanceId: string): void {
+    if (this.currentInstanceId === instanceId) {
       return;
     }
 
-    this._panel = vscode.window.createWebviewPanel(
-      "dreamgraph-chat",
-      "DreamGraph Chat",
-      vscode.ViewColumn.Beside,
-      {
-        enableScripts: true,
-        retainContextWhenHidden: false,
-        localResourceRoots: [this._extensionUri],
-      },
-    );
+    this.currentInstanceId = instanceId;
+    void this.restoreMessages();
+  }
 
-    this._panel.webview.html = this._getHtml(this._panel.webview);
-
-    // Handle messages from webview
-    this._disposables.push(
-      this._panel.webview.onDidReceiveMessage(
-        (msg: WebviewToExtensionMessage) => void this._handleWebviewMessage(msg),
-      ),
-    );
-
-    // Handle panel disposal
-    this._panel.onDidDispose(
-      () => {
-        this._panel = null;
-        this._cancelStream();
-      },
-      null,
-      this._disposables,
-    );
-
-    // Re-send state when panel becomes visible again
-    this._disposables.push(
-      this._panel.onDidChangeViewState(() => {
-        if (this._panel?.visible) {
-          this._resendState();
-        }
-      }),
-    );
+  /** Whether the chat panel is currently visible. */
+  public get isVisible(): boolean {
+    return this.view?.visible ?? false;
   }
 
   /**
    * Add a message from an external command (e.g., explainFile result).
    */
-  addExternalMessage(role: "user" | "assistant" | "system", content: string): void {
-    const msg: ChatMessage = { role, content, timestamp: new Date() };
-    this._messages.push(msg);
-    this._postMessage({ type: "addMessage", message: this._serialize(msg) });
+  public addExternalMessage(role: ChatRole, content: string): void {
+    const msg: ChatMessage = { role, content, timestamp: new Date().toISOString() };
+    this.messages.push(msg);
+    void this.persistMessages();
+    void this.postMessage({ type: 'addMessage', message: msg });
   }
 
-  /* ---- Webview message handler ---- */
+  /**
+   * Reveal/open the chat panel programmatically.
+   */
+  public open(): void {
+    void vscode.commands.executeCommand('dreamgraph.chatView.focus');
+  }
 
-  private async _handleWebviewMessage(msg: WebviewToExtensionMessage): Promise<void> {
-    switch (msg.type) {
-      case "ready":
-        this._resendState();
-        break;
+  public async resolveWebviewView(
+    webviewView: vscode.WebviewView,
+    _context: vscode.WebviewViewResolveContext,
+    _token: vscode.CancellationToken,
+  ): Promise<void> {
+    this.view = webviewView;
 
-      case "sendMessage":
-        await this._handleUserMessage(msg.content);
-        break;
+    webviewView.webview.options = {
+      enableScripts: true,
+    };
 
-      case "changeProvider":
-        await this._changeProvider(msg.provider as ArchitectProvider);
-        break;
+    webviewView.webview.html = this.getHtml(webviewView.webview);
 
-      case "changeModel":
-        if (msg.model === "__custom__") {
-          const custom = await vscode.window.showInputBox({
-            prompt: "Enter a custom model name",
-            placeHolder: "e.g. claude-sonnet-4",
-          });
-          if (custom) {
-            await this._changeModel(custom);
-          } else {
-            // User cancelled — resend current state so dropdown reverts
-            this._sendModelUpdate();
+    webviewView.onDidDispose(() => {
+      if (this.view === webviewView) {
+        this.view = undefined;
+      }
+    }, null, this.disposables);
+
+    webviewView.onDidChangeVisibility(() => {
+      if (webviewView.visible) {
+        void this.rehydrateWebview();
+      }
+    }, null, this.disposables);
+
+    webviewView.webview.onDidReceiveMessage(async (message: WebviewToExtensionMessage) => {
+      switch (message.type) {
+        case 'ready':
+          await this.rehydrateWebview();
+          this._sendModelUpdate();
+          this._checkApiKeyWarning();
+          break;
+        case 'send':
+          if ('text' in message && typeof message.text === 'string' && message.text.trim().length > 0) {
+            if (this.streaming) {
+              // Steering injection — queue the prompt for the agentic loop
+              this.steeringQueue.push(message.text.trim());
+              const steerMsg = `\n\n💬 *Steering: "${message.text.trim()}"*\n`;
+              this.streamingContent += steerMsg;
+              void this.postMessage({ type: 'stream-chunk', chunk: steerMsg });
+            } else {
+              await this.handleUserMessage(message.text.trim());
+            }
           }
-        } else {
-          await this._changeModel(msg.model);
-        }
-        break;
+          break;
+        case 'clear':
+          await this.clearMessages();
+          break;
+        case 'stop':
+          this.abortGeneration();
+          break;
+        case 'changeProvider':
+          if ('provider' in message) {
+            await this._changeProvider(message.provider as ArchitectProvider);
+          }
+          break;
+        case 'changeModel':
+          if ('model' in message) {
+            if (message.model === '__custom__') {
+              const custom = await vscode.window.showInputBox({
+                prompt: 'Enter a custom model name',
+                placeHolder: 'e.g. claude-sonnet-4',
+              });
+              if (custom) {
+                await this._changeModel(custom);
+              } else {
+                this._sendModelUpdate(); // cancelled — re-sync dropdown
+              }
+            } else {
+              await this._changeModel(message.model);
+            }
+          }
+          break;
+        case 'setApiKey':
+          await vscode.commands.executeCommand('dreamgraph.setArchitectApiKey');
+          break;
+        case 'saveDraft':
+          if ('text' in message) {
+            this.draftText = message.text ?? '';
+          }
+          break;
+        default:
+          break;
+      }
+    }, null, this.disposables);
 
-      case "openFile":
-        await this._openFile(msg.filePath, msg.line);
-        break;
+    await this.rehydrateWebview();
+  }
 
-      case "setApiKey":
-        await vscode.commands.executeCommand("dreamgraph.setArchitectApiKey");
-        break;
+  public async clearMessages(): Promise<void> {
+    this.messages.splice(0, this.messages.length);
+    await this.persistMessages();
+    await this.postState();
+  }
+
+  public dispose(): void {
+    while (this.disposables.length > 0) {
+      const disposable = this.disposables.pop();
+      disposable?.dispose();
     }
   }
 
-  /* ---- Chat message handling ---- */
+  private async handleUserMessage(text: string): Promise<void> {
+    const userMessage: ChatMessage = {
+      role: 'user',
+      content: text,
+      timestamp: new Date().toISOString(),
+    };
 
-  private async _handleUserMessage(content: string): Promise<void> {
-    if (this._isStreaming) return;
+    this.messages.push(userMessage);
+    await this.persistMessages();
+    await this.postMessage({ type: 'addMessage', message: userMessage });
 
-    // Check configuration
-    if (!this._architectLlm.isConfigured) {
-      this._postMessage({
-        type: "error",
-        message: "Architect not configured. Set provider and model in settings, then set your API key.",
-      });
+    // ---- Call Architect LLM ----
+    if (!this.architectLlm || !this.architectLlm.isConfigured) {
+      const errMsg: ChatMessage = {
+        role: 'system',
+        content: 'Architect LLM is not configured. Select provider and model in the header dropdowns, then set your API key.',
+        timestamp: new Date().toISOString(),
+      };
+      this.messages.push(errMsg);
+      await this.persistMessages();
+      await this.postMessage({ type: 'addMessage', message: errMsg });
       return;
     }
 
-    // Add user message
-    const userMsg: ChatMessage = { role: "user", content, timestamp: new Date() };
-    this._messages.push(userMsg);
-    this._postMessage({ type: "addMessage", message: this._serialize(userMsg) });
-    this._postMessage({ type: "setLoading", loading: true });
-
     try {
-      // Fetch MCP tool definitions if not cached
-      await this._refreshMcpTools();
+      this.streaming = true;
+      this.streamingContent = '';
+      this.steeringQueue = [];
+      this.abortController = new AbortController();
 
-      // Build context envelope
-      const envelope = await this._contextBuilder.buildEnvelope(content);
-      const fileContent = this._contextBuilder.readActiveFileContent();
+      // Build context envelope (from editor state + DreamGraph knowledge)
+      const envelope = this.contextBuilder
+        ? await this.contextBuilder.buildEnvelope(text)
+        : null;
 
-      // Assemble context block
-      const contextBlock = this._contextBuilder.assembleContextBlock(
-        envelope,
-        fileContent,
-        new Map(),
-      );
+      // Assemble system prompt
+      const task = inferTask(envelope?.intentMode ?? 'ask_dreamgraph');
+      const { system } = assemblePrompt(task, envelope);
 
-      // Infer task and assemble prompt
-      const task = inferTask(envelope.intentMode);
-      const { system } = assemblePrompt(task, envelope, contextBlock.text);
-
-      // Build initial message array for the API
-      // We track raw API messages separately for tool_use/tool_result round-trips
-      const provider = this._architectLlm.currentConfig?.provider ?? "anthropic";
-      const rawApiMessages: unknown[] = [];
-
-      // Include recent conversation history (last 10 messages for context)
-      const historyWindow = this._messages.slice(-11, -1);
-      for (const m of historyWindow) {
-        if (m.role === "user" || m.role === "assistant") {
-          rawApiMessages.push({ role: m.role, content: m.content });
-        }
-      }
-
-      // Add current user message
-      rawApiMessages.push({ role: "user", content });
-
-      // Also build ArchitectMessage array for system prompt extraction
+      // Build conversation history for the LLM
       const llmMessages: ArchitectMessage[] = [
-        { role: "system", content: system },
+        { role: 'system', content: system },
       ];
 
-      // Agentic tool loop — up to 25 iterations
-      const MAX_TOOL_ROUNDS = 25;
-      let round = 0;
-      let fullContent = "";
-      const toolsUsed: ChatMessage["metadata"] extends undefined ? never : NonNullable<ChatMessage["metadata"]>["toolsUsed"] = [];
-      this._isStreaming = true;
-      const messageId = `msg-${Date.now()}`;
-
-      while (round < MAX_TOOL_ROUNDS) {
-        round++;
-
-        // Call LLM with tools
-        const response: ArchitectToolResponse = await this._architectLlm.callWithTools(
-          llmMessages,
-          this._mcpTools,
-          rawApiMessages,
-        );
-
-        // Accumulate text content
-        if (response.content) {
-          fullContent += response.content;
-          this._postMessage({ type: "streamChunk", content: response.content, messageId });
-        }
-
-        // If no tool calls, we're done
-        if (response.toolCalls.length === 0 || response.stopReason !== "tool_use") {
-          break;
-        }
-
-        // Execute tool calls via MCP
-        // First, add the assistant response (with tool_use blocks) to rawApiMessages
-        if (provider === "anthropic") {
-          const assistantContent: unknown[] = [];
-          if (response.content) {
-            assistantContent.push({ type: "text", text: response.content });
-          }
-          for (const tc of response.toolCalls) {
-            assistantContent.push({
-              type: "tool_use",
-              id: tc.id,
-              name: tc.name,
-              input: tc.input,
-            });
-          }
-          rawApiMessages.push({ role: "assistant", content: assistantContent });
-        } else if (provider === "openai") {
-          rawApiMessages.push({
-            role: "assistant",
-            content: response.content || null,
-            tool_calls: response.toolCalls.map((tc) => ({
-              id: tc.id,
-              type: "function",
-              function: { name: tc.name, arguments: JSON.stringify(tc.input) },
-            })),
-          });
-        }
-
-        // Show tool calls in the UI
-        const toolStatusParts: string[] = [];
-        for (const tc of response.toolCalls) {
-          toolStatusParts.push(`\n\n🔧 **Calling tool:** \`${tc.name}\``);
-          if (Object.keys(tc.input).length > 0) {
-            toolStatusParts.push(`  _args:_ \`${JSON.stringify(tc.input).slice(0, 200)}\``);
-          }
-        }
-        const toolStatusText = toolStatusParts.join("\n");
-        fullContent += toolStatusText;
-        this._postMessage({ type: "streamChunk", content: toolStatusText, messageId });
-
-        // Execute each tool call via MCP and collect results
-        const toolResults: Array<{ id: string; result: string; isError: boolean }> = [];
-        for (const tc of response.toolCalls) {
-          const toolStart = Date.now();
-          let resultText: string;
-          let isError = false;
-          try {
-            const result = await this._mcpClient.callTool(tc.name, tc.input);
-            resultText = typeof result === "string" ? result : JSON.stringify(result, null, 2);
-          } catch (err) {
-            resultText = `Error: ${err instanceof Error ? err.message : String(err)}`;
-            isError = true;
-          }
-          const toolDuration = Date.now() - toolStart;
-
-          // Truncate before storing — the Architect gets a compact summary,
-          // not the raw multi-KB payload. The daemon's small models already
-          // did the abstraction; prevent million-token context blowup.
-          const truncatedResult = isError
-            ? resultText
-            : this._truncateToolResult(tc.name, resultText);
-
-          toolResults.push({ id: tc.id, result: truncatedResult, isError });
-          toolsUsed.push({
-            name: tc.name,
-            duration_ms: toolDuration,
-            result_summary: truncatedResult.slice(0, 200),
-          });
-
-          // Show abbreviated result in UI
-          const resultPreview = resultText.length > 500
-            ? resultText.slice(0, 500) + "…"
-            : resultText;
-          const resultStatus = isError
-            ? `\n❌ **${tc.name}** failed: ${resultPreview}`
-            : `\n✅ **${tc.name}** completed (${toolDuration}ms)`;
-          fullContent += resultStatus;
-          this._postMessage({ type: "streamChunk", content: resultStatus, messageId });
-        }
-
-        // Feed tool results back to the LLM
-        if (provider === "anthropic") {
-          rawApiMessages.push({
-            role: "user",
-            content: toolResults.map((tr) => ({
-              type: "tool_result",
-              tool_use_id: tr.id,
-              content: tr.result,
-              ...(tr.isError ? { is_error: true } : {}),
-            })),
-          });
-        } else if (provider === "openai") {
-          for (const tr of toolResults) {
-            rawApiMessages.push({
-              role: "tool",
-              tool_call_id: tr.id,
-              content: tr.result,
-            });
-          }
+      // Include recent conversation for context (last 20 messages max)
+      const recentMessages = this.messages.slice(-20);
+      for (const msg of recentMessages) {
+        if (msg.role === 'user' || msg.role === 'assistant') {
+          llmMessages.push({ role: msg.role, content: msg.content });
         }
       }
 
-      // Stream complete
-      this._postMessage({ type: "streamEnd", messageId });
+      // Signal webview to prepare a streaming assistant bubble
+      await this.postMessage({ type: 'stream-start' });
 
-      // Store assistant message
-      const assistantMsg: ChatMessage = {
-        role: "assistant",
+      // ---- Fetch MCP tool definitions if daemon is connected ----
+      let tools: ToolDefinition[] = [];
+      if (this.mcpClient?.isConnected) {
+        try {
+          const raw = await this.mcpClient.listTools();
+          tools = raw.map((t) => ({
+            name: t.name,
+            description: t.description ?? '',
+            inputSchema: (t.inputSchema ?? {}) as Record<string, unknown>,
+          }));
+        } catch {
+          // MCP not available — proceed without tools
+        }
+      }
+
+      // Append local support tools AFTER MCP tools (fallback/execution role)
+      for (const lt of LOCAL_TOOL_DEFINITIONS) {
+        tools.push({
+          name: lt.name,
+          description: lt.description,
+          inputSchema: lt.inputSchema as Record<string, unknown>,
+        });
+      }
+
+      let fullContent: string;
+
+      if (tools.length > 0) {
+        // ---- Agentic tool-calling loop ----
+        fullContent = await this.runAgenticLoop(llmMessages, tools);
+      } else {
+        // ---- Plain streaming (no MCP) ----
+        fullContent = '';
+        await this.architectLlm.stream(llmMessages, (chunk: string) => {
+          fullContent += chunk;
+          this.streamingContent += chunk;
+          void this.postMessage({ type: 'stream-chunk', chunk });
+        });
+      }
+
+      // Finalize the assistant message
+      const assistantMessage: ChatMessage = {
+        role: 'assistant',
         content: fullContent,
-        timestamp: new Date(),
-        metadata: {
-          toolsUsed,
-          resourcesRead: [],
-          intentMode: envelope.intentMode,
-          confidence: envelope.intentConfidence,
-          warnings: [],
-          fileReferences: [],
-          reasoningBasis: {
-            features: envelope.graphContext?.relatedFeatures ?? [],
-            adrs: envelope.graphContext?.applicableAdrs ?? [],
-            workflows: envelope.graphContext?.relatedWorkflows ?? [],
-            uiElements: envelope.graphContext?.uiPatterns ?? [],
-            tensions: [],
-            summary: this._buildReasoningSummary(envelope),
-          },
-          proposedChanges: [],
-        },
+        timestamp: new Date().toISOString(),
       };
-      this._messages.push(assistantMsg);
-    } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      this._postMessage({ type: "error", message: errMsg });
+
+      this.messages.push(assistantMessage);
+      await this.persistMessages();
+      await this.postMessage({ type: 'stream-end', done: true });
+    } catch (err: unknown) {
+      const errorText = err instanceof Error ? err.message : String(err);
+      const errMsg: ChatMessage = {
+        role: 'system',
+        content: `Error: ${errorText}`,
+        timestamp: new Date().toISOString(),
+      };
+      this.messages.push(errMsg);
+      await this.persistMessages();
+      await this.postMessage({ type: 'stream-end', done: true });
+      await this.postMessage({ type: 'addMessage', message: errMsg });
     } finally {
-      this._isStreaming = false;
-      this._postMessage({ type: "setLoading", loading: false });
+      this.streaming = false;
+      this.streamingContent = '';
+      this.steeringQueue = [];
+      this.abortController = null;
     }
   }
 
-  /* ---- MCP Tool Discovery ---- */
+  private abortGeneration(): void {
+    if (this.abortController) {
+      this.abortController.abort();
+    }
+  }
 
   /**
-   * Fetch available MCP tools from the daemon and cache them as ToolDefinitions.
-   * If the client isn't connected, attempts to connect first.
-   * Posts a warning to the chat if tools can't be loaded.
+   * Agentic tool-calling loop: call the LLM with MCP tool definitions,
+   * execute any requested tool calls, feed results back, repeat until done.
+   * Streams text chunks to the webview as they arrive.
+   *
+   * Enhanced with:
+   *  - Post-edit verification (reads file back to confirm change applied)
+   *  - Graph change tracking (enrichment/ADR/UI registry operations)
+   *  - Line-level diff stats for changed files
+   *  - Failure transparency (structured error classification)
+   *  - Provenance tracking (files read, entities accessed, tools used)
+   *  - Graph sync reminder after code modifications
    */
-  private async _refreshMcpTools(): Promise<void> {
-    try {
-      // Auto-connect if not already connected
-      if (!this._mcpClient.isConnected) {
-        try {
-          await this._mcpClient.connect();
-        } catch {
-          this._postMessage({
-            type: "streamChunk",
-            content: "\n\n⚠️ **Cannot reach DreamGraph daemon** — MCP tools are unavailable. " +
-              "Make sure the daemon is running and the connection is configured " +
-              "(`dreamgraph.daemonHost` / `dreamgraph.daemonPort` in settings, or run **DreamGraph: Connect**).\n\n",
-            messageId: `warn-${Date.now()}`,
-          });
-          return;
-        }
+  private async runAgenticLoop(
+    llmMessages: ArchitectMessage[],
+    tools: ToolDefinition[],
+    maxIterations = 15,
+  ): Promise<string> {
+    const llm = this.architectLlm!;
+    const mcp = this.mcpClient!;
+
+    // Helper: stream a chunk to the webview AND track it for tab-switch recovery
+    const emit = (chunk: string): void => {
+      this.streamingContent += chunk;
+      void this.postMessage({ type: 'stream-chunk', chunk });
+    };
+
+    // ---- Provenance tracker ----
+    const provenance = {
+      toolsUsed: [] as string[],
+      filesRead: [] as string[],
+      filesModified: [] as string[],
+      entitiesAccessed: [] as string[],
+      graphUpdates: [] as string[],
+      errors: [] as { tool: string; type: string; message: string }[],
+    };
+
+    // Build raw API messages for the agentic loop (Anthropic-style content blocks)
+    const rawMessages: unknown[] = llmMessages
+      .filter((m) => m.role !== 'system')
+      .map((m) => ({ role: m.role, content: m.content }));
+
+    let aggregatedText = '';
+    const signal = this.abortController?.signal;
+    let codeEditsMade = false;
+
+    for (let i = 0; i < maxIterations; i++) {
+      if (signal?.aborted) {
+        const stopMsg = '\n\n⏹ *Generation stopped by user.*';
+        aggregatedText += stopMsg;
+        emit(stopMsg);
+        break;
       }
-      const tools = await this._mcpClient.listTools();
-      this._mcpTools = tools.map((t) => ({
-        name: t.name,
-        description: t.description ?? "",
-        inputSchema: (t.inputSchema ?? { type: "object", properties: {} }) as Record<string, unknown>,
-      }));
-    } catch {
-      // Keep existing cache if refresh fails
-      if (this._mcpTools.length === 0) {
-        this._postMessage({
-          type: "streamChunk",
-          content: "\n\n⚠️ **Failed to load MCP tools from daemon.** The Architect will respond without tool access.\n\n",
-          messageId: `warn-${Date.now()}`,
+
+      // ---- Drain steering queue ----
+      while (this.steeringQueue.length > 0) {
+        const steeringText = this.steeringQueue.shift()!;
+        rawMessages.push({ role: 'user', content: `[USER STEERING]: ${steeringText}` });
+        llmMessages.push({ role: 'user', content: `[USER STEERING]: ${steeringText}` });
+      }
+
+      const response = await llm.callWithTools(llmMessages, tools, rawMessages);
+
+      if (response.content) {
+        aggregatedText += response.content;
+        emit(response.content);
+      }
+
+      if (response.toolCalls.length === 0 || response.stopReason === 'end_turn') {
+        break;
+      }
+
+      // Append the assistant's response (with tool_use blocks) to raw messages
+      const assistantContent: unknown[] = [];
+      if (response.content) {
+        assistantContent.push({ type: 'text', text: response.content });
+      }
+      for (const tc of response.toolCalls) {
+        assistantContent.push({
+          type: 'tool_use',
+          id: tc.id,
+          name: tc.name,
+          input: tc.input,
         });
       }
+      rawMessages.push({ role: 'assistant', content: assistantContent });
+
+      // Execute each tool call via MCP and collect results
+      const toolResults: unknown[] = [];
+      let aborted = false;
+      for (const tc of response.toolCalls) {
+        if (signal?.aborted) {
+          const stopMsg = '\n\n⏹ *Generation stopped by user.*';
+          aggregatedText += stopMsg;
+          emit(stopMsg);
+          aborted = true;
+          break;
+        }
+
+        // Track provenance
+        provenance.toolsUsed.push(tc.name);
+
+        // Show detailed tool call status
+        const paramSummary = this._describeToolCall(tc.name, tc.input);
+        const callMsg = `\n\n🔧 **${tc.name}** — ${paramSummary}\n`;
+        emit(callMsg);
+        aggregatedText += callMsg;
+
+        // Wire server-side log notifications to stream progress
+        const prevLogHandler = mcp.onServerLog;
+        mcp.onServerLog = (level: string, message: string) => {
+          const progressMsg = `\n📊 *${message}*\n`;
+          aggregatedText += progressMsg;
+          emit(progressMsg);
+        };
+
+        // ---- Track provenance for read operations ----
+        if (tc.name === 'read_source_code') {
+          const input = tc.input as Record<string, unknown>;
+          if (input.filePath) provenance.filesRead.push(String(input.filePath));
+          if (input.entity) provenance.entitiesAccessed.push(String(input.entity));
+        }
+        if (tc.name === 'query_resource' || tc.name === 'search_data_model') {
+          const input = tc.input as Record<string, unknown>;
+          if (input.name || input.entity) provenance.entitiesAccessed.push(String(input.name ?? input.entity));
+        }
+
+        // ---- Map tool names to change types for the Files Changed view ----
+        const fileMutatingTools: Record<string, ChangeType> = {
+          create_file: 'create', edit_file: 'edit', edit_entity: 'edit',
+          delete_file: 'delete', rename_file: 'rename',
+          modify_entity: 'edit', write_file: 'create',
+        };
+        const changeKind = fileMutatingTools[tc.name];
+
+        let resultText: string;
+        let isError = false;
+        let errorType = '';
+        const t0 = Date.now();
+        try {
+          if (isLocalTool(tc.name)) {
+            // Local extension tool — execute directly in the VS Code host
+            resultText = await executeLocalTool(tc.name, tc.input as Record<string, unknown>);
+          } else {
+            const result = await mcp.callTool(
+              tc.name,
+              tc.input,
+              300_000,
+              (message: string, _progress: number, _total?: number) => {
+                const progressMsg = `\n📊 *${message}*\n`;
+                aggregatedText += progressMsg;
+                emit(progressMsg);
+              },
+            );
+            resultText = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+          }
+        } catch (err) {
+          isError = true;
+          const errMsg = err instanceof Error ? err.message : String(err);
+          // ---- Failure transparency: classify error type ----
+          if (errMsg.includes('timeout') || errMsg.includes('ETIMEDOUT')) {
+            errorType = 'timeout';
+          } else if (errMsg.includes('ENOENT') || errMsg.includes('not found')) {
+            errorType = 'not_found';
+          } else if (errMsg.includes('EACCES') || errMsg.includes('permission')) {
+            errorType = 'permission';
+          } else if (errMsg.includes('parse') || errMsg.includes('JSON') || errMsg.includes('syntax')) {
+            errorType = 'parsing';
+          } else if (errMsg.includes('ambig') || errMsg.includes('multiple')) {
+            errorType = 'ambiguity';
+          } else {
+            errorType = 'unknown';
+          }
+          resultText = `Tool error (${errorType}): ${errMsg}`;
+          provenance.errors.push({ tool: tc.name, type: errorType, message: errMsg });
+        } finally {
+          mcp.onServerLog = prevLogHandler;
+        }
+        const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+
+        // ---- Record file change in tree view + provenance ----
+        if (changeKind && !isError) {
+          const input = tc.input as Record<string, unknown>;
+          let changedPath = input.filePath as string | undefined;
+          const previousPath = tc.name === 'rename_file' ? input.oldPath as string | undefined : undefined;
+          if (tc.name === 'rename_file') {
+            changedPath = (input.newPath as string | undefined) ?? changedPath;
+          }
+          if (changedPath) {
+            // Resolve relative paths
+            if (!changedPath.match(/^[A-Z]:\\|^\//i)) {
+              const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+              if (wsRoot) {
+                const pathMod = await import('path');
+                changedPath = pathMod.resolve(wsRoot, changedPath);
+              }
+            }
+
+            // Record in tree view (FS watcher may also pick this up, but explicit
+            // recording ensures correct change type for renames and creates)
+            this.changedFilesView?.record(changeKind, changedPath, previousPath);
+            provenance.filesModified.push(changedPath);
+            codeEditsMade = true;
+
+            // ---- Post-edit verification ----
+            if (changeKind !== 'delete' && changeKind !== 'rename') {
+              try {
+                const uri = vscode.Uri.file(changedPath);
+                const bytes = await vscode.workspace.fs.readFile(uri);
+                const content = Buffer.from(bytes).toString('utf-8');
+                if (content.length > 0) {
+                  const verifyMsg = `\n✔️ *Verified: ${changedPath.split(/[/\\]/).pop()} saved (${content.split('\n').length} lines)*\n`;
+                  aggregatedText += verifyMsg;
+                  emit(verifyMsg);
+                } else {
+                  const verifyMsg = `\n⚠️ *Verification warning: ${changedPath.split(/[/\\]/).pop()} is empty after edit*\n`;
+                  aggregatedText += verifyMsg;
+                  emit(verifyMsg);
+                }
+              } catch { /* best effort */ }
+            }
+          }
+        }
+
+        // ---- Track graph changes for provenance ----
+        if (!isError) {
+          const graphInfo = this._detectGraphChange(tc.name, tc.input as Record<string, unknown>, resultText);
+          if (graphInfo) {
+            provenance.graphUpdates.push(`${graphInfo.entityType}: ${graphInfo.description}`);
+          }
+        }
+
+        // Truncate before sending back
+        const truncatedResult = isError
+          ? resultText
+          : this._truncateToolResult(tc.name, resultText);
+
+        toolResults.push({
+          type: 'tool_result',
+          tool_use_id: tc.id,
+          content: truncatedResult,
+          ...(isError ? { is_error: true } : {}),
+        });
+
+        // Show human-readable result inline
+        const preview = this._humanReadablePreview(tc.name, resultText, 600);
+        if (isError) {
+          // ---- Failure transparency: structured error report ----
+          const errorReport = `\n❌ **${tc.name}** failed (${elapsed}s)\n` +
+            `> **Error type:** ${errorType}\n` +
+            `> **Details:** ${preview}\n` +
+            (errorType === 'timeout' ? `> **Suggestion:** Try with smaller scope or shallower depth\n` : '') +
+            (errorType === 'not_found' ? `> **Suggestion:** Check file/entity path; use list_directory or search_data_model first\n` : '') +
+            (errorType === 'ambiguity' ? `> **Suggestion:** Be more specific — use entity mode or provide exact file path\n` : '') +
+            (errorType === 'parsing' ? `> **Suggestion:** Check JSON format; the tool result may need different input\n` : '');
+          aggregatedText += errorReport;
+          emit(errorReport);
+        } else {
+          const resultStatus = `\n✅ **${tc.name}** (${elapsed}s) — ${preview}`;
+          aggregatedText += resultStatus;
+          emit(resultStatus);
+        }
+      }
+
+      if (aborted) break;
+
+      // ---- Graph sync reminder after code edits ----
+      // If code was modified and this is the last iteration before a final response,
+      // inject a reminder for the Architect to update the knowledge graph.
+      if (codeEditsMade && i === maxIterations - 2) {
+        const syncReminder =
+          '\n\n📝 *[System] Code files were modified. Consider updating the knowledge graph ' +
+          '(enrich_seed_data for features/workflows/data_model, or record_architecture_decision ' +
+          'if the change is architectural).*\n';
+        aggregatedText += syncReminder;
+        emit(syncReminder);
+      }
+
+      // Feed tool results back as a user message
+      rawMessages.push({ role: 'user', content: toolResults });
+
+      llmMessages.push({
+        role: 'assistant',
+        content: response.content || `[called ${response.toolCalls.map((t) => t.name).join(', ')}]`,
+      });
+      llmMessages.push({
+        role: 'user',
+        content: `[tool results provided for: ${response.toolCalls.map((t) => t.name).join(', ')}]`,
+      });
+    }
+
+    // ---- Provenance summary (appended after the LLM's final response) ----
+    if (provenance.toolsUsed.length > 0) {
+      const parts: string[] = ['\n\n---\n**Provenance:**'];
+      const uniqueTools = [...new Set(provenance.toolsUsed)];
+      parts.push(`- Tools: ${uniqueTools.join(', ')}`);
+      if (provenance.filesRead.length > 0) {
+        const uniqueReads = [...new Set(provenance.filesRead)].map(f => f.split(/[/\\]/).pop());
+        parts.push(`- Files read: ${uniqueReads.join(', ')}`);
+      }
+      if (provenance.filesModified.length > 0) {
+        const uniqueMods = [...new Set(provenance.filesModified)].map(f => f.split(/[/\\]/).pop());
+        parts.push(`- Files modified: ${uniqueMods.join(', ')}`);
+      }
+      if (provenance.entitiesAccessed.length > 0) {
+        const uniqueEntities = [...new Set(provenance.entitiesAccessed)];
+        parts.push(`- Entities: ${uniqueEntities.join(', ')}`);
+      }
+      if (provenance.graphUpdates.length > 0) {
+        parts.push(`- Graph updates: ${provenance.graphUpdates.join('; ')}`);
+      }
+      if (provenance.errors.length > 0) {
+        parts.push(`- Errors: ${provenance.errors.map(e => `${e.tool} (${e.type})`).join(', ')}`);
+      }
+      const provenanceBlock = parts.join('\n');
+      aggregatedText += provenanceBlock;
+      emit(provenanceBlock);
+    }
+
+    return aggregatedText;
+  }
+
+  /**
+   * Detect if a tool call resulted in a graph/knowledge-base change.
+   * Returns a GraphChange descriptor or undefined.
+   */
+  /** Lightweight graph-change detection for provenance tracking (no tree view dependency). */
+  private _detectGraphChange(
+    toolName: string,
+    input: Record<string, unknown>,
+    _resultText: string,
+  ): { entityType: string; description: string } | undefined {
+    switch (toolName) {
+      case 'enrich_seed_data':
+        return { entityType: String(input.target ?? 'unknown'), description: `Enriched ${input.target}` };
+      case 'scan_project':
+        return { entityType: 'index', description: 'Project scan completed' };
+      case 'record_architecture_decision':
+        return { entityType: 'adr', description: `ADR: ${String(input.title ?? 'new decision')}` };
+      case 'register_ui_element':
+        return { entityType: 'ui_element', description: `UI: ${String(input.id ?? 'element')}` };
+      case 'solidify_cognitive_insight':
+        return { entityType: 'tension', description: 'Insight solidified' };
+      case 'dream_cycle':
+        return { entityType: 'dream', description: 'Dream cycle completed' };
+      default:
+        return undefined;
     }
   }
 
   /* ---- Provider / model switching ---- */
 
   private async _changeProvider(provider: ArchitectProvider): Promise<void> {
-    await vscode.workspace
-      .getConfiguration("dreamgraph.architect")
-      .update("provider", provider, vscode.ConfigurationTarget.Workspace);
+    const cfg = vscode.workspace.getConfiguration('dreamgraph.architect');
+    await cfg.update('provider', provider, vscode.ConfigurationTarget.Workspace);
 
-    // Also update base URL to match the new provider's default
     const defaultUrls: Record<string, string> = {
-      anthropic: "https://api.anthropic.com/v1",
-      openai: "https://api.openai.com/v1",
-      ollama: "http://localhost:11434",
+      anthropic: 'https://api.anthropic.com/v1',
+      openai: 'https://api.openai.com/v1',
+      ollama: 'http://localhost:11434',
     };
     if (defaultUrls[provider]) {
-      await vscode.workspace
-        .getConfiguration("dreamgraph.architect")
-        .update("baseUrl", defaultUrls[provider], vscode.ConfigurationTarget.Workspace);
+      await cfg.update('baseUrl', defaultUrls[provider], vscode.ConfigurationTarget.Workspace);
     }
 
-    // Clear model so user picks a valid one for the new provider
-    await vscode.workspace
-      .getConfiguration("dreamgraph.architect")
-      .update("model", undefined, vscode.ConfigurationTarget.Workspace);
+    // Clear model so user picks one for the new provider
+    await cfg.update('model', undefined, vscode.ConfigurationTarget.Workspace);
 
-    await this._architectLlm.loadConfig();
+    await this.architectLlm?.loadConfig();
     this._sendModelUpdate();
+
+    // Proactively prompt for API key if the new provider needs one and none is stored
+    if (provider !== 'ollama' && this.architectLlm) {
+      const existingKey = await this.architectLlm.getApiKey(provider);
+      if (!existingKey) {
+        // Prompt immediately via the command palette flow
+        await vscode.commands.executeCommand('dreamgraph.setArchitectApiKey');
+        // Reload config after key was (potentially) set
+        await this.architectLlm.loadConfig();
+        this._sendModelUpdate();
+      }
+    }
+
+    this._checkApiKeyWarning();
   }
 
   private async _changeModel(model: string): Promise<void> {
     await vscode.workspace
-      .getConfiguration("dreamgraph.architect")
-      .update("model", model, vscode.ConfigurationTarget.Workspace);
-    await this._architectLlm.loadConfig();
+      .getConfiguration('dreamgraph.architect')
+      .update('model', model, vscode.ConfigurationTarget.Workspace);
+    await this.architectLlm?.loadConfig();
     this._sendModelUpdate();
   }
 
   private _sendModelUpdate(): void {
-    const config = this._architectLlm.currentConfig;
-    const provider = config?.provider ?? "";
-    const currentModel = config?.model ?? "";
+    if (!this.architectLlm) return;
+    const config = this.architectLlm.currentConfig;
+    const provider = config?.provider ?? '';
+    const currentModel = config?.model ?? '';
     const presetModels = this._getModelsForProvider(provider as ArchitectProvider);
 
-    // Ensure the current model always appears in the list (handles custom names)
+    // Ensure current model always appears (handles custom names)
     const models = currentModel && !presetModels.includes(currentModel)
       ? [currentModel, ...presetModels]
       : presetModels;
 
-    this._postMessage({
-      type: "updateModels",
-      providers: ["anthropic", "openai", "ollama"],
+    void this.postMessage({
+      type: 'updateModels',
+      providers: ['anthropic', 'openai', 'ollama'],
       models,
-      current: {
-        provider,
-        model: currentModel,
-      },
+      current: { provider, model: currentModel },
     });
   }
 
   private _getModelsForProvider(provider: ArchitectProvider): string[] {
     switch (provider) {
-      case "anthropic":
-        return [...ANTHROPIC_MODELS];
-      case "openai":
-        return [...OPENAI_MODELS];
-      case "ollama":
-        return []; // Dynamic — fetched separately
-      default:
-        return [];
+      case 'anthropic': return [...ANTHROPIC_MODELS];
+      case 'openai':    return [...OPENAI_MODELS];
+      case 'ollama':    return []; // dynamic — user enters custom
+      default:          return [];
     }
   }
 
-  /* ---- File navigation ---- */
-
-  private async _openFile(filePath: string, line?: number): Promise<void> {
-    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
-    if (!workspaceRoot) return;
-
-    const uri = vscode.Uri.joinPath(workspaceRoot, filePath);
-    const doc = await vscode.workspace.openTextDocument(uri);
-    const editor = await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
-
-    if (line !== undefined) {
-      const position = new vscode.Position(line - 1, 0);
-      editor.selection = new vscode.Selection(position, position);
-      editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
-    }
-  }
-
-  /* ---- State management ---- */
-
-  private _resendState(): void {
-    if (!this._panel) return;
-
-    // Send model state
-    this._sendModelUpdate();
-
-    // Re-send all messages
-    for (const msg of this._messages) {
-      this._postMessage({ type: "addMessage", message: this._serialize(msg) });
-    }
-
-    // Check for API key warning
-    this._checkApiKeyWarning();
-  }
-
-  private async _checkApiKeyWarning(): Promise<void> {
-    const config = this._architectLlm.currentConfig;
+  private _checkApiKeyWarning(): void {
+    if (!this.architectLlm) return;
+    const config = this.architectLlm.currentConfig;
     if (!config?.provider) {
-      this._postMessage({
-        type: "error",
-        message: 'No Architect provider configured. Set "dreamgraph.architect.provider" in settings.',
+      void this.postMessage({
+        type: 'error',
+        error: 'No Architect provider configured. Select one in the dropdown above.',
       });
       return;
     }
-
-    if (config.provider !== "ollama" && !config.apiKey) {
-      this._postMessage({
-        type: "error",
-        message: `No API key configured for ${config.provider}. Use "DreamGraph: Set Architect API Key" to store one.`,
+    if (config.provider !== 'ollama' && !config.apiKey) {
+      void this.postMessage({
+        type: 'error',
+        error: `No API key for ${config.provider}. Use "DreamGraph: Set Architect API Key".`,
       });
     }
   }
 
-  private _cancelStream(): void {
-    if (this._streamAbort) {
-      this._streamAbort.abort();
-      this._streamAbort = null;
-    }
-    this._isStreaming = false;
-  }
+  /* ---- Tool result truncation ---- */
 
-  /* ---- Helpers ---- */
-
-  private _serialize(msg: ChatMessage): SerializedChatMessage {
-    return {
-      role: msg.role,
-      content: msg.content,
-      timestamp: msg.timestamp.toISOString(),
-      metadata: msg.metadata,
-    };
-  }
-
-  private _buildReasoningSummary(envelope: EditorContextEnvelope): string {
-    const parts: string[] = [];
-    const gc = envelope.graphContext;
-    if (!gc) return "No graph context available";
-
-    if (gc.applicableAdrs.length > 0) {
-      parts.push(...gc.applicableAdrs.slice(0, 3));
-    }
-    if (gc.relatedFeatures.length > 0) {
-      parts.push(...gc.relatedFeatures.slice(0, 3));
-    }
-    if (gc.relatedWorkflows.length > 0) {
-      parts.push(...gc.relatedWorkflows.slice(0, 2));
-    }
-
-    return parts.length > 0 ? `Based on: ${parts.join(", ")}` : "Based on: file content only (no graph context)";
-  }
-
-  /* ---- Tool Result Truncation ---- */
-
-  /**
-   * Compress a raw tool result into a compact summary suitable for the
-   * Architect LLM. The daemon's small models already did the heavy work;
-   * the Architect only needs enough to decide the next step.
-   *
-   * Strategy:
-   * 1. For known tools, extract just the status/summary fields.
-   * 2. For JSON payloads, extract top-level keys and counts.
-   * 3. Hard-cap at TOOL_RESULT_MAX_CHARS.
-   */
   private _truncateToolResult(toolName: string, raw: string): string {
-    const MAX = ChatPanel.TOOL_RESULT_MAX_CHARS;
-
-    // Short results pass through
+    const MAX = ChatPanel._toolResultLimit(toolName);
     if (raw.length <= MAX) return raw;
 
-    // Try to parse as JSON and extract a summary
     try {
       const parsed = JSON.parse(raw);
-
-      // Success/error wrapper: { ok, data } or { ok, error }
-      if (typeof parsed === "object" && parsed !== null && "ok" in parsed) {
-        if (parsed.ok && parsed.data) {
-          return this._summarizeObject(toolName, parsed.data, MAX);
-        }
-        if (!parsed.ok && parsed.error) {
-          return JSON.stringify({ ok: false, error: parsed.error }).slice(0, MAX);
-        }
+      if (typeof parsed === 'object' && parsed !== null && 'ok' in parsed) {
+        if (parsed.ok && parsed.data) return this._summarizeObject(toolName, parsed.data, MAX);
+        if (!parsed.ok && parsed.error) return JSON.stringify({ ok: false, error: parsed.error }).slice(0, MAX);
       }
-
-      // Direct object/array
       return this._summarizeObject(toolName, parsed, MAX);
     } catch {
-      // Not JSON — just hard truncate
       return raw.slice(0, MAX) + `\n... [truncated, ${raw.length} chars total]`;
     }
   }
 
-  /**
-   * Produce a compact summary of a parsed tool result object.
-   */
   private _summarizeObject(toolName: string, obj: unknown, max: number): string {
-    // Arrays: show count + first few items
     if (Array.isArray(obj)) {
       const preview = obj.slice(0, 3).map((item) => {
-        if (typeof item === "object" && item !== null) {
-          const keys = ["id", "name", "title", "message", "status", "type"];
+        if (typeof item === 'object' && item !== null) {
+          const keys = ['id', 'name', 'title', 'message', 'status', 'type'];
           const pick: Record<string, unknown> = {};
           for (const k of keys) {
             if (k in item) pick[k] = (item as Record<string, unknown>)[k];
           }
-          return Object.keys(pick).length > 0 ? pick : "[object]";
+          return Object.keys(pick).length > 0 ? pick : '[object]';
         }
         return item;
       });
-      const summary = JSON.stringify({
-        _tool: toolName,
-        _count: obj.length,
-        _preview: preview,
-      });
-      return summary.slice(0, max);
+      return JSON.stringify({ _tool: toolName, _count: obj.length, _preview: preview }).slice(0, max);
     }
 
-    // Objects: extract known summary fields, drop bulk data
-    if (typeof obj === "object" && obj !== null) {
+    if (typeof obj === 'object' && obj !== null) {
       const record = obj as Record<string, unknown>;
       const summaryKeys = [
-        "message", "summary", "status", "ok", "error",
-        "entries_received", "entries_inserted", "entries_updated",
-        "total_entries", "index_entries", "target", "file", "mode",
-        "validation_errors", "count", "name", "id", "repos",
-        "features_count", "workflows_count", "data_model_count",
-        "capabilities_count", "total_files", "total_entities",
+        'message', 'summary', 'status', 'ok', 'error',
+        'entries_received', 'entries_inserted', 'entries_updated',
+        'total_entries', 'index_entries', 'target', 'file', 'mode',
+        'validation_errors', 'count', 'name', 'id', 'repos',
+        'features_count', 'workflows_count', 'data_model_count',
+        'capabilities_count', 'total_files', 'total_entities',
       ];
-
       const compact: Record<string, unknown> = { _tool: toolName };
       for (const k of summaryKeys) {
         if (k in record) {
           const val = record[k];
-          // Truncate nested arrays to counts
-          if (Array.isArray(val)) {
-            compact[k] = val.length <= 5 ? val : `[${val.length} items]`;
-          } else {
-            compact[k] = val;
-          }
+          compact[k] = Array.isArray(val) ? (val.length <= 5 ? val : `[${val.length} items]`) : val;
         }
       }
-
-      // If we got nothing useful, list the top-level keys
       if (Object.keys(compact).length <= 1) {
         compact._keys = Object.keys(record).slice(0, 20);
         for (const k of Object.keys(record).slice(0, 5)) {
           const v = record[k];
-          if (typeof v === "string" && v.length <= 200) compact[k] = v;
-          else if (typeof v === "number" || typeof v === "boolean") compact[k] = v;
+          if (typeof v === 'string' && v.length <= 200) compact[k] = v;
+          else if (typeof v === 'number' || typeof v === 'boolean') compact[k] = v;
           else if (Array.isArray(v)) compact[k] = `[${v.length} items]`;
         }
       }
-
       return JSON.stringify(compact).slice(0, max);
     }
 
-    // Primitives
     return String(obj).slice(0, max);
   }
 
-  private _postMessage(msg: ExtensionToWebviewMessage): void {
-    this._panel?.webview.postMessage(msg);
+  /**
+   * Build a short, human-readable preview of a tool result for displaying
+   * inline in the chat window. The goal is to show something useful — not JSON.
+   */
+  private _humanReadablePreview(toolName: string, raw: string, max: number): string {
+    try {
+      const json = JSON.parse(raw);
+      const obj = typeof json === 'object' && json !== null && 'data' in json ? json.data : json;
+
+      // run_command: summarise exit code + tail of relevant output
+      if (toolName === 'run_command' && obj) {
+        const exit = obj.exitCode ?? '?';
+        const out = (exit !== 0 && obj.stderr) ? String(obj.stderr) : String(obj.stdout ?? '');
+        const tail = out.split('\n').filter((l: string) => l.trim()).slice(-8).join('\n');
+        return `exit ${exit}${tail ? ' — ' + tail.slice(0, max - 20) : ''}`;
+      }
+
+      // modify_entity / write_file: show result message
+      if ((toolName === 'modify_entity' || toolName === 'write_file') && obj?.message) {
+        return String(obj.message).slice(0, max);
+      }
+
+      // Scan / enrichment results
+      if (obj.message && typeof obj.message === 'string') return obj.message.slice(0, max);
+
+      // Simple ok / error
+      if (obj.ok === false && obj.error) return `Error: ${String(obj.error).slice(0, max)}`;
+
+      // Counts-style results
+      const parts: string[] = [];
+      const pick = ['repos_scanned', 'files_discovered', 'features', 'workflows',
+        'data_model', 'index_entries', 'llm_tokens_used', 'entries_inserted',
+        'entries_updated', 'total_entries', 'count', 'edges_proposed',
+        'edges_promoted', 'status', 'state'];
+      for (const k of pick) {
+        if (k in obj) {
+          const v = obj[k];
+          if (typeof v === 'object' && v !== null && 'total' in v) {
+            parts.push(`${k}: ${v.inserted ?? 0} new / ${v.total} total`);
+          } else {
+            parts.push(`${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`);
+          }
+        }
+      }
+      if (parts.length > 0) return parts.join(' · ').slice(0, max);
+
+      // Array result
+      if (Array.isArray(obj)) return `${obj.length} item(s) returned`;
+
+      // Fallback: first 5 keys as key=value
+      const keys = Object.keys(obj).slice(0, 5);
+      return keys.map(k => `${k}: ${JSON.stringify(obj[k]).slice(0, 60)}`).join(' · ').slice(0, max);
+    } catch {
+      // Not JSON — just trim the raw text
+      return raw.length > max ? raw.slice(0, max) + '…' : raw;
+    }
   }
 
-  /* ---- Webview HTML ---- */
+  /**
+   * Produce a human-readable one-liner describing what a tool call will do,
+   * based on the tool name and the input arguments the model sent.
+   */
+  private _describeToolCall(name: string, input: Record<string, unknown>): string {
+    const descriptions: Record<string, (i: Record<string, unknown>) => string> = {
+      scan_project: (i) => {
+        const depth = i.depth ?? 'deep';
+        const targets = Array.isArray(i.targets) ? i.targets.join(', ') : 'all';
+        return `Scanning project (${depth}, targets: ${targets})…`;
+      },
+      init_graph: () => 'Initializing knowledge graph…',
+      enrich_seed_data: (i) => {
+        const target = i.target ?? '?';
+        const count = Array.isArray(i.entries) ? i.entries.length : '?';
+        return `Enriching ${target} (${count} entries, mode: ${i.mode ?? 'merge'})…`;
+      },
+      dream_cycle: (i) => `Running dream cycle (strategy: ${i.strategy ?? 'all'})…`,
+      read_source_code: (i) => {
+        if (i.entity) return `Reading entity "${i.entity}" from ${i.filePath ?? '?'}…`;
+        return `Reading ${i.filePath ?? '?'}${i.startLine ? ` L${i.startLine}–${i.endLine ?? '?'}` : ''}…`;
+      },
+      query_resource: (i) => `Querying ${i.type ?? 'resource'}${i.name ? ` "${i.name}"` : ''}…`,
+      search_data_model: (i) => `Searching data model for "${i.entity ?? i.query ?? '?'}"…`,
+      cognitive_status: () => 'Checking cognitive engine status…',
+      get_dream_insights: () => 'Fetching dream insights…',
+      get_causal_insights: () => 'Fetching causal chains…',
+      get_temporal_insights: () => 'Fetching temporal patterns…',
+      get_remediation_plan: (i) => `Getting remediation plan for "${i.tension_id ?? '?'}"…`,
+      query_architecture_decisions: (i) => `Querying ADRs${i.status ? ` (status: ${i.status})` : ''}…`,
+      record_architecture_decision: (i) => `Recording ADR: "${i.title ?? '?'}"…`,
+      register_ui_element: (i) => `Registering UI element: "${i.id ?? '?'}"…`,
+      solidify_cognitive_insight: (i) => `Solidifying insight: "${i.description?.toString().slice(0, 60) ?? '?'}"…`,
+      git_log: (i) => `Reading git log${i.filePath ? ` for ${i.filePath}` : ''}…`,
+      git_blame: (i) => `Reading git blame for ${i.filePath ?? '?'}…`,
+      get_workflow: (i) => `Getting workflow: "${i.id ?? '?'}"…`,
+      query_api_surface: (i) => `Querying API surface${i.member_name ? ` for "${i.member_name}"` : ''}…`,
+      fetch_web_page: (i) => `Fetching ${i.url ?? '?'}…`,
+      schedule_dream: (i) => `Scheduling ${i.total_cycles ?? '?'} dream cycles…`,
+      export_living_docs: () => 'Exporting living documentation…',
+      normalize_dreams: () => 'Normalizing dream graph…',
+      edit_entity: (i) => `Editing entity "${i.entity ?? '?'}" in ${i.filePath ?? '?'}…`,
+      edit_file: (i) => `Editing ${i.filePath ?? '?'}…`,
+      run_command: (i) => `Running: \`${String(i.command ?? '?').slice(0, 80)}\`…`,
+      modify_entity: (i) => `Modifying ${i.parentEntity ? `${i.parentEntity}.` : ''}${i.entity ?? '?'} in ${i.filePath ?? '?'}…`,
+      write_file: (i) => `Writing ${i.filePath ?? '?'}…`,
+      read_local_file: (i) => `Reading ${i.filePath ?? '?'}${i.startLine ? ` L${i.startLine}–${i.endLine ?? '?'}` : ''}…`,
+    };
 
-  private _getHtml(webview: vscode.Webview): string {
-    const nonce = getNonce();
-
-    return /* html */ `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
-  <title>DreamGraph Chat</title>
-  <style nonce="${nonce}">
-    :root {
-      --dg-bg: var(--vscode-editor-background);
-      --dg-fg: var(--vscode-editor-foreground);
-      --dg-input-bg: var(--vscode-input-background);
-      --dg-input-fg: var(--vscode-input-foreground);
-      --dg-input-border: var(--vscode-input-border);
-      --dg-button-bg: var(--vscode-button-background);
-      --dg-button-fg: var(--vscode-button-foreground);
-      --dg-button-hover: var(--vscode-button-hoverBackground);
-      --dg-border: var(--vscode-panel-border);
-      --dg-user-bg: var(--vscode-textBlockQuote-background);
-      --dg-assistant-bg: var(--vscode-editor-background);
-      --dg-error: var(--vscode-errorForeground);
-      --dg-warning: var(--vscode-editorWarning-foreground);
-      --dg-muted: var(--vscode-descriptionForeground);
-      --dg-link: var(--vscode-textLink-foreground);
+    const fn = descriptions[name];
+    if (fn) {
+      try { return fn(input); } catch { /* fall through */ }
     }
 
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+    // Generic fallback: show key params
+    const keys = Object.keys(input);
+    if (keys.length === 0) return 'Running…';
+    const pairs = keys.slice(0, 3).map(k => {
+      const v = input[k];
+      const s = typeof v === 'string' ? v : Array.isArray(v) ? `[${v.length}]` : JSON.stringify(v);
+      return `${k}: ${String(s).slice(0, 40)}`;
+    });
+    return pairs.join(', ') + '…';
+  }
 
+  /* ---- State management ---- */
+
+  private async restoreMessages(): Promise<void> {
+    if (!this.memory) {
+      return;
+    }
+
+    const persisted = await this.memory.load(this.currentInstanceId);
+    this.messages.splice(0, this.messages.length, ...persisted.map((message) => ({
+      role: message.role,
+      content: message.content,
+      timestamp: message.timestamp,
+    })));
+
+    await this.postState();
+  }
+
+  private async persistMessages(): Promise<void> {
+    if (!this.memory) {
+      return;
+    }
+
+    const persisted: PersistedMessage[] = this.messages.map((message) => ({
+      role: message.role,
+      content: message.content,
+      timestamp: message.timestamp,
+    }));
+
+    await this.memory.save(this.currentInstanceId, persisted);
+  }
+
+  private async rehydrateWebview(): Promise<void> {
+    await this.restoreMessages();
+    await this.postState();
+    this._sendModelUpdate();
+
+    // If a streaming response is in progress, restore the full accumulated content.
+    // This handles the case where the webview was fully destroyed and recreated
+    // (retainContextWhenHidden prevents this in most cases, but not panel close/reopen).
+    if (this.streaming && this.streamingContent) {
+      await this.postMessage({ type: 'stream-start' });
+      await this.postMessage({ type: 'stream-chunk', chunk: this.streamingContent });
+      // Also tell the webview to show steering UI (stop button, changed placeholder)
+      // by sending a synthetic stream-start first (already done above)
+    }
+
+    // Restore draft text in the prompt input
+    if (this.draftText) {
+      await this.postMessage({ type: 'restoreDraft', text: this.draftText });
+    }
+  }
+
+  private async postState(): Promise<void> {
+    await this.postMessage({
+      type: 'state',
+      state: {
+        messages: [...this.messages],
+      },
+    });
+  }
+
+  private async postMessage(message: ExtensionToWebviewMessage): Promise<void> {
+    await this.view?.webview.postMessage(message);
+  }
+
+  private getHtml(webview: vscode.Webview): string {
+    const nonce = String(Date.now());
+    const csp = `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';`;
+
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="${csp}" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DreamGraph Chat</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
     body {
       font-family: var(--vscode-font-family);
       font-size: var(--vscode-font-size);
-      color: var(--dg-fg);
-      background: var(--dg-bg);
+      color: var(--vscode-foreground);
+      background: var(--vscode-editor-background);
       display: flex;
       flex-direction: column;
-      height: 100vh;
-      overflow: hidden;
     }
-
-    /* Header */
+    /* Config header */
     .header {
       display: flex;
       align-items: center;
-      gap: 8px;
-      padding: 8px 12px;
-      border-bottom: 1px solid var(--dg-border);
+      gap: 6px;
+      padding: 6px 8px;
+      border-bottom: 1px solid var(--vscode-panel-border);
       flex-shrink: 0;
-    }
-    .header-title {
-      font-weight: 600;
-      flex: 1;
+      flex-wrap: wrap;
     }
     .header select {
-      background: var(--dg-input-bg);
-      color: var(--dg-input-fg);
-      border: 1px solid var(--dg-input-border);
+      background: var(--vscode-input-background);
+      color: var(--vscode-input-foreground);
+      border: 1px solid var(--vscode-input-border);
       border-radius: 3px;
-      padding: 2px 6px;
-      font-size: 12px;
+      padding: 2px 4px;
+      font-size: 11px;
       font-family: inherit;
+      flex: 1;
+      min-width: 0;
     }
-
-    /* Messages */
-    .messages {
+    #messages {
       flex: 1;
       overflow-y: auto;
-      padding: 12px;
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 8px;
+      padding: 12px;
     }
-
     .message {
-      padding: 10px 14px;
-      border-radius: 6px;
-      max-width: 95%;
-      word-wrap: break-word;
+      padding: 8px 10px;
+      border-radius: 8px;
       white-space: pre-wrap;
-      line-height: 1.5;
+      word-break: break-word;
+      max-width: 90%;
     }
-    .message.user {
-      background: var(--dg-user-bg);
+    .user {
+      background: var(--vscode-button-background);
+      color: var(--vscode-button-foreground);
       align-self: flex-end;
-      border: 1px solid var(--dg-border);
     }
-    .message.assistant {
-      background: var(--dg-assistant-bg);
+    .assistant, .system {
+      background: var(--vscode-editor-inactiveSelectionBackground);
+      color: var(--vscode-foreground);
       align-self: flex-start;
-      border: 1px solid var(--dg-border);
     }
-    .message.system {
-      color: var(--dg-muted);
-      font-style: italic;
-      font-size: 0.9em;
-      text-align: center;
-      align-self: center;
-    }
-    .message.error {
-      color: var(--dg-error);
-      border: 1px solid var(--dg-error);
+    .error-msg {
+      color: var(--vscode-errorForeground);
+      border: 1px solid var(--vscode-errorForeground);
       text-align: center;
       align-self: center;
       font-size: 0.9em;
+      padding: 8px 10px;
+      border-radius: 8px;
     }
-
-    .message .reasoning-basis {
-      margin-top: 8px;
-      padding-top: 6px;
-      border-top: 1px solid var(--dg-border);
-      font-size: 0.85em;
-      color: var(--dg-muted);
-    }
-
-    .message .timestamp {
-      font-size: 0.8em;
-      color: var(--dg-muted);
-      margin-top: 4px;
-    }
-
-    .message code {
-      background: var(--vscode-textCodeBlock-background);
-      padding: 1px 4px;
-      border-radius: 3px;
-      font-family: var(--vscode-editor-font-family);
-      font-size: 0.95em;
-    }
-
-    .message pre {
-      background: var(--vscode-textCodeBlock-background);
-      padding: 8px 12px;
-      border-radius: 4px;
-      overflow-x: auto;
-      margin: 6px 0;
-      font-family: var(--vscode-editor-font-family);
-      font-size: 0.9em;
-      line-height: 1.4;
-    }
-
-    .streaming-cursor::after {
-      content: "▌";
-      animation: blink 0.7s step-end infinite;
-    }
-    @keyframes blink { 50% { opacity: 0; } }
-
-    /* Loading indicator */
-    .loading {
-      display: none;
-      align-self: center;
-      color: var(--dg-muted);
-      font-style: italic;
-      padding: 8px;
-    }
-    .loading.visible { display: block; }
-
-    /* Input area */
-    .input-area {
+    .error-msg a { color: var(--vscode-textLink-foreground); cursor: pointer; }
+    #composer {
       display: flex;
       gap: 8px;
-      padding: 10px 12px;
-      border-top: 1px solid var(--dg-border);
-      flex-shrink: 0;
+      padding: 8px 12px;
+      border-top: 1px solid var(--vscode-panel-border);
+      background: var(--vscode-editor-background);
     }
-    .input-area textarea {
+    #prompt {
       flex: 1;
-      background: var(--dg-input-bg);
-      color: var(--dg-input-fg);
-      border: 1px solid var(--dg-input-border);
+      padding: 6px 8px;
+      background: var(--vscode-input-background);
+      color: var(--vscode-input-foreground);
+      border: 1px solid var(--vscode-input-border);
       border-radius: 4px;
-      padding: 8px 10px;
-      font-family: inherit;
-      font-size: inherit;
-      resize: none;
-      min-height: 40px;
-      max-height: 120px;
-      line-height: 1.4;
+      font-family: var(--vscode-font-family);
+      font-size: var(--vscode-font-size);
+      outline: none;
     }
-    .input-area textarea:focus {
-      outline: 1px solid var(--dg-button-bg);
+    #prompt:focus {
+      border-color: var(--vscode-focusBorder);
     }
-    .input-area button {
-      background: var(--dg-button-bg);
-      color: var(--dg-button-fg);
+    #prompt::placeholder {
+      color: var(--vscode-input-placeholderForeground);
+    }
+    button {
+      padding: 6px 10px;
+      background: var(--vscode-button-background);
+      color: var(--vscode-button-foreground);
       border: none;
       border-radius: 4px;
-      padding: 8px 16px;
       cursor: pointer;
-      font-family: inherit;
-      font-size: inherit;
-      align-self: flex-end;
+      font-family: var(--vscode-font-family);
+      font-size: var(--vscode-font-size);
     }
-    .input-area button:hover {
-      background: var(--dg-button-hover);
+    button:hover {
+      background: var(--vscode-button-hoverBackground);
     }
-    .input-area button:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
+    #clear {
+      background: var(--vscode-button-secondaryBackground);
+      color: var(--vscode-button-secondaryForeground);
+    }
+    #clear:hover {
+      background: var(--vscode-button-secondaryHoverBackground);
+    }
+    .streaming-cursor::after {
+      content: '▊';
+      animation: blink 1s step-start infinite;
+    }
+    @keyframes blink {
+      50% { opacity: 0; }
     }
   </style>
 </head>
 <body>
   <div class="header">
-    <span class="header-title">DreamGraph Chat</span>
     <select id="providerSelect" title="Provider">
-      <option value="">Select provider…</option>
+      <option value="">Provider…</option>
       <option value="anthropic">anthropic</option>
       <option value="openai">openai</option>
       <option value="ollama">ollama</option>
     </select>
     <select id="modelSelect" title="Model">
-      <option value="">Select model…</option>
+      <option value="">Model…</option>
     </select>
   </div>
 
-  <div class="messages" id="messages"></div>
-  <div class="loading" id="loading">Thinking…</div>
-
-  <div class="input-area">
-    <textarea id="input" placeholder="Ask the Architect…" rows="1"></textarea>
-    <button id="sendBtn">Send</button>
-  </div>
+  <div id="messages"></div>
+  <form id="composer">
+    <input id="prompt" type="text" placeholder="Ask DreamGraph…" autocomplete="off" />
+    <button id="sendBtn" type="submit">Send</button>
+    <button id="stopBtn" type="button" style="display:none;background:var(--vscode-errorForeground);color:#fff">Stop</button>
+    <button id="clear" type="button">Clear</button>
+  </form>
 
   <script nonce="${nonce}">
     (function() {
-      const vscode = acquireVsCodeApi();
-      const messagesEl = document.getElementById("messages");
-      const loadingEl = document.getElementById("loading");
-      const inputEl = document.getElementById("input");
-      const sendBtn = document.getElementById("sendBtn");
-      const providerSelect = document.getElementById("providerSelect");
-      const modelSelect = document.getElementById("modelSelect");
+    const vscode = acquireVsCodeApi();
+    const messagesEl = document.getElementById('messages');
+    const form = document.getElementById('composer');
+    const promptEl = document.getElementById('prompt');
+    const sendBtn = document.getElementById('sendBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const clearEl = document.getElementById('clear');
+    const providerSelect = document.getElementById('providerSelect');
+    const modelSelect = document.getElementById('modelSelect');
+    let streamingEl = null;
 
-      let streamingEl = null;
+    function scrollToBottom() {
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
 
-      /* ---- Send message ---- */
-      function send() {
-        const content = inputEl.value.trim();
-        if (!content) return;
-        vscode.postMessage({ type: "sendMessage", content: content });
-        inputEl.value = "";
-        inputEl.style.height = "40px";
+    function createBubble(role, content) {
+      const div = document.createElement('div');
+      div.className = 'message ' + role;
+      div.textContent = content;
+      return div;
+    }
+
+    function render(messages) {
+      messagesEl.innerHTML = '';
+      streamingEl = null;
+      for (const message of messages) {
+        messagesEl.appendChild(createBubble(message.role, message.content));
       }
+      scrollToBottom();
+    }
 
-      sendBtn.addEventListener("click", send);
-      inputEl.addEventListener("keydown", function(e) {
-        if (e.key === "Enter" && !e.shiftKey) {
+    /* ---- Provider / model change ---- */
+    providerSelect.addEventListener('change', function() {
+      vscode.postMessage({ type: 'changeProvider', provider: this.value });
+    });
+    modelSelect.addEventListener('change', function() {
+      vscode.postMessage({ type: 'changeModel', model: this.value });
+    });
+
+    function updateModels(providers, models, current) {
+      providerSelect.value = current.provider || '';
+
+      modelSelect.innerHTML = '';
+      if (models.length === 0) {
+        var opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = 'Model…';
+        modelSelect.appendChild(opt);
+      }
+      models.forEach(function(m) {
+        var opt = document.createElement('option');
+        opt.value = m;
+        opt.textContent = m;
+        modelSelect.appendChild(opt);
+      });
+
+      // "Custom…" entry for free-text model names
+      var customOpt = document.createElement('option');
+      customOpt.value = '__custom__';
+      customOpt.textContent = 'Custom model…';
+      modelSelect.appendChild(customOpt);
+
+      modelSelect.value = current.model || '';
+    }
+
+    function escapeHtml(text) {
+      var div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    function showError(message) {
+      var el = document.createElement('div');
+      el.className = 'message error-msg';
+      if (message.indexOf('API key') !== -1 || message.indexOf('Set Architect') !== -1) {
+        el.innerHTML = escapeHtml(message)
+          + '<br><a href="#" id="setKeyLink">Set API Key</a>';
+        messagesEl.appendChild(el);
+        el.querySelector('#setKeyLink').addEventListener('click', function(e) {
           e.preventDefault();
-          send();
-        }
-      });
-
-      /* Auto-resize textarea */
-      inputEl.addEventListener("input", function() {
-        this.style.height = "40px";
-        this.style.height = Math.min(this.scrollHeight, 120) + "px";
-      });
-
-      /* ---- Provider/model change ---- */
-      providerSelect.addEventListener("change", function() {
-        vscode.postMessage({ type: "changeProvider", provider: this.value });
-      });
-      modelSelect.addEventListener("change", function() {
-        vscode.postMessage({ type: "changeModel", model: this.value });
-      });
-
-      /* ---- Receive messages from extension ---- */
-      window.addEventListener("message", function(event) {
-        const msg = event.data;
-        switch (msg.type) {
-          case "addMessage":
-            addMessage(msg.message);
-            break;
-          case "streamChunk":
-            appendStreamChunk(msg.content, msg.messageId);
-            break;
-          case "streamEnd":
-            endStream(msg.messageId);
-            break;
-          case "setLoading":
-            loadingEl.classList.toggle("visible", msg.loading);
-            sendBtn.disabled = msg.loading;
-            break;
-          case "updateModels":
-            updateModels(msg.providers, msg.models, msg.current);
-            break;
-          case "error":
-            showError(msg.message);
-            break;
-        }
-      });
-
-      function addMessage(msg) {
-        const el = document.createElement("div");
-        el.className = "message " + msg.role;
-        el.innerHTML = escapeHtml(msg.content);
-
-        if (msg.metadata && msg.metadata.reasoningBasis && msg.metadata.reasoningBasis.summary) {
-          const basis = document.createElement("div");
-          basis.className = "reasoning-basis";
-          basis.textContent = msg.metadata.reasoningBasis.summary;
-          el.appendChild(basis);
-        }
-
-        messagesEl.appendChild(el);
-        messagesEl.scrollTop = messagesEl.scrollHeight;
-      }
-
-      function appendStreamChunk(content, messageId) {
-        if (!streamingEl) {
-          streamingEl = document.createElement("div");
-          streamingEl.className = "message assistant streaming-cursor";
-          streamingEl.dataset.messageId = messageId;
-          messagesEl.appendChild(streamingEl);
-        }
-        streamingEl.textContent += content;
-        messagesEl.scrollTop = messagesEl.scrollHeight;
-      }
-
-      function endStream(messageId) {
-        if (streamingEl) {
-          streamingEl.classList.remove("streaming-cursor");
-          streamingEl = null;
-        }
-      }
-
-      function updateModels(providers, models, current) {
-        providerSelect.value = current.provider || "";
-
-        /* Rebuild model dropdown */
-        modelSelect.innerHTML = "";
-        if (models.length === 0) {
-          var opt = document.createElement("option");
-          opt.value = "";
-          opt.textContent = "Select model…";
-          modelSelect.appendChild(opt);
-        }
-        models.forEach(function(m) {
-          var opt = document.createElement("option");
-          opt.value = m;
-          opt.textContent = m;
-          modelSelect.appendChild(opt);
+          vscode.postMessage({ type: 'setApiKey' });
         });
-
-        /* Add "Custom…" entry to allow free-text model names */
-        var customOpt = document.createElement("option");
-        customOpt.value = "__custom__";
-        customOpt.textContent = "Custom model…";
-        modelSelect.appendChild(customOpt);
-
-        modelSelect.value = current.model || "";
-      }
-
-      function showError(message) {
-        var el = document.createElement("div");
-        el.className = "message error";
-
-        /* Make "Set Architect API Key" clickable */
-        if (message.indexOf("Set Architect API Key") !== -1) {
-          el.innerHTML = escapeHtml(message) +
-            '<br><a href="#" style="color:var(--dg-link);cursor:pointer" id="setKeyLink">Set API Key</a>';
-          el.querySelector("#setKeyLink").addEventListener("click", function(e) {
-            e.preventDefault();
-            vscode.postMessage({ type: "setApiKey" });
-          });
-        } else {
-          el.textContent = message;
-        }
-
+      } else {
+        el.textContent = message;
         messagesEl.appendChild(el);
-        messagesEl.scrollTop = messagesEl.scrollHeight;
       }
+      scrollToBottom();
+    }
 
-      function escapeHtml(text) {
-        var div = document.createElement("div");
-        div.textContent = text;
-        return div.innerHTML;
+    window.addEventListener('message', (event) => {
+      const message = event.data;
+      switch (message.type) {
+        case 'state':
+          if (message.state) {
+            render(message.state.messages || []);
+          }
+          break;
+        case 'addMessage':
+          if (message.message) {
+            messagesEl.appendChild(createBubble(message.message.role, message.message.content));
+            scrollToBottom();
+          }
+          break;
+        case 'stream-start':
+          streamingEl = createBubble('assistant', '');
+          streamingEl.classList.add('streaming-cursor');
+          messagesEl.appendChild(streamingEl);
+          scrollToBottom();
+          // Keep input enabled so user can send steering prompts
+          promptEl.placeholder = 'Steer the conversation…';
+          sendBtn.textContent = 'Steer';
+          stopBtn.style.display = '';
+          break;
+        case 'stream-chunk':
+          if (streamingEl && message.chunk) {
+            streamingEl.textContent += message.chunk;
+            scrollToBottom();
+          }
+          break;
+        case 'stream-end':
+          if (streamingEl) {
+            streamingEl.classList.remove('streaming-cursor');
+            streamingEl = null;
+          }
+          promptEl.disabled = false;
+          promptEl.placeholder = 'Ask DreamGraph…';
+          sendBtn.textContent = 'Send';
+          sendBtn.style.display = '';
+          stopBtn.style.display = 'none';
+          promptEl.focus();
+          break;
+        case 'updateModels':
+          updateModels(message.providers, message.models, message.current);
+          break;
+        case 'error':
+          if (message.error) {
+            showError(message.error);
+          }
+          break;
+        case 'restoreDraft':
+          if (message.text) {
+            promptEl.value = message.text;
+            vscode.setState(Object.assign({}, vscode.getState() || {}, { draft: message.text }));
+          }
+          break;
       }
+    });
 
-      /* Signal readiness */
-      vscode.postMessage({ type: "ready" });
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const text = promptEl.value.trim();
+      if (!text) return;
+      vscode.postMessage({ type: 'send', text });
+      promptEl.value = '';
+      vscode.setState(Object.assign({}, vscode.getState() || {}, { draft: '' }));
+      vscode.postMessage({ type: 'saveDraft', text: '' });
+    });
+
+    stopBtn.addEventListener('click', () => {
+      vscode.postMessage({ type: 'stop' });
+    });
+
+    clearEl.addEventListener('click', () => {
+      vscode.postMessage({ type: 'clear' });
+    });
+
+    /* ---- Draft persistence ---- */
+    // Restore from VS Code webview state (survives hide/show within same lifecycle)
+    var savedState = vscode.getState();
+    if (savedState && savedState.draft) {
+      promptEl.value = savedState.draft;
+    }
+
+    // Save draft on every input keystroke
+    promptEl.addEventListener('input', function() {
+      var draft = promptEl.value;
+      vscode.setState(Object.assign({}, vscode.getState() || {}, { draft: draft }));
+      vscode.postMessage({ type: 'saveDraft', text: draft });
+    });
+
+    // Listen for restoreDraft from extension host (handles full webview recreation)
+    // Already wired in the message listener above — add the case:
+    // (handled inside the existing message switch)
+
+    vscode.postMessage({ type: 'ready' });
     })();
   </script>
 </body>
 </html>`;
   }
-
-  /* ---- Dispose ---- */
-
-  dispose(): void {
-    this._cancelStream();
-    this._panel?.dispose();
-    for (const d of this._disposables) d.dispose();
-    this._disposables = [];
-  }
-}
-
-/* ------------------------------------------------------------------ */
-/*  Utility                                                           */
-/* ------------------------------------------------------------------ */
-
-function getNonce(): string {
-  let text = "";
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  for (let i = 0; i < 32; i++) {
-    text += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return text;
 }

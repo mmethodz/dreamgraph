@@ -27,6 +27,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { loadJsonArray } from "../utils/cache.js";
 import { success, error, safeExecute } from "../utils/errors.js";
 import { logger } from "../utils/logger.js";
+import { getMetricsSnapshot, flushMetricsToDisk } from "../utils/metrics.js";
 import type { Feature } from "../types/index.js";
 import type {
   RuntimeMetricConfig,
@@ -403,4 +404,44 @@ export function registerRuntimeSensesTools(server: McpServer): void {
   );
 
   logger.info("Registered 1 runtime-senses tool");
+
+  // =========================================================================
+  // query_self_metrics — DreamGraph's own internal instrumentation
+  // =========================================================================
+  server.tool(
+    "query_self_metrics",
+    "Return DreamGraph's own runtime instrumentation: tool call counts, " +
+      "failure rates, symbol lookup misses, file-read hotspots, and dream " +
+      "strategy performance. No external endpoint needed — these are live " +
+      "in-memory metrics since server startup. Use this for self-calibration, " +
+      "identifying tool issues, and understanding actual usage patterns.",
+    {
+      flush_to_disk: z
+        .boolean()
+        .optional()
+        .describe(
+          "If true, also persist the snapshot to data/metrics_snapshot.json " +
+            "for post-mortem analysis (default: false)."
+        ),
+    },
+    async ({ flush_to_disk }) => {
+      logger.info("query_self_metrics called");
+      const snapshot = getMetricsSnapshot();
+
+      if (flush_to_disk) {
+        await flushMetricsToDisk();
+      }
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify({ success: true, data: snapshot }, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  logger.info("Registered 2 runtime-senses tools (query_runtime_metrics, query_self_metrics)");
 }

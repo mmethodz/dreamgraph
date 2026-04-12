@@ -27,6 +27,7 @@ import { dataPath } from "../utils/paths.js";
 import { invalidateCache, loadJsonData } from "../utils/cache.js";
 import { success, error, safeExecute } from "../utils/errors.js";
 import { logger } from "../utils/logger.js";
+import { recordSymbolLookup } from "../utils/metrics.js";
 import { withFileLock } from "../utils/mutex.js";
 import type {
   ApiSurface,
@@ -160,6 +161,118 @@ async function saveSurface(data: ApiSurface): Promise<void> {
   await fs.writeFile(surfacePath(), JSON.stringify(data, null, 2), "utf-8");
   invalidateCache("api_surface.json");
   logger.debug("API surface saved to disk");
+}
+
+// ---------------------------------------------------------------------------
+// Source snippet extraction (for include_source queries)
+// ---------------------------------------------------------------------------
+
+/** Maximum characters of source code to include per method/function snippet. */
+const MAX_SNIPPET_CHARS = 2_000;
+
+/**
+ * Read a range of lines from a source file, resolving relative paths
+ * against all configured repo roots.
+ */
+async function readSourceLines(
+  relPath: string,
+  startLine: number,
+  endLine: number,
+): Promise<string | null> {
+  // Try each repo root
+  for (const repoRoot of Object.values(config.repos)) {
+    const absPath = path.resolve(repoRoot, relPath);
+    try {
+      const content = await fs.readFile(absPath, "utf-8");
+      const lines = content.split("\n");
+      const start = Math.max(0, startLine - 1);
+      const end = Math.min(lines.length, endLine);
+      return lines.slice(start, end).join("\n");
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+/**
+ * For a list of methods sorted by line_number, compute the end line
+ * for each method — which is (next method's line - 1), or `fileEndLine`.
+ */
+function computeMethodEndLines(
+  methods: Array<{ line_number: number }>,
+  properties: Array<{ line_number: number }>,
+  classEndHint: number,
+): Map<number, number> {
+  // Merge all member line numbers to find boundaries
+  const allLines = [
+    ...methods.map(m => m.line_number),
+    ...properties.map(p => p.line_number),
+  ].filter(n => n > 0).sort((a, b) => a - b);
+
+  const endMap = new Map<number, number>();
+  for (let i = 0; i < allLines.length; i++) {
+    const nextStart = i + 1 < allLines.length ? allLines[i + 1] - 1 : classEndHint;
+    endMap.set(allLines[i], nextStart);
+  }
+  return endMap;
+}
+
+/**
+ * Attach source_code snippets to methods and free functions.
+ * Reads the file ONCE and distributes snippets to each member.
+ */
+async function attachSourceSnippets(
+  filePath: string,
+  methods: Array<ApiMethod & { defined_in?: string; source_code?: string }>,
+  freeFunctions?: Array<ApiFreeFunction & { source_code?: string }>,
+  classLineNumber?: number,
+): Promise<void> {
+  // Read the entire file once
+  let fileContent: string | null = null;
+  for (const repoRoot of Object.values(config.repos)) {
+    const absPath = path.resolve(repoRoot, filePath);
+    try {
+      fileContent = await fs.readFile(absPath, "utf-8");
+      break;
+    } catch {
+      continue;
+    }
+  }
+  if (!fileContent) return;
+
+  const lines = fileContent.split("\n");
+  const totalLines = lines.length;
+
+  // Collect all members with line numbers
+  const allMembers: Array<{ line_number: number; ref: { source_code?: string } }> = [];
+  if (methods) {
+    for (const m of methods) {
+      if (m.line_number > 0) allMembers.push({ line_number: m.line_number, ref: m });
+    }
+  }
+  if (freeFunctions) {
+    for (const f of freeFunctions) {
+      if (f.line_number > 0) allMembers.push({ line_number: f.line_number, ref: f });
+    }
+  }
+
+  // Sort by line number
+  allMembers.sort((a, b) => a.line_number - b.line_number);
+
+  // For each member, extract from its line to (next member's line - 1)
+  for (let i = 0; i < allMembers.length; i++) {
+    const startLine = allMembers[i].line_number - 1; // 0-indexed
+    const endLine = i + 1 < allMembers.length
+      ? allMembers[i + 1].line_number - 1  // 0-indexed, exclusive
+      : Math.min(startLine + 80, totalLines); // cap at 80 lines for last member
+
+    let snippet = lines.slice(startLine, endLine).join("\n");
+    if (snippet.length > MAX_SNIPPET_CHARS) {
+      snippet = snippet.slice(0, MAX_SNIPPET_CHARS) + "\n// … (truncated)";
+    }
+    allMembers[i].ref.source_code = snippet;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -412,6 +525,34 @@ function extractTypeScript(content: string, filePath: string, relPath: string): 
         continue;
       }
 
+      // Getter/setter detection inside class (before general method detection)
+      const accessorMatch = line.match(
+        /^\s+(?:(public|private|protected)\s+)?(?:(static)\s+)?(get|set)\s+(\w+)\s*\((.*?)\)(?:\s*:\s*(.+?))?(?:\s*\{|;)/
+      );
+      if (accessorMatch) {
+        const name = accessorMatch[4];
+        if (!CONTROL_FLOW_KEYWORDS.has(name)) {
+          const visibility = (accessorMatch[1] as "public" | "protected" | "private") || "public";
+          const isStatic = !!accessorMatch[2];
+          const accessorKind = accessorMatch[3]; // 'get' or 'set'
+          const params = parseParams(accessorMatch[5] ?? "", "typescript");
+          const returnType = accessorMatch[6]?.trim();
+          const method: ApiMethod = {
+            name: `${accessorKind} ${name}`,
+            parameters: params,
+            return_type: returnType,
+            is_static: isStatic,
+            is_async: false,
+            visibility,
+            line_number: lineNum,
+            decorators: collectDecorators(lines, i),
+          };
+          method.signature_text = buildSignatureText(method);
+          currentClass.methods.push(method);
+        }
+        continue;
+      }
+
       // Method detection inside class
       const methodMatch = line.match(
         /^\s+(?:async\s+)?(?:(public|private|protected)\s+)?(?:(static)\s+)?(?:(readonly)\s+)?(\w+)\s*(?:<[^>]*>)?\s*\((.*?)\)(?:\s*:\s*(.+?))?(?:\s*\{|;)/
@@ -420,6 +561,10 @@ function extractTypeScript(content: string, filePath: string, relPath: string): 
         const visibility = (methodMatch[1] as "public" | "protected" | "private") || "public";
         const isStatic = !!methodMatch[2];
         const name = methodMatch[4];
+
+        // Skip control-flow keywords misidentified as methods
+        if (CONTROL_FLOW_KEYWORDS.has(name)) continue;
+
         const params = parseParams(methodMatch[5] ?? "", "typescript");
         const returnType = methodMatch[6]?.trim();
 
@@ -464,7 +609,8 @@ function extractTypeScript(content: string, filePath: string, relPath: string): 
       );
       if (propMatch && !line.includes("(")) {
         const name = propMatch[4];
-        if (!name.startsWith("#")) {
+        // Skip control-flow keywords misidentified as properties
+        if (!name.startsWith("#") && !CONTROL_FLOW_KEYWORDS.has(name)) {
           currentClass.properties.push({
             name,
             type: propMatch[5]?.trim()?.replace(/;$/, ""),
@@ -703,6 +849,16 @@ function extractCSharp(content: string, filePath: string, relPath: string): ApiM
 // ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
+
+/** JS/TS keywords that should never be extracted as method or property names. */
+const CONTROL_FLOW_KEYWORDS = new Set([
+  "if", "else", "for", "while", "do", "switch", "case", "break",
+  "continue", "return", "throw", "try", "catch", "finally",
+  "new", "delete", "typeof", "instanceof", "void", "in", "of",
+  "yield", "await", "import", "export", "default", "class",
+  "extends", "super", "this", "const", "let", "var", "function",
+  "debugger", "with", "enum", "type", "interface", "namespace",
+]);
 
 function countBraces(line: string): number {
   let depth = 0;
@@ -1142,8 +1298,15 @@ export function registerApiSurfaceTools(server: McpServer): void {
       language: z.string()
         .default("any")
         .describe("Optional language filter. Must be one of: any, python, typescript, javascript, csharp."),
+      include_source: z.boolean()
+        .default(false)
+        .describe(
+          "When true, attach the actual source code snippet for each method/function. " +
+          "This eliminates the need for separate read_source_code calls. " +
+          "Each snippet is capped at ~2 KB. Use this instead of calling read_source_code repeatedly."
+        ),
     },
-    async ({ symbol_name, symbol_kind, member_name, file_path: filePathFilter, include_inherited, detail_level, platform, language }) => {
+    async ({ symbol_name, symbol_kind, member_name, file_path: filePathFilter, include_inherited, detail_level, platform, language, include_source }) => {
       const result = await safeExecute<QueryApiSurfaceOutput>(async (): Promise<ToolResponse<QueryApiSurfaceOutput>> => {
         const surface = await loadSurface();
         if (surface.modules.length === 0) {
@@ -1276,6 +1439,22 @@ export function registerApiSurfaceTools(server: McpServer): void {
             // All file paths this class spans
             const allFilePaths = fragments.map(f => f.cls.file_path ?? f.mod.file_path);
 
+            // Attach source snippets if requested
+            if (include_source) {
+              // Group methods by file and attach snippets
+              const fileGroups = new Map<string, typeof methods>();
+              for (const m of methods) {
+                const fp = m.defined_in || primaryFragment.mod.file_path;
+                if (!fileGroups.has(fp)) fileGroups.set(fp, []);
+                fileGroups.get(fp)!.push(m);
+              }
+              for (const [fp, fileMethods] of fileGroups) {
+                await attachSourceSnippets(fp, fileMethods, undefined, primaryFragment.cls.line_number);
+              }
+            }
+
+            recordSymbolLookup(primaryFragment.cls.name, true);
+
             return success<QueryApiSurfaceOutput>({
               symbol_name: primaryFragment.cls.name,
               symbol_kind: "class",
@@ -1297,17 +1476,26 @@ export function registerApiSurfaceTools(server: McpServer): void {
               f.name.toLowerCase() === symbol_name.toLowerCase()
             );
             if (fn) {
+              // Attach source snippet if requested
+              const fnWithSource: ApiFreeFunction & { source_code?: string } = { ...fn };
+              if (include_source) {
+                await attachSourceSnippets(mod.file_path, [], [fnWithSource]);
+              }
+
+              recordSymbolLookup(fnWithSource.name, true);
+
               return success<QueryApiSurfaceOutput>({
-                symbol_name: fn.name,
+                symbol_name: fnWithSource.name,
                 symbol_kind: "function",
                 language: mod.language,
                 file_path: mod.file_path,
-                line_number: fn.line_number,
-                parameters: fn.parameters,
-                return_type: fn.return_type,
-                signature_text: fn.signature_text,
-                is_async: fn.is_async,
-                is_exported: fn.is_exported,
+                line_number: fnWithSource.line_number,
+                parameters: fnWithSource.parameters,
+                return_type: fnWithSource.return_type,
+                signature_text: fnWithSource.signature_text,
+                is_async: fnWithSource.is_async,
+                is_exported: fnWithSource.is_exported,
+                ...(fnWithSource.source_code ? { source_code: fnWithSource.source_code } : {}),
               });
             }
           }
@@ -1321,6 +1509,14 @@ export function registerApiSurfaceTools(server: McpServer): void {
             m.file_path.toLowerCase().replace(/\.(tsx?|jsx?|mjs|cjs|py|cs)$/, "").replace(/\//g, ".") === symbol_name.toLowerCase()
           );
           if (mod) {
+            // Attach source snippets if requested
+            if (include_source) {
+              const allMethods: Array<ApiMethod & { source_code?: string }> = [];
+              for (const cls of mod.classes) allMethods.push(...cls.methods);
+              const allFunctions: Array<ApiFreeFunction & { source_code?: string }> = [...mod.functions];
+              await attachSourceSnippets(mod.file_path, allMethods, allFunctions);
+            }
+
             return success<QueryApiSurfaceOutput>({
               symbol_name: mod.module_name ?? mod.file_path,
               symbol_kind: "module",
@@ -1333,6 +1529,7 @@ export function registerApiSurfaceTools(server: McpServer): void {
         }
 
         // Not found — suggest close matches
+        recordSymbolLookup(symbol_name, false);
         const allNames: string[] = [];
         for (const mod of modules) {
           for (const c of mod.classes) allNames.push(c.name);
@@ -1349,10 +1546,338 @@ export function registerApiSurfaceTools(server: McpServer): void {
           ? ` Similar symbols: ${suggestions.join(", ")}`
           : "";
 
+        recordSymbolLookup(symbol_name, false);
+
         return error(
           "NOT_FOUND",
           `Symbol '${symbol_name}' not found in API surface.${suggestStr}`
         );
+      });
+
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify(result, null, 2),
+        }],
+      };
+    }
+  );
+
+  // =========================================================================
+  // modify_api_surface — Pull / modify / push an API surface entry
+  // =========================================================================
+
+  server.tool(
+    "modify_api_surface",
+    "Insert, update, or delete an entry in the API surface. " +
+      "Use this to inject hand-curated knowledge, correct extraction errors, " +
+      "or add entries that regex extraction missed. " +
+      "Entries are addressed by module_path + entry_type + entry_name (+ class_name for members). " +
+      "For upsert: if the entry exists it is replaced; otherwise it is inserted. " +
+      "For delete: the entry is removed. " +
+      "The module is auto-created when upserting into a path that doesn't exist yet.",
+    {
+      action: z.enum(["upsert", "delete"])
+        .describe("upsert = insert-or-replace. delete = remove the entry."),
+      module_path: z.string()
+        .describe("File path (relative to repo root) that identifies the module, e.g. 'src/tools/api-surface.ts'."),
+      entry_type: z.enum(["class", "function", "method", "property"])
+        .describe("Kind of entity to modify. 'method' and 'property' live inside a class."),
+      entry_name: z.string()
+        .describe("Name of the entity (class name, function name, method name, or property name)."),
+      class_name: z.string().optional()
+        .describe("Required when entry_type is 'method' or 'property'. The owning class name."),
+      entry_data: z.string().optional()
+        .describe(
+          "JSON string of the entity object to upsert. " +
+          "For class: { name, bases?, methods?, properties?, decorators?, file_path?, line_number? }. " +
+          "For function: { name, parameters?, return_type?, signature_text?, is_async?, is_exported?, line_number? }. " +
+          "For method: { name, parameters?, return_type?, signature_text?, is_static?, is_async?, visibility?, line_number?, decorators? }. " +
+          "For property: { name, type?, is_readonly?, line_number? }. " +
+          "Required for upsert, ignored for delete."
+        ),
+      language: z.string().default("typescript")
+        .describe("Language tag for the module if it needs to be auto-created. One of: typescript, javascript, python, csharp."),
+    },
+    async ({ action, module_path, entry_type, entry_name, class_name, entry_data, language }) => {
+      const result = await safeExecute(async () => {
+        // Validate member-level entries require class_name
+        if ((entry_type === "method" || entry_type === "property") && !class_name) {
+          return error(
+            "MISSING_CLASS",
+            `class_name is required when entry_type is '${entry_type}'.`
+          );
+        }
+
+        // Validate upsert requires entry_data
+        if (action === "upsert" && !entry_data) {
+          return error("MISSING_DATA", "entry_data is required for upsert action.");
+        }
+
+        // Parse entry_data if provided
+        let parsed: Record<string, unknown> | null = null;
+        if (entry_data) {
+          try {
+            parsed = JSON.parse(entry_data);
+          } catch (e) {
+            return error("INVALID_JSON", `entry_data is not valid JSON: ${e instanceof Error ? e.message : String(e)}`);
+          }
+        }
+
+        return await withFileLock("api_surface.json", async () => {
+          const surface = await loadSurface();
+
+          // Normalise the module path
+          const normPath = module_path.replace(/\\/g, "/");
+
+          // Find or create module
+          let mod = surface.modules.find(
+            (m) => m.file_path.replace(/\\/g, "/") === normPath
+          );
+
+          if (!mod && action === "delete") {
+            return error("NOT_FOUND", `Module '${module_path}' not found in API surface.`);
+          }
+
+          if (!mod && action === "upsert") {
+            // Auto-create the module
+            mod = {
+              file_path: normPath,
+              module_name: normPath
+                .replace(/\.(tsx?|jsx?|mjs|cjs|py|cs)$/, "")
+                .replace(/\//g, "."),
+              language,
+              classes: [],
+              functions: [],
+              provenance: {
+                kind: "manual",
+                source_files: [normPath],
+              },
+            };
+            surface.modules.push(mod);
+          }
+
+          // --- Handle class-level operations ---
+          if (entry_type === "class") {
+            if (action === "delete") {
+              const idx = mod!.classes.findIndex(
+                (c) => c.name.toLowerCase() === entry_name.toLowerCase()
+              );
+              if (idx === -1) {
+                return error("NOT_FOUND", `Class '${entry_name}' not found in module '${module_path}'.`);
+              }
+              const removed = mod!.classes.splice(idx, 1)[0];
+              await saveSurface(surface);
+              return success({
+                action: "deleted",
+                entry_type: "class",
+                entry_name: removed.name,
+                module_path: normPath,
+              });
+            }
+
+            // Upsert class
+            const classData: ApiClass = {
+              name: entry_name,
+              bases: [],
+              methods: [],
+              properties: [],
+              decorators: [],
+              file_path: normPath,
+              line_number: 0,
+              ...(parsed as Partial<ApiClass>),
+              // Ensure name matches the entry_name parameter
+            };
+            classData.name = entry_name;
+
+            const existing = mod!.classes.findIndex(
+              (c) => c.name.toLowerCase() === entry_name.toLowerCase()
+            );
+            if (existing !== -1) {
+              mod!.classes[existing] = classData;
+            } else {
+              mod!.classes.push(classData);
+            }
+
+            await saveSurface(surface);
+            return success({
+              action: existing !== -1 ? "updated" : "inserted",
+              entry_type: "class",
+              entry_name: classData.name,
+              module_path: normPath,
+              entry: classData,
+            });
+          }
+
+          // --- Handle free function operations ---
+          if (entry_type === "function") {
+            if (action === "delete") {
+              const idx = mod!.functions.findIndex(
+                (f) => f.name.toLowerCase() === entry_name.toLowerCase()
+              );
+              if (idx === -1) {
+                return error("NOT_FOUND", `Function '${entry_name}' not found in module '${module_path}'.`);
+              }
+              const removed = mod!.functions.splice(idx, 1)[0];
+              await saveSurface(surface);
+              return success({
+                action: "deleted",
+                entry_type: "function",
+                entry_name: removed.name,
+                module_path: normPath,
+              });
+            }
+
+            // Upsert function
+            const fnData: ApiFreeFunction = {
+              name: entry_name,
+              parameters: [],
+              is_async: false,
+              is_exported: true,
+              line_number: 0,
+              ...(parsed as Partial<ApiFreeFunction>),
+            };
+            fnData.name = entry_name;
+
+            // Rebuild signature_text if not provided
+            if (!fnData.signature_text) {
+              fnData.signature_text = buildFreeFunctionSignature(fnData);
+            }
+
+            const existing = mod!.functions.findIndex(
+              (f) => f.name.toLowerCase() === entry_name.toLowerCase()
+            );
+            if (existing !== -1) {
+              mod!.functions[existing] = fnData;
+            } else {
+              mod!.functions.push(fnData);
+            }
+
+            await saveSurface(surface);
+            return success({
+              action: existing !== -1 ? "updated" : "inserted",
+              entry_type: "function",
+              entry_name: fnData.name,
+              module_path: normPath,
+              entry: fnData,
+            });
+          }
+
+          // --- Handle method / property (class member) operations ---
+          const cls = mod!.classes.find(
+            (c) => c.name.toLowerCase() === class_name!.toLowerCase()
+          );
+          if (!cls) {
+            return error(
+              "NOT_FOUND",
+              `Class '${class_name}' not found in module '${module_path}'. ` +
+                `Upsert the class first, or check the class_name.`
+            );
+          }
+
+          if (entry_type === "method") {
+            if (action === "delete") {
+              const idx = cls.methods.findIndex(
+                (m) => m.name.toLowerCase() === entry_name.toLowerCase()
+              );
+              if (idx === -1) {
+                return error("NOT_FOUND", `Method '${entry_name}' not found in class '${class_name}'.`);
+              }
+              const removed = cls.methods.splice(idx, 1)[0];
+              await saveSurface(surface);
+              return success({
+                action: "deleted",
+                entry_type: "method",
+                entry_name: removed.name,
+                class_name: cls.name,
+                module_path: normPath,
+              });
+            }
+
+            // Upsert method
+            const methodData: ApiMethod = {
+              name: entry_name,
+              parameters: [],
+              is_static: false,
+              is_async: false,
+              visibility: "public",
+              line_number: 0,
+              decorators: [],
+              ...(parsed as Partial<ApiMethod>),
+            };
+            methodData.name = entry_name;
+
+            if (!methodData.signature_text) {
+              methodData.signature_text = buildSignatureText(methodData);
+            }
+
+            const existing = cls.methods.findIndex(
+              (m) => m.name.toLowerCase() === entry_name.toLowerCase()
+            );
+            if (existing !== -1) {
+              cls.methods[existing] = methodData;
+            } else {
+              cls.methods.push(methodData);
+            }
+
+            await saveSurface(surface);
+            return success({
+              action: existing !== -1 ? "updated" : "inserted",
+              entry_type: "method",
+              entry_name: methodData.name,
+              class_name: cls.name,
+              module_path: normPath,
+              entry: methodData,
+            });
+          }
+
+          // entry_type === "property"
+          if (action === "delete") {
+            const idx = cls.properties.findIndex(
+              (p) => p.name.toLowerCase() === entry_name.toLowerCase()
+            );
+            if (idx === -1) {
+              return error("NOT_FOUND", `Property '${entry_name}' not found in class '${class_name}'.`);
+            }
+            const removed = cls.properties.splice(idx, 1)[0];
+            await saveSurface(surface);
+            return success({
+              action: "deleted",
+              entry_type: "property",
+              entry_name: removed.name,
+              class_name: cls.name,
+              module_path: normPath,
+            });
+          }
+
+          // Upsert property
+          const propData: ApiProperty = {
+            name: entry_name,
+            is_readonly: false,
+            line_number: 0,
+            ...(parsed as Partial<ApiProperty>),
+          };
+          propData.name = entry_name;
+
+          const existingProp = cls.properties.findIndex(
+            (p) => p.name.toLowerCase() === entry_name.toLowerCase()
+          );
+          if (existingProp !== -1) {
+            cls.properties[existingProp] = propData;
+          } else {
+            cls.properties.push(propData);
+          }
+
+          await saveSurface(surface);
+          return success({
+            action: existingProp !== -1 ? "updated" : "inserted",
+            entry_type: "property",
+            entry_name: propData.name,
+            class_name: cls.name,
+            module_path: normPath,
+            entry: propData,
+          });
+        });
       });
 
       return {
@@ -1391,5 +1916,5 @@ export function registerApiSurfaceTools(server: McpServer): void {
     }
   );
 
-  logger.info("Registered API surface tools (2 tools, 1 resource)");
+  logger.info("Registered API surface tools (3 tools, 1 resource)");
 }

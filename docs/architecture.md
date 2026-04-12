@@ -6,7 +6,7 @@
 
 DreamGraph is a **cognitive dreaming engine** and **active Architect agent** for MCP (Model Context Protocol) knowledge graphs. The Architect calls MCP tools directly to build and maintain the knowledge graph, while the cognitive engine speculatively discovers hidden connections, validates them against a fact graph, and builds a persistent, evolving understanding of the systems it observes.
 
-**Version:** 6.2.0 "La Catedral"  
+**Version:** 7.0.0 "El Alarife"  
 **License:** MIT  
 **Runtime:** Node.js (TypeScript, ES2022, Node16 modules)  
 **Transport:** STDIO (default) or Streamable HTTP (`--transport http`)
@@ -66,8 +66,8 @@ graph TB
 
     subgraph "MCP Protocol Layer"
         Server["MCP Server<br/>STDIO / Streamable HTTP"]
-        Tools["62 Tools"]
-        Resources["25 Resources"]
+        Tools["67 Tools"]
+        Resources["26 Resources"]
     end
 
     Architect --> Server
@@ -259,11 +259,11 @@ src/
 │       └── restart.ts       # dg restart — atomic stop → start
 ├── tools/
 │   ├── register.ts          # General tool registration
-│   ├── code-senses.ts       # File system read/write/list
+│   ├── code-senses.ts       # list_directory, read_source_code, create_file, edit_file, delete_file, rename_file
 │   ├── git-senses.ts        # Git log/blame
 │   ├── db-senses.ts         # PostgreSQL schema inspector (lazy pg import)
 │   ├── web-senses.ts        # Web page fetcher
-│   ├── runtime-senses.ts    # APM metrics integration
+│   ├── runtime-senses.ts    # query_runtime_metrics, query_self_metrics
 │   ├── solidify-insight.ts  # Manual insight injection
 │   ├── enrich-seed-data.ts  # Seed data enrichment (merge/replace)
 │   ├── init-graph.ts        # Bootstrap knowledge graph from source

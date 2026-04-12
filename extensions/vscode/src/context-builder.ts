@@ -158,9 +158,10 @@ export class ContextBuilder {
 
   /* ---- Graph Context Fetching (§3.5) ---- */
 
-  private _shouldFetchGraphContext(mode: IntentMode): boolean {
-    // Only fetch when the mode benefits from graph knowledge
-    return mode === "ask_dreamgraph" || mode === "active_file";
+  private _shouldFetchGraphContext(_mode: IntentMode): boolean {
+    // Always fetch graph context — this is the core advantage.
+    // The graph knows things about the code that generic AI doesn't.
+    return true;
   }
 
   private async _fetchGraphContext(
@@ -174,6 +175,12 @@ export class ContextBuilder {
       activeTensions: 0,
       cognitiveState: "unknown",
       apiSurface: null,
+      // Deep graph signals
+      tensions: [],
+      dreamInsights: [],
+      causalChains: [],
+      temporalPatterns: [],
+      dataModelEntities: [],
     };
 
     // Try daemon REST endpoint first (batched, efficient)
@@ -198,23 +205,154 @@ export class ContextBuilder {
         );
         graphCtx.uiPatterns = result.ui_elements.map((u) => u.name);
         graphCtx.activeTensions = result.tensions.length;
+        graphCtx.tensions = result.tensions.map((t) => ({
+          id: t.id,
+          description: t.description,
+          severity: t.severity,
+        }));
         if (result.api_surface) {
           graphCtx.apiSurface = result.api_surface;
         }
       }
     }
 
-    // Cognitive status (always cheap)
-    try {
-      const status = await this._mcpClient.getCognitiveStatus();
-      if (status && typeof status === "object" && "current_state" in status) {
-        graphCtx.cognitiveState = (status as { current_state: string }).current_state;
-      }
-    } catch {
-      // Non-critical — keep "unknown"
+    // Fetch deep graph signals in parallel via MCP tools —
+    // these are the knowledge edges that generic AI doesn't have.
+    const deepFetches = await Promise.allSettled([
+      this._fetchDreamInsights(),
+      this._fetchCausalInsights(),
+      this._fetchTemporalInsights(),
+      this._fetchDataModelEntities(envelope.activeFile?.path),
+      this._fetchCognitiveStatus(),
+    ]);
+
+    // Dream insights
+    if (deepFetches[0].status === "fulfilled" && deepFetches[0].value) {
+      graphCtx.dreamInsights = deepFetches[0].value;
+    }
+    // Causal chains
+    if (deepFetches[1].status === "fulfilled" && deepFetches[1].value) {
+      graphCtx.causalChains = deepFetches[1].value;
+    }
+    // Temporal patterns
+    if (deepFetches[2].status === "fulfilled" && deepFetches[2].value) {
+      graphCtx.temporalPatterns = deepFetches[2].value;
+    }
+    // Data model entities
+    if (deepFetches[3].status === "fulfilled" && deepFetches[3].value) {
+      graphCtx.dataModelEntities = deepFetches[3].value;
+    }
+    // Cognitive status
+    if (deepFetches[4].status === "fulfilled" && deepFetches[4].value) {
+      graphCtx.cognitiveState = deepFetches[4].value;
     }
 
     return graphCtx;
+  }
+
+  /* ---- Deep Graph Signal Fetchers ---- */
+
+  private async _fetchDreamInsights(): Promise<
+    Array<{ type: string; insight: string; confidence: number; source?: string }>
+  > {
+    try {
+      const result = await this._mcpClient.callTool("get_dream_insights", {});
+      const data = typeof result === "string" ? JSON.parse(result) : result;
+      if (data?.ok && Array.isArray(data.data?.insights)) {
+        return data.data.insights.slice(0, 10).map((i: Record<string, unknown>) => ({
+          type: String(i.type ?? "insight"),
+          insight: String(i.insight ?? i.description ?? i.text ?? ""),
+          confidence: Number(i.confidence ?? 0.5),
+          source: i.source ? String(i.source) : undefined,
+        }));
+      }
+      if (Array.isArray(data?.insights)) {
+        return data.insights.slice(0, 10).map((i: Record<string, unknown>) => ({
+          type: String(i.type ?? "insight"),
+          insight: String(i.insight ?? i.description ?? i.text ?? ""),
+          confidence: Number(i.confidence ?? 0.5),
+          source: i.source ? String(i.source) : undefined,
+        }));
+      }
+      return [];
+    } catch {
+      return [];
+    }
+  }
+
+  private async _fetchCausalInsights(): Promise<
+    Array<{ from: string; to: string; relationship: string; confidence: number }>
+  > {
+    try {
+      const result = await this._mcpClient.callTool("get_causal_insights", {});
+      const data = typeof result === "string" ? JSON.parse(result) : result;
+      const chains = data?.ok ? data.data?.chains ?? data.data?.insights : data?.chains ?? data?.insights;
+      if (Array.isArray(chains)) {
+        return chains.slice(0, 15).map((c: Record<string, unknown>) => ({
+          from: String(c.from ?? c.source ?? ""),
+          to: String(c.to ?? c.target ?? ""),
+          relationship: String(c.relationship ?? c.type ?? "influences"),
+          confidence: Number(c.confidence ?? 0.5),
+        }));
+      }
+      return [];
+    } catch {
+      return [];
+    }
+  }
+
+  private async _fetchTemporalInsights(): Promise<
+    Array<{ pattern: string; frequency: string; last_seen?: string }>
+  > {
+    try {
+      const result = await this._mcpClient.callTool("get_temporal_insights", {});
+      const data = typeof result === "string" ? JSON.parse(result) : result;
+      const patterns = data?.ok ? data.data?.patterns ?? data.data?.insights : data?.patterns ?? data?.insights;
+      if (Array.isArray(patterns)) {
+        return patterns.slice(0, 8).map((p: Record<string, unknown>) => ({
+          pattern: String(p.pattern ?? p.description ?? ""),
+          frequency: String(p.frequency ?? p.recurrence ?? "unknown"),
+          last_seen: p.last_seen ? String(p.last_seen) : undefined,
+        }));
+      }
+      return [];
+    } catch {
+      return [];
+    }
+  }
+
+  private async _fetchDataModelEntities(
+    filePath?: string,
+  ): Promise<Array<{ id: string; name: string; storage: string }>> {
+    try {
+      const args: Record<string, unknown> = {};
+      if (filePath) args.entity_name = filePath.split("/").pop()?.replace(/\.\w+$/, "") ?? "";
+      const result = await this._mcpClient.callTool("search_data_model", args);
+      const data = typeof result === "string" ? JSON.parse(result) : result;
+      const entities = data?.ok ? data.data?.matches ?? data.data?.entities : data?.matches ?? data?.entities;
+      if (Array.isArray(entities)) {
+        return entities.slice(0, 10).map((e: Record<string, unknown>) => ({
+          id: String(e.id ?? ""),
+          name: String(e.name ?? ""),
+          storage: String(e.storage ?? e.store ?? "unknown"),
+        }));
+      }
+      return [];
+    } catch {
+      return [];
+    }
+  }
+
+  private async _fetchCognitiveStatus(): Promise<string | null> {
+    try {
+      const status = await this._mcpClient.getCognitiveStatus();
+      if (status && typeof status === "object" && "current_state" in status) {
+        return (status as { current_state: string }).current_state;
+      }
+      return null;
+    } catch {
+      return null;
+    }
   }
 
   /* ---- Token Budget Assembly (§3.7) ---- */

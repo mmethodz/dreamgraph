@@ -1,20 +1,59 @@
 {
-  "name": "Example Bookstore System",
-  "description": "A sample multi-repo bookstore application used to demonstrate DreamGraph's cognitive dreaming capabilities. Replace this with your own system overview.",
+  "_schema": "SystemOverview — project description with repository inventory",
+  "id": "system_overview",
+  "name": "DreamGraph",
+  "description": "DreamGraph is an autonomous cognitive layer for software systems. It builds and maintains a living knowledge graph of features, workflows, data models, architecture decisions, UI semantics, and cognitive insights. It supports grounded code understanding, disciplined modification workflows, speculative dream cycles, threat scanning, API surface extraction, and interactive tooling through both MCP/server interfaces and a VS Code extension.",
+  "source_repo": "dreamgraph",
+  "source_files": [
+    "package.json",
+    "README.md",
+    "src/index.ts",
+    "src/tools",
+    "src/cognitive",
+    "src/resources",
+    "extensions/vscode"
+  ],
   "repositories": [
     {
-      "name": "bookstore-api",
-      "description": "REST API backend (Node.js + Express + PostgreSQL)",
-      "tech_stack": ["Node.js", "Express", "PostgreSQL", "TypeScript"],
-      "purpose": "Handles all business logic, auth, and data persistence"
+      "name": "dreamgraph",
+      "role": "Primary application repository containing the DreamGraph server, cognitive engine, tooling surface, resource registry, discipline workflow system, and supporting utilities.",
+      "entry_points": [
+        "src/index.ts",
+        "src/cli/dg.ts"
+      ],
+      "major_domains": [
+        "cognitive engine and dream lifecycle",
+        "knowledge graph resources and retrieval",
+        "tool registration and MCP/server interface",
+        "discipline-mode modification workflow",
+        "API surface extraction and introspection",
+        "runtime and architectural analysis"
+      ],
+      "primary_workflows": [
+        "graph bootstrap and enrichment",
+        "code-grounded analysis and retrieval",
+        "dream / nightmare / metacognitive cycles",
+        "discipline-based audit → plan → execute → verify sessions",
+        "living documentation and UI semantic registration"
+      ]
     },
     {
-      "name": "bookstore-web",
-      "description": "Customer-facing web frontend (React + Next.js)",
-      "tech_stack": ["React", "Next.js", "TailwindCSS", "TypeScript"],
-      "purpose": "Storefront, search, cart, checkout, user account"
+      "name": "extensions/vscode",
+      "role": "VS Code extension that acts as DreamGraph’s interactive self-interface for chat, context construction, dashboard visibility, and operational health feedback.",
+      "entry_points": [
+        "extensions/vscode/src/extension.ts"
+      ],
+      "major_domains": [
+        "chat interaction",
+        "context building and token budgeting",
+        "dashboard and health monitoring",
+        "developer-facing transparency UX"
+      ],
+      "primary_workflows": [
+        "user prompt → context assembly → DreamGraph request → response rendering",
+        "dashboard health inspection",
+        "tool and context transparency for interactive sessions"
+      ]
     }
-  ],
-  "architecture": "Monorepo with shared types. API serves REST endpoints consumed by the web frontend. PostgreSQL for persistence. Stripe for payments.",
-  "deployment": "Vercel (web) + Railway (API) + PostgreSQL (database)"
+  ]
 }

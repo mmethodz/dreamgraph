@@ -23,6 +23,11 @@ import { ContextInspector } from "./context-inspector.js";
 import { ArchitectLlm } from "./architect-llm.js";
 import { ContextBuilder } from "./context-builder.js";
 import { ChatPanel } from "./chat-panel.js";
+import { DashboardViewProvider } from "./dashboard-view.js";
+import { ChangedFilesView } from "./changed-files-view.js";
+import { GraphSignalProvider } from "./graph-signal.js";
+import { ChatMemory } from "./chat-memory.js";
+import { registerRunnerCommands } from "./local-tools.js";
 import type { ResolvedInstance } from "./types.js";
 import {
   connectCommand,
@@ -38,6 +43,7 @@ import {
   checkAdrComplianceCommand,
   openChatCommand,
   setArchitectApiKeyCommand,
+  showGraphSignalCommand,
   type CommandServices,
 } from "./commands.js";
 
@@ -52,6 +58,9 @@ let currentInstance: ResolvedInstance | null = null;
 /* ------------------------------------------------------------------ */
 
 export function activate(context: vscode.ExtensionContext): void {
+  // Register local runner palette commands (dreamgraph.runCommand, dreamgraph.runBuild)
+  registerRunnerCommands(context);
+
   const config = vscode.workspace.getConfiguration("dreamgraph");
 
   // ---- Layer 3: DreamGraph Client ----
@@ -77,7 +86,24 @@ export function activate(context: vscode.ExtensionContext): void {
     maxContextTokens,
     instance: null,
   });
-  const chatPanel = new ChatPanel(context.extensionUri, architectLlm, contextBuilder, mcpClient);
+  const chatPanel = new ChatPanel(context);
+  const dashboardView = new DashboardViewProvider(context.extensionUri);
+  const changedFiles = new ChangedFilesView(context);
+  changedFiles.restore();
+
+  // ---- Graph Signal Provider (proactive context pre-fetching) ----
+  const graphSignal = new GraphSignalProvider(mcpClient, daemonClient);
+  chatPanel.setGraphSignal(graphSignal);
+
+  // ---- Per-instance chat memory (persists across VS Code restarts) ----
+  const chatMemory = new ChatMemory(context);
+  chatPanel.setMemory(chatMemory);
+
+  // ---- Wire Architect LLM + Context into Chat ----
+  chatPanel.setArchitectLlm(architectLlm);
+  chatPanel.setContextBuilder(contextBuilder);
+  chatPanel.setMcpClient(mcpClient);
+  chatPanel.setChangedFilesProvider(changedFiles);
 
   // Load architect config asynchronously
   void architectLlm.loadConfig();
@@ -105,10 +131,15 @@ export function activate(context: vscode.ExtensionContext): void {
     architectLlm,
     contextBuilder,
     chatPanel,
+    graphSignal,
     getInstance: () => currentInstance,
     setInstance: (inst) => {
       currentInstance = inst;
       contextBuilder.updateOptions({ instance: inst });
+      // Swap chat history to the new instance
+      if (inst) {
+        chatPanel.setInstance(inst.uuid);
+      }
     },
   };
 
@@ -130,6 +161,10 @@ export function activate(context: vscode.ExtensionContext): void {
     // M5: Chat & API Key
     ["dreamgraph.openChat", () => openChatCommand(services)],
     ["dreamgraph.setArchitectApiKey", () => setArchitectApiKeyCommand(services)],
+    // Graph Signal
+    ["dreamgraph.showGraphSignal", () => showGraphSignalCommand(services)],
+    // Files Changed
+    ["dreamgraph.clearChangedFiles", () => changedFiles.clear()],
   ];
 
   for (const [id, handler] of commands) {
@@ -137,6 +172,20 @@ export function activate(context: vscode.ExtensionContext): void {
       vscode.commands.registerCommand(id, handler),
     );
   }
+
+  // ---- Register webview view providers (dockable sidebar panels) ----
+  const changedFilesTreeView = vscode.window.createTreeView(
+    'dreamgraph.changedFiles',
+    { treeDataProvider: changedFiles, showCollapseAll: true },
+  );
+
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(ChatPanel.viewType, chatPanel, {
+      webviewOptions: { retainContextWhenHidden: true },
+    }),
+    vscode.window.registerWebviewViewProvider(DashboardViewProvider.viewType, dashboardView),
+    changedFilesTreeView,
+  );
 
   // ---- Register disposables ----
   context.subscriptions.push(
@@ -147,6 +196,9 @@ export function activate(context: vscode.ExtensionContext): void {
     contextInspector,
     architectLlm,
     chatPanel,
+    dashboardView,
+    changedFiles,
+    graphSignal,
   );
 
   // ---- Listen for configuration changes ----

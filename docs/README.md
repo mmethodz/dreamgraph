@@ -1,6 +1,6 @@
 # DreamGraph Documentation
 
-> **v6.2.0 "La Catedral"** — Comprehensive documentation generated from DreamGraph's own knowledge graph.
+> **v7.0.0 "El Alarife"** — Comprehensive documentation generated from DreamGraph's own knowledge graph.
 
 ---
 
@@ -21,7 +21,7 @@ System overview, cognitive states, state machine, promotion pipeline, feature de
 How the engine thinks: state machine internals, 10 dream strategies (incl. LLM dream + PGO wave), normalization pipeline, speculative memory lifecycle, tension system, adversarial dreaming, causal/temporal analysis, v5.1 capabilities (metacognitive self-tuning, event-driven dreaming, continuous narrative), and v5.2 dream scheduling.
 
 ### [Tools Reference](tools-reference.md)
-Complete catalog of all **62 MCP tools** (28 cognitive + 25 general + 9 discipline) and **25 MCP resources**, with parameters, types, defaults, and descriptions.
+Complete catalog of all **67 MCP tools** (28 cognitive + 30 general + 9 discipline) and **26 MCP resources**, with parameters, types, defaults, and descriptions.
 
 ### [Data Model](data-model.md)
 All **15 data stores**: dream graph, candidate edges, validated edges, tension log, dream history, threat log, archetypes, ADR log, UI registry, fact graph, capabilities, system story, schedules, API surface, and lucid log. Full schemas and relationship map.
@@ -131,8 +131,8 @@ get_system_narrative(depth="technical")
 |--------|-------|
 | Validated connections | 280+ |
 | Dream strategies | 10 |
-| MCP tools | 62 |
-| MCP resources | 25 |
+| MCP tools | 67 |
+| MCP resources | 26 |
 | Data stores | 20 |
 | Workflows | 14 |
 | Features | 36 |

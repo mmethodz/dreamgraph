@@ -9,6 +9,7 @@
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { LoggingMessageNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 import * as vscode from "vscode";
 
 /* ------------------------------------------------------------------ */
@@ -19,6 +20,9 @@ export class McpClient implements vscode.Disposable {
   private _client: Client | null = null;
   private _transport: StreamableHTTPClientTransport | null = null;
   private _baseUrl: string;
+
+  /** External listener for server log/progress messages (set by ChatPanel). */
+  public onServerLog: ((level: string, message: string) => void) | null = null;
 
   constructor(baseUrl: string) {
     this._baseUrl = baseUrl;
@@ -46,6 +50,18 @@ export class McpClient implements vscode.Disposable {
     );
 
     await this._client.connect(this._transport);
+
+    // Subscribe to server log notifications and forward to the external listener
+    this._client.setNotificationHandler(
+      LoggingMessageNotificationSchema,
+      (notification) => {
+        if (this.onServerLog) {
+          const p = notification.params;
+          const msg = typeof p.data === 'string' ? p.data : JSON.stringify(p.data);
+          this.onServerLog(p.level, msg);
+        }
+      },
+    );
   }
 
   /**
@@ -85,13 +101,30 @@ export class McpClient implements vscode.Disposable {
 
   /**
    * Call an MCP tool by name with the given arguments.
+   * @param timeoutMs Override request timeout (default 300 000 ms = 5 min).
+   * @param onprogress Callback invoked with progress messages from the tool.
    */
   async callTool(
     name: string,
     args: Record<string, unknown> = {},
+    timeoutMs = 300_000,
+    onprogress?: (message: string, progress: number, total?: number) => void,
   ): Promise<unknown> {
     this._ensureConnected();
-    const result = await this._client!.callTool({ name, arguments: args });
+    const result = await this._client!.callTool(
+      { name, arguments: args },
+      undefined,
+      {
+        timeout: timeoutMs,
+        ...(onprogress
+          ? {
+              onprogress: (p: { progress: number; total?: number; message?: string }) => {
+                onprogress(p.message ?? `Step ${p.progress}`, p.progress, p.total);
+              },
+            }
+          : {}),
+      },
+    );
     // MCP tool results have a `content` array; extract text content
     if (result.content && Array.isArray(result.content)) {
       const textParts = result.content

@@ -108,6 +108,10 @@ export class ArchitectLlm implements vscode.Disposable {
     return this._config !== null && this._config.provider.length > 0;
   }
 
+  get provider(): ArchitectProvider | null {
+    return this._config?.provider ?? null;
+  }
+
   get currentConfig(): ArchitectConfig | null {
     return this._config ? { ...this._config } : null;
   }
@@ -343,6 +347,85 @@ export class ArchitectLlm implements vscode.Disposable {
     };
   }
 
+  /**
+   * Translate Anthropic-style raw messages (tool_use / tool_result content
+   * blocks) into OpenAI-compatible messages (tool_calls + role:"tool").
+   * Messages that are already plain strings pass through unchanged.
+   */
+  private _translateRawToOpenAI(raw: unknown[]): unknown[] {
+    const out: unknown[] = [];
+
+    for (const msg of raw) {
+      const m = msg as Record<string, unknown>;
+      const role = m.role as string;
+      const content = m.content;
+
+      // Plain string content — pass through
+      if (typeof content === 'string') {
+        out.push({ role, content });
+        continue;
+      }
+
+      // Array content — may contain Anthropic-style blocks
+      if (!Array.isArray(content)) {
+        out.push(msg);
+        continue;
+      }
+
+      const blocks = content as Array<Record<string, unknown>>;
+
+      if (role === 'assistant') {
+        // Extract text + tool_use blocks → OpenAI assistant message with tool_calls
+        const textParts = blocks.filter((b) => b.type === 'text').map((b) => b.text as string);
+        const toolUseBlocks = blocks.filter((b) => b.type === 'tool_use');
+
+        const openaiMsg: Record<string, unknown> = {
+          role: 'assistant',
+          content: textParts.join('') || null,
+        };
+
+        if (toolUseBlocks.length > 0) {
+          openaiMsg.tool_calls = toolUseBlocks.map((b) => ({
+            id: b.id as string,
+            type: 'function',
+            function: {
+              name: b.name as string,
+              arguments: typeof b.input === 'string' ? b.input : JSON.stringify(b.input),
+            },
+          }));
+        }
+
+        out.push(openaiMsg);
+      } else if (role === 'user') {
+        // tool_result blocks → separate role:"tool" messages for OpenAI
+        const toolResults = blocks.filter((b) => b.type === 'tool_result');
+        const nonToolBlocks = blocks.filter((b) => b.type !== 'tool_result');
+
+        // Emit any non-tool-result blocks as a normal user message
+        if (nonToolBlocks.length > 0) {
+          const text = nonToolBlocks.map((b) => (b.text as string) ?? '').join('');
+          if (text) {
+            out.push({ role: 'user', content: text });
+          }
+        }
+
+        // Each tool_result becomes a separate role:"tool" message
+        for (const tr of toolResults) {
+          out.push({
+            role: 'tool',
+            tool_call_id: tr.tool_use_id as string,
+            content: typeof tr.content === 'string' ? tr.content : JSON.stringify(tr.content),
+          });
+        }
+      } else {
+        // Unknown role — pass through
+        out.push(msg);
+      }
+    }
+
+    return out;
+  }
+
   private async _callOpenAIWithTools(
     config: ArchitectConfig,
     messages: ArchitectMessage[],
@@ -359,7 +442,30 @@ export class ArchitectLlm implements vscode.Disposable {
       },
     }));
 
-    const apiMessages = rawMessages ?? messages.map((m) => ({ role: m.role, content: m.content }));
+    // Translate Anthropic-style tool_use/tool_result blocks to OpenAI format
+    const apiMessages = rawMessages
+      ? this._translateRawToOpenAI(rawMessages)
+      : messages.map((m) => ({ role: m.role, content: m.content }));
+
+    // Ensure system message is included (rawMessages filters it out for Anthropic compat,
+    // but OpenAI needs it in the messages array)
+    const { system } = this._splitSystem(messages);
+    if (system && !apiMessages.some((m) => (m as Record<string, unknown>).role === 'system')) {
+      apiMessages.unshift({ role: 'system', content: system });
+    }
+
+    // Validate body is serializable before sending
+    let bodyJson: string;
+    try {
+      bodyJson = JSON.stringify({
+        model: config.model,
+        max_completion_tokens: 16384,
+        messages: apiMessages,
+        tools: openaiTools,
+      });
+    } catch (serErr) {
+      throw new Error(`Failed to serialize OpenAI request body: ${serErr instanceof Error ? serErr.message : String(serErr)}`);
+    }
 
     const res = await fetch(`${config.baseUrl}/chat/completions`, {
       method: "POST",
@@ -367,11 +473,7 @@ export class ArchitectLlm implements vscode.Disposable {
         "Content-Type": "application/json",
         Authorization: `Bearer ${config.apiKey}`,
       },
-      body: JSON.stringify({
-        model: config.model,
-        messages: apiMessages,
-        tools: openaiTools,
-      }),
+      body: bodyJson,
     });
 
     if (!res.ok) {
@@ -458,6 +560,7 @@ export class ArchitectLlm implements vscode.Disposable {
       },
       body: JSON.stringify({
         model: config.model,
+        max_completion_tokens: 16384,
         messages: messages.map((m) => ({ role: m.role, content: m.content })),
       }),
     });
@@ -494,6 +597,7 @@ export class ArchitectLlm implements vscode.Disposable {
       },
       body: JSON.stringify({
         model: config.model,
+        max_completion_tokens: 16384,
         stream: true,
         messages: messages.map((m) => ({ role: m.role, content: m.content })),
       }),

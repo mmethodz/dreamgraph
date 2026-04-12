@@ -1,6 +1,6 @@
 {
   "name": "dreamgraph",
-  "version": "6.2.0",
+  "version": "7.0.0",
   "description": "DreamGraph — A cognitive dreaming engine for MCP servers. Builds, explores, and self-heals knowledge graphs through speculative reasoning.",
   "type": "module",
   "bin": {
@@ -30,7 +30,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/mikajussila/dreamgraph.git"
+    "url": "https://github.com/mmethodz/dreamgraph.git"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",

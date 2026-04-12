@@ -1,75 +1,52 @@
-DreamGraph License v1.0
+# DreamGraph License v1.1
 
-Copyright (c) 2026 Mika Jussila
+## 1. Introduction
 
-This license is based on the Business Source License (BSL) model.
+This license governs the use of the DreamGraph software.
 
-1. Definitions
+## 2. Grant of License
 
-“Software”: The DreamGraph source code and all included components.
-“Licensed Work”: The Software and any modifications made to it.
-“Production Use”: Any use of the Software in a commercial, revenue-generating, or internal business environment.
-“Competitive Offering”: Any product or service whose primary purpose is to provide DreamGraph functionality (e.g., cognition engine, graph-based reasoning, system abstraction, or application reconstruction) as a hosted, managed, or monetized service.
+You are hereby granted a non-exclusive, worldwide, royalty-free license to use the DreamGraph software, including but not limited to its source code, binaries, and documentation.
 
-2. Usage Grant
+## 3. Modifications
 
-You are granted a non-exclusive, worldwide, royalty-free license to:
+You have the right to modify, merge, publish, or distribute copies of the DreamGraph software,
+provided that you include this license in all copies or substantial portions of the software.
 
-- Use the Software for:
+## 4. Attribution
 
-personal use
-research and experimentation
-internal business use
-integration into your own products
+You must give appropriate credit to the original authors of the DreamGraph software,
+provide a link to the license, and indicate if changes were made.
 
-- Modify the Software for:
+## 5. Warranty Disclaimer
 
-internal use
-non-competitive applications
+The software is provided "as is", without warranty of any kind, express or implied,
+including but not limited to the warranties of merchantability, fitness for a particular purpose,
+non-infringement or course of performance.
 
-3. Restrictions
+## 6. Limitation of Liability
 
-You may NOT:
+In no event shall the authors or copyright holders be liable for any claim,
+ damages or other liability, whether in an action of contract, tort or otherwise,
+arising from, out of or in connection with the software or the use or other dealings in the software.
 
-- Offer the Software (or a modified version) as a hosted or managed service
-- Build or sell a Competitive Offering based on the Software
-- Provide DreamGraph functionality as a standalone commercial platform
-- Resell, sublicense, or distribute the Software as a primary product
+## 7. Acceptance
 
-4. Distribution
+By using the DreamGraph software, you accept and agree to be bound by the terms of this license.
 
-You may distribute modified or unmodified versions of the Software:
+## 8. Termination
 
-- For non-commercial use
-- As part of a larger product where DreamGraph is not the primary value
+This license will terminate automatically if you fail to comply with any of the terms and conditions
+of this license. Upon termination, you must cease all use of the software and destroy any copies in your possession.
 
-But you must:
+## 9. Governing Law
 
-- Include this license
-- Clearly state modifications
+This license shall be governed by and construed in accordance with the laws of the jurisdiction in which the software was released.
 
-5. Change License (Future Open Source Conversion)
+## 10. Amendments
 
-On January 1, 2030, this Software will automatically convert to:
+This license may only be amended or modified by a written agreement signed by the parties.
 
-Apache License 2.0
+## 11. Contact
 
-At that point, all restrictions in Section 3 are lifted.
-
-6. Commercial Licensing
-
-If you wish to:
-
-- Build a Competitive Offering
-- Offer DreamGraph as a service
-- Integrate into a commercial platform as a core feature
-
-You must obtain a commercial license from:
-
-mika.jussila@siteledger.io
-
-7. Disclaimer
-
-The Software is provided “as is”, without warranty of any kind.
-
-The authors are not liable for any damages arising from use of the Software.
+For any questions regarding this license, please contact the original authors.

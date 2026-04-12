@@ -23,6 +23,7 @@ import type { ContextInspector } from "./context-inspector.js";
 import type { ArchitectLlm, ArchitectProvider, ArchitectMessage } from "./architect-llm.js";
 import type { ContextBuilder } from "./context-builder.js";
 import type { ChatPanel } from "./chat-panel.js";
+import type { GraphSignalProvider } from "./graph-signal.js";
 import type { ResolvedInstance, RegistryEntry } from "./types.js";
 import {
   resolveInstance,
@@ -45,6 +46,7 @@ export interface CommandServices {
   architectLlm: ArchitectLlm;
   contextBuilder: ContextBuilder;
   chatPanel: ChatPanel;
+  graphSignal: GraphSignalProvider;
   /** Get the current resolved instance */
   getInstance: () => ResolvedInstance | null;
   /** Set the current resolved instance */
@@ -245,36 +247,9 @@ export function showStatusCommand(svc: CommandServices): void {
 /* ------------------------------------------------------------------ */
 
 export async function openDashboardCommand(
-  svc: CommandServices,
+  _svc: CommandServices,
 ): Promise<void> {
-  const instance = svc.getInstance();
-  if (!instance?.daemon.running) {
-    vscode.window.showWarningMessage(
-      "DreamGraph: Daemon is not running. Start it first.",
-    );
-    return;
-  }
-
-  const host = getConfig<string>("daemonHost") ?? "127.0.0.1";
-  const port = instance.daemon.port;
-  if (!port) {
-    vscode.window.showWarningMessage(
-      "DreamGraph: Daemon port unknown. Reconnect first.",
-    );
-    return;
-  }
-  const url = `http://${host}:${port}/`;
-
-  // Try Simple Browser first, fall back to external browser
-  try {
-    await vscode.commands.executeCommand(
-      "simpleBrowser.api.open",
-      vscode.Uri.parse(url),
-      { viewColumn: vscode.ViewColumn.Beside },
-    );
-  } catch {
-    await vscode.env.openExternal(vscode.Uri.parse(url));
-  }
+  await vscode.commands.executeCommand("dreamgraph.dashboardView.focus");
 }
 
 /* ------------------------------------------------------------------ */
@@ -785,4 +760,63 @@ async function showInstancePicker(
 
   if (!picked) return undefined;
   return entries.find((e) => e.uuid === picked.uuid);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Command: Show Graph Signal                                        */
+/* ------------------------------------------------------------------ */
+
+export async function showGraphSignalCommand(svc: CommandServices): Promise<void> {
+  const signal = svc.graphSignal.currentSignal;
+  if (!signal) {
+    void vscode.window.showInformationMessage("DreamGraph: No graph context available for the current file.");
+    return;
+  }
+
+  const lines: string[] = [
+    `### Graph Context: ${signal.filePath}`,
+    "",
+  ];
+
+  if (signal.features.length > 0) {
+    lines.push(`**Related Features (${signal.featureCount}):**`);
+    for (const f of signal.features) {
+      lines.push(`  - ${f.id}: ${f.name}`);
+    }
+    lines.push("");
+  }
+
+  if (signal.tensions.length > 0) {
+    lines.push(`**Active Tensions (${signal.tensionCount}):**`);
+    for (const t of signal.tensions) {
+      lines.push(`  - ⚡ [${t.severity}] ${t.description}`);
+    }
+    lines.push("");
+  }
+
+  if (signal.insights.length > 0) {
+    lines.push(`**Dream Insights (${signal.insightCount}):**`);
+    for (const i of signal.insights) {
+      lines.push(`  - 💡 [${i.type}] ${i.insight} (confidence: ${(i.confidence * 100).toFixed(0)}%)`);
+    }
+    lines.push("");
+  }
+
+  if (signal.adrs.length > 0) {
+    lines.push(`**Applicable ADRs (${signal.adrCount}):**`);
+    for (const a of signal.adrs) {
+      lines.push(`  - 📋 ${a.id}: ${a.title} [${a.status}]`);
+    }
+    lines.push("");
+  }
+
+  // Show in an information message with option to open chat
+  const choice = await vscode.window.showInformationMessage(
+    signal.summary,
+    "Open Chat",
+    "Dismiss",
+  );
+  if (choice === "Open Chat") {
+    svc.chatPanel.open();
+  }
 }

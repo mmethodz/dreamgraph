@@ -341,6 +341,7 @@ function buildEnrichmentPrompt(
   keyFileContents: string,
   manifestSummary: string,
   target: "features" | "workflows" | "data_model",
+  repoName: string,
 ): LlmMessage[] {
   const targetInstructions: Record<string, string> = {
     features: `Identify ALL major features and modules in this project.
@@ -348,7 +349,7 @@ Each feature should have:
 - id: snake_case unique identifier
 - name: Human-readable feature name
 - description: 2-3 sentences explaining what it does, its purpose, and key behaviors
-- source_repo: "${target}" 
+- source_repo: "${repoName}" 
 - source_files: array of key source file paths (relative to repo root)
 - status: "active"
 - category: logical category (e.g., "core", "ui", "plugin", "cli", "infrastructure")
@@ -367,7 +368,7 @@ Each workflow should have:
 - name: Human-readable workflow name (usually ends with "Flow" or "Process")
 - description: 2-3 sentences explaining the process
 - trigger: What initiates this workflow
-- source_repo: "${target}"
+- source_repo: "${repoName}"
 - source_files: array of source file paths involved
 - domain: domain grouping
 - keywords: array of keywords
@@ -385,7 +386,7 @@ Each entity should have:
 - description: 2-3 sentences explaining what data it holds and how it's used
 - table_name: identifier (can match id)
 - storage: storage mechanism (e.g., "json", "sqlite", "memory", "file-system", "registry")
-- source_repo: "${target}"
+- source_repo: "${repoName}"
 - source_files: array of source file paths where this is defined
 - domain: domain grouping
 - keywords: array of keywords
@@ -403,7 +404,8 @@ Aim for 10-25 data model entities.`,
       role: "system" as const,
       content:
         `You are a software architecture analyst. Analyze the given project and extract structured data.\n` +
-        `Respond ONLY with a JSON array of objects. No markdown, no explanation, just the JSON array.\n` +
+        `Respond with a JSON array of objects. No markdown, no explanation.\n` +
+        `If you must wrap it in an object, use a key matching the target type (e.g. {"features": [...]}).\n` +
         `${targetInstructions[target]}`,
     },
     {
@@ -474,20 +476,50 @@ async function writeSeed(filename: string, data: unknown): Promise<void> {
 // ---------------------------------------------------------------------------
 
 function extractJsonArray(text: string): unknown[] {
+  // Strip markdown code fences if present (```json ... ```)
+  const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const cleaned = fenceMatch ? fenceMatch[1].trim() : text.trim();
+
   // Try direct parse first
   try {
-    const parsed = JSON.parse(text);
+    const parsed = JSON.parse(cleaned);
     if (Array.isArray(parsed)) return parsed;
+
+    // OpenAI json_object mode wraps arrays in an object like { "features": [...] }
+    // Walk every top-level value and return the first array we find.
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      for (const val of Object.values(parsed as Record<string, unknown>)) {
+        if (Array.isArray(val) && val.length > 0) return val;
+      }
+    }
     return [];
   } catch { /* try extraction */ }
 
-  // Extract JSON array from markdown code blocks or mixed text
-  const arrayMatch = text.match(/\[[\s\S]*\]/);
+  // Extract the largest JSON array from mixed text (greedy outer brackets)
+  const arrayMatch = cleaned.match(/\[[\s\S]*\]/);
   if (arrayMatch) {
     try {
       const parsed = JSON.parse(arrayMatch[0]);
       if (Array.isArray(parsed)) return parsed;
-    } catch { /* give up */ }
+    } catch {
+      // The greedy match may have grabbed too much — try the first balanced array
+      try {
+        const start = cleaned.indexOf("[");
+        if (start !== -1) {
+          let depth = 0;
+          for (let i = start; i < cleaned.length; i++) {
+            if (cleaned[i] === "[") depth++;
+            else if (cleaned[i] === "]") depth--;
+            if (depth === 0) {
+              const candidate = cleaned.slice(start, i + 1);
+              const arr = JSON.parse(candidate);
+              if (Array.isArray(arr)) return arr;
+              break;
+            }
+          }
+        }
+      } catch { /* give up */ }
+    }
   }
 
   return [];
@@ -569,9 +601,43 @@ export function registerScanProjectTool(server: McpServer): void {
           "Specific repo names to scan. Default: all configured repos.",
         ),
     },
-    async ({ depth, targets, repos }) => {
+    async ({ depth, targets, repos }, extra) => {
       const VALID_TARGETS = ["features", "workflows", "data_model"];
       const targetList = targets ?? [...VALID_TARGETS];
+
+      // ---- Progress helper ----
+      // Sends MCP progress notifications AND logging messages so the client
+      // can display live status.  The logging message acts as a reliable
+      // fallback because progress tokens may not always be routed.
+      let _step = 0;
+      const _totalSteps = 2 + targetList.length + 1; // scan + (per-target LLM) + index
+      async function progress(message: string): Promise<void> {
+        _step++;
+        logger.info(`scan_project: ${message}`);
+        // Try progress notification (token-routed)
+        try {
+          await extra.sendNotification({
+            method: "notifications/progress" as const,
+            params: {
+              progressToken: (extra._meta as Record<string, unknown>)?.progressToken as string | number ?? "scan",
+              progress: _step,
+              total: _totalSteps,
+              message,
+            },
+          });
+        } catch { /* client may not support progress — ignore */ }
+        // Also send a logging message (always delivered)
+        try {
+          await extra.sendNotification({
+            method: "notifications/message" as const,
+            params: {
+              level: "info",
+              logger: "scan_project",
+              data: `[${_step}/${_totalSteps}] ${message}`,
+            },
+          });
+        } catch { /* best effort */ }
+      }
 
       // Validate targets
       const invalidTargets = targetList.filter(t => !VALID_TARGETS.includes(t));
@@ -606,7 +672,7 @@ export function registerScanProjectTool(server: McpServer): void {
         let totalTokens = 0;
 
         // Phase 1: Mechanical scan
-        logger.info("scan_project: Phase 1 — mechanical scan");
+        await progress("Phase 1 — scanning file system…");
         const scans: ProjectScan[] = [];
         for (const repoName of targetRepos) {
           const repoRoot = path.resolve(config.repos[repoName]);
@@ -616,6 +682,7 @@ export function registerScanProjectTool(server: McpServer): void {
             `scan_project: ${repoName} — ${scan.files.length} files, ${scan.uiFiles.length} UI files, ` +
             `tech: ${scan.technology}, dirs: ${scan.topLevelDirs.join(", ")}`,
           );
+          await progress(`Scanned ${repoName}: ${scan.files.length} files, tech: ${scan.technology}`);
         }
 
         const totalFiles = scans.reduce((s, sc) => s + sc.files.length, 0);
@@ -632,6 +699,7 @@ export function registerScanProjectTool(server: McpServer): void {
 
         if (llmAvailable) {
           logger.info(`scan_project: Phase 2 — LLM enrichment (model: ${dreamerConfig.model})`);
+          await progress(`Phase 2 — LLM enrichment (model: ${dreamerConfig.model})…`);
           const llm = getLlmProvider();
 
           for (const scan of scans) {
@@ -645,10 +713,11 @@ export function registerScanProjectTool(server: McpServer): void {
             for (const target of targetList) {
               try {
                 const messages = buildEnrichmentPrompt(
-                  treeSummary, fileListing, keyFileContents, manifestSummary, target as "features" | "workflows" | "data_model",
+                  treeSummary, fileListing, keyFileContents, manifestSummary, target as "features" | "workflows" | "data_model", scan.repoName,
                 );
 
                 logger.info(`scan_project: LLM call for ${target} (${scan.repoName})`);
+                await progress(`LLM extracting ${target} from ${scan.repoName}…`);
                 const response = await llm.complete(messages, {
                   model: dreamerConfig.model,
                   temperature: 0.3, // Low temp for factual extraction
@@ -660,8 +729,9 @@ export function registerScanProjectTool(server: McpServer): void {
 
                 const rawEntries = extractJsonArray(response.text);
                 if (rawEntries.length === 0) {
+                  const preview = response.text.slice(0, 500).replace(/\n/g, "\\n");
                   errors.push(`LLM returned no parseable ${target} entries for ${scan.repoName}`);
-                  logger.warn(`scan_project: LLM returned no entries for ${target} (${scan.repoName})`);
+                  logger.warn(`scan_project: LLM returned no entries for ${target} (${scan.repoName}). Response preview: ${preview}`);
                   continue;
                 }
 
@@ -683,6 +753,7 @@ export function registerScanProjectTool(server: McpServer): void {
 
                 await writeSeed(filename, merged.merged);
                 logger.info(`scan_project: ${target} — ${merged.inserted} inserted, ${merged.updated} updated, ${merged.merged.length} total`);
+                await progress(`${target}: ${merged.inserted} new, ${merged.updated} updated, ${merged.merged.length} total`);
 
                 const resultRef = target === "features" ? featureResult
                   : target === "workflows" ? workflowResult
@@ -701,6 +772,7 @@ export function registerScanProjectTool(server: McpServer): void {
           }
         } else {
           logger.info("scan_project: Phase 2 — LLM unavailable, structural-only mode");
+          await progress("Phase 2 — LLM unavailable, using structural analysis…");
           errors.push("LLM not available — generated structural entries only. Consider running enrich_seed_data manually for richer data.");
 
           // Fallback: generate basic entries from directory structure
@@ -738,6 +810,7 @@ export function registerScanProjectTool(server: McpServer): void {
         }
 
         // Rebuild resource index
+        await progress("Rebuilding resource index…");
         const indexEntries = await rebuildIndex();
         logger.info(`scan_project: index rebuilt with ${indexEntries} entries`);
 

@@ -43,5 +43,5 @@ export function registerTools(server: McpServer): void {
   registerScanProjectTool(server);
   registerApiSurfaceTools(server);
 
-  logger.info("Registered 25 tools");
+  logger.info("Registered 30 tools");
 }

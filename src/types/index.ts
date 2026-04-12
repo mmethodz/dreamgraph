@@ -239,6 +239,8 @@ export interface ApiMethod {
   line_number: number;
   decorators: string[];
   defined_in?: string;
+  /** Actual source code snippet, populated when query_api_surface is called with include_source=true. */
+  source_code?: string;
 }
 
 export interface ApiClass {
@@ -259,6 +261,8 @@ export interface ApiFreeFunction {
   is_async: boolean;
   is_exported: boolean;
   line_number: number;
+  /** Actual source code snippet, populated when query_api_surface is called with include_source=true. */
+  source_code?: string;
 }
 
 export interface ApiModule {
@@ -310,6 +314,8 @@ export interface QueryApiSurfaceOutput {
   is_exported?: boolean;
   functions?: ApiFreeFunction[];
   classes?: ApiClass[];
+  /** Actual source code snippet for a single function result, populated with include_source=true. */
+  source_code?: string;
 }
 
 // ---------------------------------------------------------------------------

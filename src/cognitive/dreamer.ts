@@ -259,8 +259,12 @@ function dreamId(prefix: string): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Find entity pairs that share domain or keywords but have no direct edge.
+ * Find entity pairs that share domain, keywords, description tokens, or
+ * source files but have no direct edge.
  * These are "nearby but unconnected" — potential hidden relationships.
+ *
+ * Resilient to sparse data: works even when domain/keywords are empty
+ * by falling back to description token overlap and shared source files.
  */
 function gapDetection(
   snapshot: FactSnapshot,
@@ -284,19 +288,59 @@ function gapDetection(
         continue;
       }
 
-      // Calculate affinity
-      const sameDomain = a.domain && b.domain && a.domain === b.domain;
+      // ---- Affinity signals (any can trigger a dream edge) ----
+      const sameDomain = !!(a.domain && b.domain && a.domain === b.domain);
       const sharedKeywords = a.keywords.filter((k) => b.keywords.includes(k));
-      const sameRepo = a.source_repo === b.source_repo;
+      const sameRepo = !!(a.source_repo && b.source_repo && a.source_repo === b.source_repo);
 
-      // Must have at least domain match + keyword overlap to be interesting
-      if (!sameDomain && sharedKeywords.length < 2) continue;
-      if (!sameDomain && !sameRepo) continue;
+      // Description token overlap (semantic affinity from descriptions)
+      let descOverlap = 0;
+      if (a.descriptionTokens.size > 0 && b.descriptionTokens.size > 0) {
+        for (const token of a.descriptionTokens) {
+          if (b.descriptionTokens.has(token)) descOverlap++;
+        }
+      }
 
+      // Shared source files (structural coupling)
+      let sharedFiles = 0;
+      for (const file of a.source_files) {
+        if (b.source_files.includes(file)) sharedFiles++;
+      }
+      // Also check if any source files are co-indexed (different entities in same file)
+      let coIndexedFiles = 0;
+      for (const file of a.source_files) {
+        const indexed = snapshot.sourceFileIndex.get(file);
+        if (indexed && indexed.includes(b.id)) coIndexedFiles++;
+      }
+
+      // ---- Threshold: need at least one meaningful signal ----
+      const hasSignal =
+        sameDomain ||
+        sharedKeywords.length >= 2 ||
+        descOverlap >= 3 ||
+        sharedFiles > 0 ||
+        coIndexedFiles > 0 ||
+        (sameRepo && (descOverlap >= 2 || sharedKeywords.length >= 1));
+
+      if (!hasSignal) continue;
+
+      // ---- Build confidence from all signals ----
       const confidence =
-        (sameDomain ? 0.3 : 0) +
-        Math.min(sharedKeywords.length * 0.1, 0.4) +
-        (sameRepo ? 0.15 : 0);
+        (sameDomain ? 0.25 : 0) +
+        Math.min(sharedKeywords.length * 0.1, 0.3) +
+        (sameRepo ? 0.1 : 0) +
+        Math.min(descOverlap * 0.04, 0.25) +
+        Math.min(sharedFiles * 0.15, 0.3) +
+        Math.min(coIndexedFiles * 0.1, 0.2);
+
+      // Build reason listing all detected signals
+      const reasons: string[] = [];
+      if (sameDomain) reasons.push(`domain "${a.domain}"`);
+      if (sharedKeywords.length > 0) reasons.push(`keywords [${sharedKeywords.join(", ")}]`);
+      if (descOverlap > 0) reasons.push(`${descOverlap} shared description terms`);
+      if (sharedFiles > 0) reasons.push(`${sharedFiles} shared source files`);
+      if (coIndexedFiles > 0) reasons.push(`${coIndexedFiles} co-indexed files`);
+      if (sameRepo) reasons.push(`same repo "${a.source_repo}"`);
 
       edges.push({
         id: dreamId("gap"),
@@ -304,8 +348,8 @@ function gapDetection(
         to: b.id,
         type: a.type === b.type ? a.type : "hypothetical",
         relation: `potential_${a.type}_${b.type}_connection`,
-        reason: `Both entities share ${sameDomain ? `domain "${a.domain}"` : ""}${sameDomain && sharedKeywords.length > 0 ? " and " : ""}${sharedKeywords.length > 0 ? `keywords [${sharedKeywords.join(", ")}]` : ""} but have no direct edge`,
-        confidence: Math.round(confidence * 100) / 100,
+        reason: `Entities "${a.name}" and "${b.name}" share ${reasons.join(", ")} but have no direct edge`,
+        confidence: Math.round(Math.min(confidence, 0.95) * 100) / 100,
         origin: "rem",
         created_at: now,
         dream_cycle: cycle,
@@ -401,7 +445,9 @@ function weakReinforcement(
 // ---------------------------------------------------------------------------
 
 /**
- * Connect entities from different domains that share keywords.
+ * Connect entities from different domains that share keywords or
+ * description tokens. When explicit domains are missing, infers
+ * pseudo-domains from entity type + source repo.
  * These are potential integration points or feature synergies.
  */
 function crossDomainBridging(
@@ -412,14 +458,24 @@ function crossDomainBridging(
   const edges: DreamEdge[] = [];
   const now = new Date().toISOString();
 
-  // Group entities by domain
+  // Infer domain: explicit domain > type+repo > type
+  const inferDomain = (e: FactEntity): string => {
+    if (e.domain) return e.domain;
+    if (e.source_repo) return `${e.type}:${e.source_repo}`;
+    return e.type;
+  };
+
+  // Group entities by inferred domain
   const byDomain = new Map<string, FactEntity[]>();
   for (const entity of snapshot.entities.values()) {
-    if (!entity.domain) continue;
-    const list = byDomain.get(entity.domain) ?? [];
+    const d = inferDomain(entity);
+    const list = byDomain.get(d) ?? [];
     list.push(entity);
-    byDomain.set(entity.domain, list);
+    byDomain.set(d, list);
   }
+
+  // Need at least 2 distinct domains to bridge
+  if (byDomain.size < 2) return edges;
 
   const domainPairs = Array.from(byDomain.keys());
 
@@ -450,10 +506,26 @@ function crossDomainBridging(
           const sharedKeywords = a.keywords.filter((k) =>
             b.keywords.includes(k)
           );
-          if (sharedKeywords.length < 2) continue;
+
+          // Description token overlap as fallback when keywords are sparse
+          let descOverlap = 0;
+          if (a.descriptionTokens.size > 0 && b.descriptionTokens.size > 0) {
+            for (const token of a.descriptionTokens) {
+              if (b.descriptionTokens.has(token)) descOverlap++;
+            }
+          }
+
+          // Need either keyword overlap OR strong description token overlap
+          if (sharedKeywords.length < 2 && descOverlap < 3) continue;
 
           const confidence =
-            0.2 + Math.min(sharedKeywords.length * 0.12, 0.5);
+            0.2 +
+            Math.min(sharedKeywords.length * 0.12, 0.4) +
+            Math.min(descOverlap * 0.03, 0.2);
+
+          const reasons: string[] = [];
+          if (sharedKeywords.length > 0) reasons.push(`keywords [${sharedKeywords.join(", ")}]`);
+          if (descOverlap > 0) reasons.push(`${descOverlap} shared description terms`);
 
           edges.push({
             id: dreamId("bridge"),
@@ -461,8 +533,8 @@ function crossDomainBridging(
             to: b.id,
             type: "hypothetical",
             relation: `cross_domain_bridge_${domainA}_${domainB}`,
-            reason: `Cross-domain connection: "${a.name}" (${domainA}) and "${b.name}" (${domainB}) share keywords [${sharedKeywords.join(", ")}]`,
-            confidence: Math.round(confidence * 100) / 100,
+            reason: `Cross-domain connection: "${a.name}" (${domainA}) and "${b.name}" (${domainB}) share ${reasons.join(" and ")}`,
+            confidence: Math.round(Math.min(confidence, 0.85) * 100) / 100,
             origin: "rem",
             created_at: now,
             dream_cycle: cycle,
@@ -859,7 +931,7 @@ async function llmDream(
   // Check LLM availability
   const available = await isLlmAvailable();
   if (!available) {
-    logger.debug("LLM dream: provider not available, skipping");
+    logger.warn("LLM dream: provider not available — check DREAMGRAPH_LLM_PROVIDER, DREAMGRAPH_LLM_API_KEY, and model config. Skipping LLM dreaming.");
     return { edges, nodes };
   }
 
@@ -1071,19 +1143,23 @@ Analyze the SOURCE CODE EVIDENCE above together with the entity graph. Propose $
   ];
 
   try {
-    logger.debug(`LLM dream: sending prompt (${entitySummaries.length} entities, ${edgeSummaries.length} edges)`);
+    const dreamerCfg = getDreamerLlmConfig();
+    logger.info(
+      `LLM dream: sending prompt (${entitySummaries.length} entities, ${edgeSummaries.length} edges) ` +
+      `to model=${dreamerCfg.model}, temp=${dreamerCfg.temperature}, maxTokens=${dreamerCfg.maxTokens}`
+    );
 
     const response = await llm.complete(messages, {
-      temperature: getDreamerLlmConfig().temperature,
-      maxTokens: getDreamerLlmConfig().maxTokens,
-      model: getDreamerLlmConfig().model,
+      temperature: dreamerCfg.temperature,
+      maxTokens: dreamerCfg.maxTokens,
+      model: dreamerCfg.model,
       jsonSchema: {
         name: "dream_response",
         schema: DREAM_RESPONSE_SCHEMA,
       },
     });
 
-    logger.debug(`LLM dream: received ${response.text.length} chars from ${response.model}`);
+    logger.info(`LLM dream: received ${response.text.length} chars from ${response.model}`);
 
     // Parse the LLM response
     const parsed = parseLlmDreamResponse(response.text, snapshot, cycle, now, entityIds, groundingContext);
@@ -1095,8 +1171,12 @@ Analyze the SOURCE CODE EVIDENCE above together with the entity graph. Propose $
       `(${response.tokensUsed ?? "?"} tokens)`
     );
   } catch (err) {
+    const dreamerModel = getDreamerLlmConfig().model;
+    const providerName = getLlmProvider().name;
     logger.warn(
-      `LLM dream failed: ${err instanceof Error ? err.message : "unknown error"}`
+      `LLM dream FAILED (provider=${providerName}, model=${dreamerModel}): ` +
+      `${err instanceof Error ? err.message : "unknown error"}. ` +
+      `Check the model name and API key in Dashboard > Config > LLM.`
     );
   }
 
