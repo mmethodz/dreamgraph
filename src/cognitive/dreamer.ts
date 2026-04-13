@@ -593,7 +593,7 @@ function missingAbstraction(
 
     for (const [linkType, targets] of byType) {
       if (nodes.length >= max) break;
-      if (targets.length < 3) continue;
+      if (targets.length < 2) continue;
 
       // Check if those targets also connect to each other
       let interconnections = 0;
@@ -1086,7 +1086,7 @@ Rules:
 - Focus on: hidden dependencies found in actual imports/calls, architectural patterns visible in code structure, data flow through actual function signatures, integration points proven by shared interfaces
 - Confidence guide: 0.3-0.5 = code hints at it, 0.5-0.7 = code structure supports it, 0.7-0.9 = code directly proves it
 - Aim for ${Math.min(max, 15)} edges (quality over quantity)
-- If you see potential for a NEW concept (something not in the graph), include it as a "new_node" object with: id (dream_llm_<name>), name, description, type ("hypothetical_feature" or "hypothetical_workflow" or "hypothetical_entity"), domain (e.g. "inference", "core"), keywords (array of semantic tags), and category ("feature", "workflow", or "data_model"). Nodes with strong evidence will be promoted into the fact graph after normalization.
+- **NEW CONCEPTS**: Actively propose 2-5 new_node objects for concepts the graph is MISSING. Look for: shared abstractions (e.g. a "Billing Pipeline" hub connecting invoice, payment, subscription features), cross-cutting concerns (authorization layer, audit logging, caching strategy), unnamed integration points, and architectural patterns visible in the code. Each new_node needs: id (dream_llm_<snake_case_name>), name, description, intent (WHY this concept should exist), type ("hypothetical_feature" or "hypothetical_workflow" or "hypothetical_entity"), domain (match an existing domain from the graph, e.g. "invoicing", "core", "auth"), keywords (array of semantic tags that overlap with existing entity keywords), and category ("feature", "workflow", or "data_model"). Nodes with strong domain and keyword grounding will be promoted into the fact graph after normalization.
 - Copy-paste exact identifiers, class names, or short code fragments (under 50 characters). Do NOT include markdown formatting, newlines, or extra indentation in the source_evidence string, as this will break the exact substring verification.
 - Output format MUST be strictly this JSON array:
   [
@@ -1127,7 +1127,11 @@ ${tensionContext}
 ${validatedContext}
 ${groundingContext}
 
-Analyze the SOURCE CODE EVIDENCE above together with the entity graph. Propose ${Math.min(max, 15)} edge hypotheses that are GROUNDED IN THE CODE you can see. Every edge must cite specific source evidence. Output a JSON object with:
+Analyze the SOURCE CODE EVIDENCE above together with the entity graph. Propose ${Math.min(max, 15)} edge hypotheses that are GROUNDED IN THE CODE you can see. Every edge must cite specific source evidence.
+
+Also propose 2-5 new_nodes for MISSING CONCEPTS — shared abstractions, integration hubs, cross-cutting concerns, or architectural patterns that the current graph doesn't capture but the code implies. Use domain and keywords that match existing entities so the normalizer can ground them.
+
+Output a JSON object with:
 {
   "edges": [
     { "from": "entity_id", "to": "entity_id", "relation": "verb", "reason": "why this connection", "confidence": 0.5, "source_evidence": "src/path/File.cs:ClassName.Method() — proves X" }
@@ -1164,7 +1168,7 @@ Analyze the SOURCE CODE EVIDENCE above together with the entity graph. Propose $
     // Parse the LLM response
     const parsed = parseLlmDreamResponse(response.text, snapshot, cycle, now, entityIds, groundingContext);
     edges.push(...parsed.edges.slice(0, max));
-    nodes.push(...parsed.nodes.slice(0, Math.ceil(max / 3)));
+    nodes.push(...parsed.nodes.slice(0, Math.ceil(max / 2)));
 
     logger.info(
       `LLM dream: ${edges.length} edges, ${nodes.length} nodes from ${response.model} ` +
@@ -1240,6 +1244,7 @@ function parseLlmDreamResponse(
   const idSet = new Set(knownIds);
 
   // Process new nodes first (so their IDs are available for edges)
+  // Also backfill inspiration from edges that reference each node.
   const newNodeIds = new Set<string>();
   for (const n of data.new_nodes ?? []) {
     if (!n.id || !n.name) continue;
@@ -1259,13 +1264,26 @@ function parseLlmDreamResponse(
       category = "feature"; // default
     }
 
+    // Collect inspiration: fact-graph entities sharing domain or keywords
+    const nodeInspiration: string[] = [];
+    const nodeDomain = (n.domain ?? "").toLowerCase();
+    const nodeKws = new Set((n.keywords ?? []).map((k: string) => k.toLowerCase()));
+    for (const eid of knownIds) {
+      if (nodeInspiration.length >= 8) break;
+      const entity = snapshot.entities.get(eid);
+      if (!entity) continue;
+      const domainMatch = nodeDomain && entity.domain?.toLowerCase() === nodeDomain;
+      const kwMatch = entity.keywords?.some((k: string) => nodeKws.has(k.toLowerCase()));
+      if (domainMatch || kwMatch) nodeInspiration.push(eid);
+    }
+
     nodes.push({
       id: nodeId,
       type: (n.type as DreamNode["type"]) ?? "hypothetical_feature",
       name: n.name,
       description: n.description ?? "",
       intent: n.intent ?? "",
-      inspiration: [],
+      inspiration: nodeInspiration,
       confidence: 0.4,
       origin: "rem",
       created_at: now,
@@ -1375,6 +1393,22 @@ function parseLlmDreamResponse(
 
   if (rejectedNoEvidence > 0 || rejectedFakeEvidence > 0) {
     logger.info(`LLM dream: rejected ${rejectedNoEvidence} edges with no evidence, ${rejectedFakeEvidence} with fabricated evidence (proof-of-work filter)`);
+  }
+
+  // Backfill node inspiration from accepted edges that reference new nodes.
+  // If an edge connects a fact-graph entity to a new node, that entity is
+  // evidence of the node's relevance — exactly what the normalizer needs.
+  for (const node of nodes) {
+    const existing = new Set(node.inspiration);
+    for (const edge of edges) {
+      if (existing.size >= 12) break;
+      if (edge.from === node.id && idSet.has(edge.to) && !existing.has(edge.to)) {
+        existing.add(edge.to);
+      } else if (edge.to === node.id && idSet.has(edge.from) && !existing.has(edge.from)) {
+        existing.add(edge.from);
+      }
+    }
+    node.inspiration = [...existing];
   }
 
   return { edges, nodes };

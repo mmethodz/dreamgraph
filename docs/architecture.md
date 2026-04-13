@@ -239,6 +239,7 @@ src/
 │   ├── scope.ts             # InstanceScope — file-system isolation enforcement
 │   ├── registry.ts          # Master registry CRUD (~/.dreamgraph/instances.json)
 │   ├── lifecycle.ts         # Create, load, resolve, migrate instances
+│   ├── bootstrap.ts         # Zero-touch bootstrap — auto-scan, auto-dream, ADR discovery (v7.0)
 │   ├── policies.ts          # policies.json parser, validator, runtime queries
 │   └── index.ts             # Barrel re-exports
 ├── cli/                     # CLI instance manager — `dg` binary (v6.0 La Catedral)
@@ -267,6 +268,7 @@ src/
 │   ├── solidify-insight.ts  # Manual insight injection
 │   ├── enrich-seed-data.ts  # Seed data enrichment (merge/replace)
 │   ├── init-graph.ts        # Bootstrap knowledge graph from source
+│   ├── scan-project.ts      # Automated project scan + LLM enrichment + auto-dream (v7.0)
 │   ├── visual-architect.ts  # Mermaid diagram generation
 │   ├── adr-historian.ts     # Architecture Decision Records
 │   ├── ui-registry.ts       # Semantic UI element registry

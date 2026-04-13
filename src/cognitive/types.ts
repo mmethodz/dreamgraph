@@ -533,9 +533,9 @@ export interface TensionConfig {
 }
 
 export const DEFAULT_TENSION_CONFIG: TensionConfig = {
-  max_active_tensions: 50,
+  max_active_tensions: 200,
   default_tension_ttl: 30,
-  tension_urgency_decay: 0.02,
+  tension_urgency_decay: 0.01,
   min_urgency_threshold: 0.05,
 };
 

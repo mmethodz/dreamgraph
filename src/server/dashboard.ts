@@ -73,18 +73,15 @@ function persistLlmEngineEnv(): void {
   const effectiveApiKey = base.apiKey || process.env.DREAMGRAPH_LLM_API_KEY || "";
 
   const vars: Record<string, string> = {
-    // Base provider
+    // Shared provider settings
     DREAMGRAPH_LLM_PROVIDER: base.provider,
-    DREAMGRAPH_LLM_MODEL: base.model,
     DREAMGRAPH_LLM_URL: base.baseUrl,
     DREAMGRAPH_LLM_API_KEY: effectiveApiKey,
-    DREAMGRAPH_LLM_TEMPERATURE: String(base.temperature),
-    DREAMGRAPH_LLM_MAX_TOKENS: String(base.maxTokens),
-    // Dreamer overrides
+    // Dreamer (creative dream cycle generation)
     DREAMGRAPH_LLM_DREAMER_MODEL: dreamer.model,
     DREAMGRAPH_LLM_DREAMER_TEMPERATURE: String(dreamer.temperature),
     DREAMGRAPH_LLM_DREAMER_MAX_TOKENS: String(dreamer.maxTokens),
-    // Normalizer overrides
+    // Normalizer (validation / truth-filter pass)
     DREAMGRAPH_LLM_NORMALIZER_MODEL: normalizer.model,
     DREAMGRAPH_LLM_NORMALIZER_TEMPERATURE: String(normalizer.temperature),
     DREAMGRAPH_LLM_NORMALIZER_MAX_TOKENS: String(normalizer.maxTokens),
@@ -464,7 +461,8 @@ async function renderStatus(): Promise<string> {
   body += `<h2>LLM Provider</h2>
   <div class="card">
     <div class="kv"><span class="kv-key">Provider</span><span class="kv-val">${esc(llm?.provider ?? "none")}</span></div>
-    <div class="kv"><span class="kv-key">Model</span><span class="kv-val">${esc(llm?.model ?? "—")}</span></div>
+    <div class="kv"><span class="kv-key">Dreamer Model</span><span class="kv-val">${esc(getDreamerLlmConfig().model || "—")}</span></div>
+    <div class="kv"><span class="kv-key">Normalizer Model</span><span class="kv-val">${esc(getNormalizerLlmConfig().model || "—")}</span></div>
     <div class="kv"><span class="kv-key">Available</span><span class="kv-val">${llm?.available
       ? '<span class="badge badge-green">online</span>'
       : '<span class="badge badge-red">offline</span>'
@@ -507,7 +505,7 @@ async function renderHealth(): Promise<string> {
   const checks = [
     { name: "Cognitive Engine", ok: true, detail: status.current_state.toUpperCase() },
     { name: "HTTP Sessions", ok: true, detail: `${sessions} active` },
-    { name: "LLM Provider", ok: status.llm?.available ?? false, detail: `${llmCfg.provider} / ${llmCfg.model || "—"}` },
+    { name: "LLM Provider", ok: status.llm?.available ?? false, detail: `${llmCfg.provider} — dreamer: ${getDreamerLlmConfig().model || "—"}, normalizer: ${getNormalizerLlmConfig().model || "—"}` },
     { name: "Instance", ok: isInstanceMode(), detail: isInstanceMode() ? getActiveScope()!.uuid : "legacy" },
   ];
 
@@ -943,7 +941,7 @@ async function renderConfig(savedSection?: string): Promise<string> {
         <input type="hidden" name="_section" value="llm">
         <div class="form-row">
           <label>Provider</label>
-          <select name="provider">
+          <select name="provider" id="llm-provider" onchange="window.__dgUpdateProviderUrl()">
             ${(["ollama", "openai", "anthropic", "sampling", "none"] as const).map(p =>
               `<option value="${p}" ${llmCfg.provider === p ? "selected" : ""}>${p}</option>`
             ).join("")}
@@ -951,7 +949,7 @@ async function renderConfig(savedSection?: string): Promise<string> {
         </div>
         <div class="form-row">
           <label>Base URL</label>
-          <input name="baseUrl" value="${escAttr(llmCfg.baseUrl)}" placeholder="e.g. http://localhost:11434">
+          <input id="llm-baseUrl" name="baseUrl" value="${escAttr(llmCfg.baseUrl)}" placeholder="e.g. http://localhost:11434">
         </div>
         <div class="form-row">
           <label>API Key</label>
@@ -976,10 +974,10 @@ async function renderConfig(savedSection?: string): Promise<string> {
         <div class="form-row">
           <label>Model</label>
           <div style="display:flex;gap:8px;flex:1;align-items:center">
-            <select id="dreamer-preset" style="flex:0 0 auto;min-width:140px" onchange="if(this.value){document.getElementById('dreamer-model').value=this.value}">
-              <option value="">— preset —</option>
+            <select id="dreamer-select" style="flex:0 0 auto;min-width:180px"
+              onchange="window.__dgModelSelect('dreamer')">
             </select>
-            <input id="dreamer-model" name="model" value="${escAttr(dreamerCfg.model)}" placeholder="select or type model" style="flex:1">
+            <input id="dreamer-model" name="model" value="${escAttr(dreamerCfg.model)}" placeholder="type custom model name" style="flex:1">
           </div>
         </div>
         <div class="form-row">
@@ -1005,10 +1003,10 @@ async function renderConfig(savedSection?: string): Promise<string> {
         <div class="form-row">
           <label>Model</label>
           <div style="display:flex;gap:8px;flex:1;align-items:center">
-            <select id="normalizer-preset" style="flex:0 0 auto;min-width:140px" onchange="if(this.value){document.getElementById('normalizer-model').value=this.value}">
-              <option value="">— preset —</option>
+            <select id="normalizer-select" style="flex:0 0 auto;min-width:180px"
+              onchange="window.__dgModelSelect('normalizer')">
             </select>
-            <input id="normalizer-model" name="model" value="${escAttr(normalizerCfg.model)}" placeholder="select or type model" style="flex:1">
+            <input id="normalizer-model" name="model" value="${escAttr(normalizerCfg.model)}" placeholder="type custom model name" style="flex:1">
           </div>
         </div>
         <div class="form-row">
@@ -1025,12 +1023,21 @@ async function renderConfig(savedSection?: string): Promise<string> {
       </form>
     </div>
 
-    <!-- Model preset JS -->
+    <!-- Provider URL auto-fill + Model selector JS -->
     <script>
     (function() {
-      const MODEL_PRESETS = {
+      var PROVIDER_URLS = {
+        ollama:    'http://localhost:11434',
+        openai:    'https://api.openai.com/v1',
+        anthropic: 'https://api.anthropic.com/v1',
+        sampling:  '',
+        none:      '',
+      };
+
+      var MODEL_PRESETS = {
         openai: [
           'gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano',
+          'gpt-5.4-nano',
           'o4-mini', 'o3', 'o3-mini', 'o1', 'o1-mini',
         ],
         anthropic: [
@@ -1047,24 +1054,79 @@ async function renderConfig(savedSection?: string): Promise<string> {
         sampling: [],
         none: [],
       };
-      const provider = '${llmCfg.provider}';
-      const models = MODEL_PRESETS[provider] || [];
-      ['dreamer-preset', 'normalizer-preset'].forEach(function(id) {
-        const sel = document.getElementById(id);
-        if (!sel) return;
+
+      var CUSTOM_VALUE = '__custom__';
+
+      /** Auto-fill base URL when provider changes */
+      window.__dgUpdateProviderUrl = function() {
+        var prov = document.getElementById('llm-provider').value;
+        var urlInput = document.getElementById('llm-baseUrl');
+        if (PROVIDER_URLS[prov] !== undefined) {
+          urlInput.value = PROVIDER_URLS[prov];
+        }
+        // Also refresh model dropdowns for new provider
+        buildModelSelect('dreamer');
+        buildModelSelect('normalizer');
+      };
+
+      /** Build a model <select> with presets + Custom option */
+      function buildModelSelect(role) {
+        var sel = document.getElementById(role + '-select');
+        var input = document.getElementById(role + '-model');
+        if (!sel || !input) return;
+
+        var prov = document.getElementById('llm-provider').value;
+        var models = MODEL_PRESETS[prov] || [];
+        var current = input.value;
+
+        // Clear existing options
+        sel.innerHTML = '';
+
+        // Add preset models
         models.forEach(function(m) {
-          const opt = document.createElement('option');
+          var opt = document.createElement('option');
           opt.value = m;
           opt.textContent = m;
           sel.appendChild(opt);
         });
-        // Pre-select if current value matches a preset
-        const inputId = id.replace('-preset', '-model');
-        const input = document.getElementById(inputId);
-        if (input && models.includes(input.value)) {
-          sel.value = input.value;
+
+        // Add "Custom…" option at the end
+        var customOpt = document.createElement('option');
+        customOpt.value = CUSTOM_VALUE;
+        customOpt.textContent = 'Custom\u2026';
+        sel.appendChild(customOpt);
+
+        // Select the right option
+        if (current && models.indexOf(current) !== -1) {
+          sel.value = current;
+          input.style.display = 'none';
+        } else {
+          // Current model is custom (not in presets)
+          sel.value = CUSTOM_VALUE;
+          input.style.display = '';
         }
-      });
+      }
+
+      /** Handle model select change */
+      window.__dgModelSelect = function(role) {
+        var sel = document.getElementById(role + '-select');
+        var input = document.getElementById(role + '-model');
+        if (!sel || !input) return;
+
+        if (sel.value === CUSTOM_VALUE) {
+          // Show text input for custom model
+          input.style.display = '';
+          input.focus();
+        } else {
+          // Preset selected — copy to hidden input
+          input.value = sel.value;
+          input.style.display = 'none';
+        }
+      };
+
+      // Initialise on load
+      buildModelSelect('dreamer');
+      buildModelSelect('normalizer');
     })();
     </script>
 
@@ -1255,13 +1317,15 @@ async function handleConfigPost(
           process.env.DREAMGRAPH_LLM_API_KEY = resolvedKey;
         }
 
+        const newProvider = (body.provider ?? "none") as LlmConfig["provider"];
+
         const newCfg: LlmConfig = {
-          provider: (body.provider ?? "none") as LlmConfig["provider"],
-          model: getLlmConfig().model, // preserve — edited via dreamer/normalizer sections
+          provider: newProvider,
+          model: getDreamerLlmConfig().model, // base model follows dreamer
           baseUrl: body.baseUrl ?? getLlmConfig().baseUrl,
           apiKey: resolvedKey,
-          temperature: getLlmConfig().temperature,
-          maxTokens: getLlmConfig().maxTokens,
+          temperature: getDreamerLlmConfig().temperature,
+          maxTokens: getDreamerLlmConfig().maxTokens,
         };
         initLlmProvider(newCfg);
         logger.info(`Dashboard: LLM provider config updated via web UI (provider=${newCfg.provider}, apiKey=${resolvedKey ? "set" : "NOT SET"})`);
@@ -1400,9 +1464,7 @@ async function handleRestartPost(res: ServerResponse): Promise<void> {
 /** Resolve the project-root docs/ directory from the active instance */
 function docsDir(): string {
   const scope = getActiveScope();
-  if (scope?.projectRoot) {
-    return resolve(scope.projectRoot, "docs");
-  }
+  if (scope?.projectRoot) return resolve(scope.projectRoot, "docs");
   // Legacy / fallback: dataDir is typically <project>/data, so go up one level
   return resolve(config.dataDir, "..", "docs");
 }
@@ -1427,8 +1489,20 @@ function markdownToHtml(md: string): string {
     return text
       // Images (must come before links)
       .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img alt="$1" src="$2" style="max-width:100%">')
-      // Links
-      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
+      // Links — rewrite relative .md hrefs to /docs/ dashboard URLs
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, label: string, href: string) => {
+        // Only rewrite relative .md links (not http/https/mailto/anchor)
+        if (
+          !href.startsWith("http") &&
+          !href.startsWith("mailto:") &&
+          !href.startsWith("#") &&
+          href.endsWith(".md")
+        ) {
+          const slug = href.replace(/\.md$/, "").replace(/^\.\//,"");
+          return `<a href="/docs/${slug}">${label}</a>`;
+        }
+        return `<a href="${href}">${label}</a>`;
+      })
       // Bold+italic
       .replace(/\*\*\*(.+?)\*\*\*/g, "<strong><em>$1</em></strong>")
       // Bold
@@ -1592,6 +1666,11 @@ const MD_CSS = `
     .docs-layout { grid-template-columns: 1fr; }
     .docs-sidebar { position: static; display: flex; flex-wrap: wrap; gap: 4px; }
   }
+  .doc-section {
+    margin-top: 12px; padding: 4px 8px; font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .05em; color: var(--text-dim);
+  }
+  .doc-sublink { padding-left: 20px; font-size: 13px; }
 `;
 
 /** Friendly display name from filename */
@@ -1603,22 +1682,92 @@ function docTitle(filename: string): string {
     .replace(/\b\w/g, c => c.toUpperCase());
 }
 
-/** Sort order for doc files — README first, then alphabetical */
+/**
+ * Sort order for doc files.
+ * Priority: index.md / README.md first, then top-level files before
+ * subdirectory files, _index.md first within a section, then alphabetical.
+ */
 function docOrder(a: string, b: string): number {
-  if (a === "README.md") return -1;
-  if (b === "README.md") return 1;
+  if (a === "index.md" || a === "README.md") return -1;
+  if (b === "index.md" || b === "README.md") return 1;
+  const aDeep = a.includes("/"), bDeep = b.includes("/");
+  if (!aDeep && bDeep) return -1;
+  if (aDeep && !bDeep) return 1;
+  // Within the same section, _index.md first
+  const [aDir] = a.split("/"), [bDir] = b.split("/");
+  if (aDir === bDir) {
+    if (a.endsWith("/_index.md")) return -1;
+    if (b.endsWith("/_index.md")) return 1;
+  }
   return a.localeCompare(b);
 }
 
+/**
+ * Discover all .md files in docs/, scanning one level of subdirectories.
+ * Returns relative paths like "index.md" or "features/overview.md".
+ */
 async function getDocFiles(): Promise<string[]> {
+  const base = docsDir();
+  const files: string[] = [];
   try {
-    const entries = await readdir(docsDir());
-    return entries
-      .filter(f => f.endsWith(".md"))
-      .sort(docOrder);
+    const entries = await readdir(base, { withFileTypes: true });
+    for (const e of entries) {
+      if (!e.isDirectory() && e.name.endsWith(".md")) {
+        files.push(e.name);
+      }
+    }
+    for (const e of entries) {
+      if (e.isDirectory() && !e.name.startsWith(".")) {
+        try {
+          const sub = await readdir(resolve(base, e.name));
+          for (const f of sub) {
+            if (f.endsWith(".md")) files.push(`${e.name}/${f}`);
+          }
+        } catch { /* skip unreadable dirs */ }
+      }
+    }
   } catch {
     return [];
   }
+  return files.sort(docOrder);
+}
+
+/** Convert a relative .md path to its URL slug: "features/overview.md" → "features/overview" */
+function docSlug(relPath: string): string {
+  return relPath.replace(/\.md$/, "");
+}
+
+/** Build a grouped sidebar with section headers */
+function buildSidebar(files: string[], activeFile: string): string {
+  const topLevel: string[] = [];
+  const sections = new Map<string, string[]>();
+
+  for (const f of files) {
+    if (f.includes("/")) {
+      const section = f.split("/")[0];
+      if (!sections.has(section)) sections.set(section, []);
+      sections.get(section)!.push(f);
+    } else {
+      topLevel.push(f);
+    }
+  }
+
+  const parts: string[] = [];
+  for (const f of topLevel) {
+    const active = f === activeFile ? " active" : "";
+    parts.push(`<a href="/docs/${encodeURIComponent(docSlug(f))}" class="doc-link${active}">${docTitle(f)}</a>`);
+  }
+  for (const [section, sectionFiles] of sections) {
+    parts.push(`<div class="doc-section">${docTitle(section)}</div>`);
+    for (const f of sectionFiles) {
+      const active = f === activeFile ? " active" : "";
+      const slug = docSlug(f);
+      const name = basename(f, ".md");
+      const title = name === "_index" ? "Overview" : docTitle(name);
+      parts.push(`<a href="/docs/${slug}" class="doc-link doc-sublink${active}">${title}</a>`);
+    }
+  }
+  return parts.join("\n");
 }
 
 async function renderDocs(): Promise<string> {
@@ -1626,33 +1775,30 @@ async function renderDocs(): Promise<string> {
   if (files.length === 0) {
     return shell("Docs", `<h1>Documentation</h1><p class="empty">No markdown files found in docs/ directory.</p>`, "docs");
   }
-  // Default to README.md
+  // Default to first file (index.md or README.md due to sort order)
   return renderDocFile(files[0], files);
 }
 
 async function renderDocFile(filename: string, files?: string[]): Promise<string> {
   if (!files) files = await getDocFiles();
 
-  // Security: only allow .md files from the docs dir
-  const safeName = basename(filename);
-  if (!safeName.endsWith(".md") || safeName.includes("..")) {
+  // Security: reject traversal and non-.md
+  if (filename.includes("..")) {
     return shell("Not Found", `<h1>Not Found</h1><p><a href="/docs">Back to Docs</a></p>`, "docs");
   }
+  const safePath = filename.endsWith(".md") ? filename : `${filename}.md`;
 
   let content: string;
   try {
-    content = await readFile(resolve(docsDir(), safeName), "utf-8");
+    const fullPath = resolve(docsDir(), ...safePath.split("/"));
+    content = await readFile(fullPath, "utf-8");
   } catch {
-    return shell("Not Found", `<h1>File not found</h1><p><code>${esc(safeName)}</code> does not exist.</p><p><a href="/docs">Back to Docs</a></p>`, "docs");
+    return shell("Not Found", `<h1>File not found</h1><p><code>${esc(safePath)}</code> does not exist.</p><p><a href="/docs">Back to Docs</a></p>`, "docs");
   }
 
-  const sidebar = files.map(f => {
-    const active = f === safeName ? " active" : "";
-    return `<a href="/docs/${encodeURIComponent(basename(f, ".md"))}\" class="${active}">${docTitle(f)}</a>`;
-  }).join("\n");
-
+  const sidebar = buildSidebar(files, safePath);
   const rendered = markdownToHtml(content);
-  const title = docTitle(safeName);
+  const title = docTitle(basename(safePath, ".md"));
 
   const body = `
     <style>${MD_CSS}</style>
@@ -1726,10 +1872,12 @@ export async function handleDashboardRoute(
         html = await renderHealth();
         break;
       default:
-        // /docs/:slug — render a specific markdown file
+        // /docs/:slug — render a specific markdown file (supports section/slug paths)
         if (pathname.startsWith("/docs/")) {
-          const slug = decodeURIComponent(pathname.slice(6));
-          if (slug && !slug.includes("/") && !slug.includes("..")) {
+          const raw = decodeURIComponent(pathname.slice(6));
+          // Strip trailing .md if present (links from rendered markdown already include it)
+          const slug = raw.replace(/\.md$/, "");
+          if (slug && !slug.includes("..")) {
             html = await renderDocFile(`${slug}.md`);
             break;
           }

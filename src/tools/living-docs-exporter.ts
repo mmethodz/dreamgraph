@@ -817,8 +817,10 @@ export function registerLivingDocsTools(server: McpServer): void {
     {
       output_dir: z
         .string()
+        .optional()
+        .default("docs")
         .describe(
-          "Output directory (absolute path, or relative to project root)"
+          "Output directory relative to project root (default: 'docs'). Can also be an absolute path."
         ),
       sections: z
         .array(z.string())

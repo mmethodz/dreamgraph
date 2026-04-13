@@ -132,6 +132,7 @@ export function activate(context: vscode.ExtensionContext): void {
     contextBuilder,
     chatPanel,
     graphSignal,
+    dashboardView,
     getInstance: () => currentInstance,
     setInstance: (inst) => {
       currentInstance = inst;
@@ -213,6 +214,7 @@ export function activate(context: vscode.ExtensionContext): void {
         if (currentPort > 0) {
           daemonClient.updateEndpoint(host, currentPort);
           mcpClient.updateBaseUrl(`http://${host}:${currentPort}`);
+          dashboardView.updateDaemonUrl(host, currentPort);
         }
       }
     }),

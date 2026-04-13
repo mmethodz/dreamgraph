@@ -962,8 +962,8 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       // Scan / enrichment results
       if (obj.message && typeof obj.message === 'string') return obj.message.slice(0, max);
 
-      // Simple ok / error
-      if (obj.ok === false && obj.error) return `Error: ${String(obj.error).slice(0, max)}`;
+      // Simple ok / error (accept both ok:false and success:false)
+      if ((obj.ok === false || obj.success === false) && obj.error) return `Error: ${String(obj.error).slice(0, max)}`;
 
       // Counts-style results
       const parts: string[] = [];
@@ -986,9 +986,38 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       // Array result
       if (Array.isArray(obj)) return `${obj.length} item(s) returned`;
 
-      // Fallback: first 5 keys as key=value
-      const keys = Object.keys(obj).slice(0, 5);
-      return keys.map(k => `${k}: ${JSON.stringify(obj[k]).slice(0, 120)}`).join(' · ').slice(0, max);
+      // Smart array-summariser: for objects whose values are mostly arrays,
+      // show counts and a one-line sample instead of dumping raw JSON.
+      const allKeys = Object.keys(obj);
+      const arrayKeys = allKeys.filter(k => Array.isArray(obj[k]));
+      if (arrayKeys.length > 0 && arrayKeys.length >= allKeys.length * 0.4) {
+        const summaryParts: string[] = [];
+        for (const k of allKeys) {
+          const v = obj[k];
+          if (Array.isArray(v)) {
+            if (v.length === 0) {
+              summaryParts.push(`${k}: (none)`);
+            } else {
+              // Show count + first item's key fields as sample
+              const first = v[0];
+              let sample = '';
+              if (typeof first === 'object' && first !== null) {
+                const id = first.id ?? first.edge_id ?? first.tension_id ?? first.schedule_id ?? '';
+                const label = first.name ?? first.from ?? first.entity_id ?? '';
+                if (id || label) sample = ` — e.g. ${id || label}`;
+              }
+              summaryParts.push(`${k}: ${v.length}${sample}`);
+            }
+          } else if (typeof v === 'number' || typeof v === 'string' || typeof v === 'boolean') {
+            summaryParts.push(`${k}: ${v}`);
+          }
+        }
+        if (summaryParts.length > 0) return summaryParts.join(' · ').slice(0, max);
+      }
+
+      // Fallback: first 5 keys as key=value (generous per-key limit for paths)
+      const fKeys = allKeys.slice(0, 5);
+      return fKeys.map(k => `${k}: ${JSON.stringify(obj[k]).slice(0, 300)}`).join(' · ').slice(0, max);
     } catch {
       // Not JSON — just trim the raw text
       return raw.length > max ? raw.slice(0, max) + '…' : raw;
@@ -1049,13 +1078,13 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       try { return fn(input); } catch { /* fall through */ }
     }
 
-    // Generic fallback: show key params
+    // Generic fallback: show key params (generous limit for file paths)
     const keys = Object.keys(input);
     if (keys.length === 0) return 'Running…';
     const pairs = keys.slice(0, 3).map(k => {
       const v = input[k];
       const s = typeof v === 'string' ? v : Array.isArray(v) ? `[${v.length}]` : JSON.stringify(v);
-      return `${k}: ${String(s).slice(0, 40)}`;
+      return `${k}: ${String(s).slice(0, 160)}`;
     });
     return pairs.join(', ') + '…';
   }

@@ -127,16 +127,16 @@ This enables conclusions like:
 
 Tensions are not permanent. They:
 
-- Decay over time (urgency -0.02/cycle)
+- Decay over time (urgency -0.01/cycle)
 - Expire via TTL (default 30 cycles)
 - Can be resolved with evidence
-- Are capped to maintain focus (max 50 active)
+- Are capped to maintain focus (max 200 active)
 - Can be turned into **remediation plans** with concrete fix steps
 
 This prevents cognitive overload:
 
 ```
-2033 tensions → 50 active → manageable focus
+2033 tensions → 200 active → manageable focus
 ```
 
 ### Speculative Memory
@@ -771,7 +771,16 @@ Sessions are isolated — each connecting client gets its own `mcp-session-id` h
 
 ### 5. Dream
 
-Bootstrap your knowledge graph — pick either the quick automated path or the manual path:
+New instances **bootstrap automatically** — when the daemon starts on a fresh instance, DreamGraph detects the empty fact graph and runs a zero-touch onboarding sequence:
+
+1. `scan_project` discovers your project structure and populates features, workflows, and data model
+2. A dream cycle runs automatically after scan completes
+3. The LLM discovers implicit architectural decisions (ADRs) from your codebase
+4. Five follow-up dream cycles are scheduled at 5-minute intervals
+
+**No manual intervention needed.** Just start the daemon, connect your IDE, and the knowledge graph starts building itself.
+
+For manual control, you can also bootstrap step-by-step:
 
 **Quick path** — one tool does everything:
 
@@ -1091,6 +1100,7 @@ src/
 │   ├── scope.ts            # InstanceScope — file-system isolation enforcement
 │   ├── registry.ts         # Master registry CRUD (~/.dreamgraph/instances.json)
 │   ├── lifecycle.ts        # Create, load, resolve, migrate instances
+│   ├── bootstrap.ts        # Zero-touch bootstrap — auto-scan, auto-dream, ADR discovery (v7.0)
 │   ├── policies.ts         # policies.json parser, validator, runtime queries
 │   └── index.ts            # Barrel re-exports
 ├── cli/                    # CLI instance manager — `dg` binary (v6.0 La Catedral)
@@ -1241,7 +1251,7 @@ data/                                   # Legacy mode (flat) or <instance>/data/
 | `solidify_cognitive_insight` | Persist a validated insight to the knowledge graph |
 | `enrich_seed_data` | Feed curated knowledge (features, workflows, data model, capabilities) into the fact graph with merge or replace mode |
 | `init_graph` | Bootstrap a knowledge graph from source code — scans repos and builds seed data |
-| `scan_project` | Automated project scan with LLM enrichment — populates features, workflows, and data model in one call (merge mode, non-destructive) |
+| `scan_project` | Automated project scan with LLM enrichment — populates features, workflows, and data model in one call (merge mode, non-destructive). **Automatically triggers a dream cycle** after completion |
 | `get_workflow` | Retrieve a specific workflow by ID |
 | `search_data_model` | Search for a data entity by name |
 | `query_resource` | Query features, workflows, or data model with filters |
@@ -1278,7 +1288,7 @@ data/                                   # Legacy mode (flat) or <instance>/data/
 | `discipline_verify` | Generate a verification report with regression detection and compliance scoring |
 | `discipline_complete_session` | Complete or abandon the active session with final status |
 
-### MCP Resources (25)
+### MCP Resources (26)
 
 Read-only views the agent can inspect at any time:
 
@@ -1303,6 +1313,7 @@ Read-only views the agent can inspect at any time:
 | Lucid Log | `dream://lucid` | Lucid dream session archive — hypotheses, findings, actions, results (v5.2) |
 | Discipline Manifest | `discipline://manifest` | Tool classifications, phase permissions, data protection rules (v6.0 La Catedral) |
 | API Surface | `ops://api-surface` | Full cached API surface — classes, functions, methods, properties with signatures. Operational layer (v6.2) |
+| Runtime Metrics | `ops://metrics` | Live runtime instrumentation snapshot: tool call counts, failure rates, symbol misses, file-read hotspots, dream strategy performance. Resets on restart |
 | System Overview | `system://overview` | High-level system description, repos, tech stack |
 | System Features | `system://features` | All features from fact graph |
 | System Workflows | `system://workflows` | All workflows |
@@ -1390,10 +1401,10 @@ Tensions are signals that something in the knowledge graph needs attention:
 | Property | Description |
 |---|---|
 | **Domain** | Auto-categorized: security, auth, api, data_model, sync, integration, invoicing, payroll, reporting, mobile, general |
-| **Urgency** | Priority score that decays (-0.02/cycle). High-urgency tensions direct dreaming |
+| **Urgency** | Priority score that decays (-0.01/cycle). High-urgency tensions direct dreaming |
 | **TTL** | Time-to-live in cycles (default 30). Expired tensions are auto-archived |
 | **Resolution** | Closed by human or system with evidence, authority tracking, and optional recheck window |
-| **Active cap** | Maximum 50 active tensions, enforced by urgency-ranked eviction |
+| **Active cap** | Maximum 200 active tensions, enforced by urgency-ranked eviction |
 
 ### Resolution Types
 

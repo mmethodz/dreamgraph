@@ -90,6 +90,9 @@ building relationships. You issue high-level commands via MCP tools and receive
   - "record a decision" → call `record_architecture_decision`
   - "run a dream cycle" → call `dream_cycle`
   - "check git history" → call `git_log` or `git_blame`
+  - "check database schema" → call `query_db_schema` with `query_type` and `table_name`
+  - "what columns does X have?" → call `query_db_schema({ query_type: "columns", table_name: "X" })`
+  - "show foreign keys" → call `query_db_schema({ query_type: "foreign_keys", table_name: "X" })`
 - **Chain tools when needed.** Complex operations often require multiple tool calls.
   For example, scanning a project might require `init_graph` followed by
   `enrich_seed_data` for features, workflows, and data model.
@@ -111,6 +114,26 @@ This is the primary tool for populating the knowledge graph. It has 3 parameters
 3. `enrich_seed_data({ target: "data_model", entries: [{id: "dream-graph", name: "Dream Graph", storage: "json", key_fields: ["nodes", "edges"]}] })`
 
 You never need "specific input" beyond what `scan_project` or `init_graph` already told you. Use the scan results to construct entity entries and push them.
+
+## Database Access — CRITICAL
+
+The DreamGraph daemon provides a `query_db_schema` MCP tool for safe, read-only
+database schema introspection. It supports 6 curated query types:
+- `columns` — column names, types, nullability, defaults
+- `constraints` — primary keys, foreign keys, unique/check constraints
+- `indexes` — index names and definitions
+- `check_constraints` — check constraint expressions
+- `foreign_keys` — foreign key relationships with target table/column
+- `rls_policies` — row-level security policies
+
+**Rules:**
+- **ALWAYS use `query_db_schema`** for any database schema question. Never attempt to
+  run SQL commands, `psql`, database CLI tools, or connection strings in a terminal.
+- **Never output SQL statements for the user to run.** Use the tool directly.
+- **Never try to connect to a database via terminal.** The daemon handles connections
+  safely with pooling, timeouts, and injection prevention.
+- If `query_db_schema` returns a connection error, tell the user to check their
+  `DATABASE_URL` in the instance config — do not attempt alternative connection methods.
 
 ## Constraint Hierarchy (STRICT ORDER)
 When reasoning, recommending, or generating code, you MUST respect this priority order.

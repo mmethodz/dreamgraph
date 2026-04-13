@@ -24,6 +24,7 @@ import type { ArchitectLlm, ArchitectProvider, ArchitectMessage } from "./archit
 import type { ContextBuilder } from "./context-builder.js";
 import type { ChatPanel } from "./chat-panel.js";
 import type { GraphSignalProvider } from "./graph-signal.js";
+import type { DashboardViewProvider } from "./dashboard-view.js";
 import type { ResolvedInstance, RegistryEntry } from "./types.js";
 import {
   resolveInstance,
@@ -47,6 +48,7 @@ export interface CommandServices {
   contextBuilder: ContextBuilder;
   chatPanel: ChatPanel;
   graphSignal: GraphSignalProvider;
+  dashboardView: DashboardViewProvider;
   /** Get the current resolved instance */
   getInstance: () => ResolvedInstance | null;
   /** Set the current resolved instance */
@@ -155,6 +157,7 @@ async function connectToInstance(
   }
   svc.daemonClient.updateEndpoint(host, port);
   svc.mcpClient.updateBaseUrl(`http://${host}:${port}`);
+  svc.dashboardView.updateDaemonUrl(host, port);
 
   // Start health monitoring
   const interval = getConfig<number>("healthCheckInterval") ?? 10000;

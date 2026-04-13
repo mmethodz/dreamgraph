@@ -1,6 +1,6 @@
 # DreamGraph Workflows
 
-> Step-by-step flows for all 14 operational processes.
+> Step-by-step flows for all 15 operational processes.
 
 ---
 
@@ -80,8 +80,8 @@
 | Step | Name | Description |
 |------|------|-------------|
 | 1 | Creation | UUID assigned. Type, urgency, entities, domain (inferred by keyword heuristic from 11 domains). |
-| 2 | Active cap enforcement | >50 active → lowest-urgency auto-archived. Prevents cognitive overload. |
-| 3 | Per-cycle decay | urgency −= 0.02, TTL −= 1. At zero → expired. |
+| 2 | Active cap enforcement | >200 active → lowest-urgency auto-archived. Prevents cognitive overload while allowing rich autonomous exploration. |
+| 3 | Per-cycle decay | urgency −= 0.01, TTL −= 1. At zero → expired. |
 | 4 | Goal-directed dreaming | Highest-urgency tensions read by `tension_directed` strategy. |
 | 5 | Resolution (happy path) | `resolve_tension(id, type, authority)`. Types: `confirmed_fixed`, `false_positive`, `wont_fix`. |
 | 6 | Expiry (timeout path) | TTL=0 or urgency=0 → auto-expires. Archived for historical analysis. |
@@ -282,3 +282,24 @@ candidate → [normalization] → validated (promoted)
 | 2 | Dispatch action | Route to handler based on path: `/config` → `handleConfigPost()`, `/schedules` → `handleSchedulePost()`, `/config/test-db` → `handleTestDbPost()`. |
 | 3 | Execute mutation | Apply the requested change: update LLM/scheduler/narrative config, toggle/create/delete schedule, or test DB connection. |
 | 4 | Redirect (PRG) | For form POSTs, return `303 See Other` redirecting back to the originating page. For `/config/test-db`, return JSON response directly. |
+
+---
+
+## 15. Zero-Touch Bootstrap (`bootstrap_flow`)
+
+**Automated onboarding for new instances.** Runs once on first startup when the fact graph is empty.
+
+**Trigger:** `bootstrapNewInstance()` called during server startup  
+**Guard:** Skips if `features.json` already contains real entries (non-stub)  
+**Source:** [src/instance/bootstrap.ts](../src/instance/bootstrap.ts)
+
+| Step | Name | Description |
+|------|------|-------------|
+| 1 | Detect fresh instance | Check if `features.json` is empty or contains only template stubs. If populated, skip bootstrap entirely. |
+| 2 | Project scan | Call `runScanProject()` to discover directory structure, read key source files, and populate features, workflows, and data model entities via merge mode. |
+| 3 | LLM enrichment | If an LLM is configured, the scan uses it to generate rich semantic descriptions for discovered entities. Falls back to structural-only analysis otherwise. |
+| 4 | Auto-dream | `scan_project` Phase 3 automatically triggers a full dream cycle (`strategy="all"`) after scan completes. This generates initial speculative edges and validates them against the newly populated fact graph. |
+| 5 | ADR discovery | If an LLM is available, build a comprehensive prompt from discovered features, workflows, and data model entities. The LLM identifies implicit architectural decisions embedded in the codebase. Each discovered ADR is recorded via `recordADR()` with `decided_by: "system"`. |
+| 6 | Schedule follow-up dreams | Five dream cycles are scheduled at 5-minute intervals (`after_cycles` trigger) to allow the knowledge graph to grow and stabilize post-bootstrap. |
+
+**Output:** Log messages indicating each phase’s completion. The instance is ready for interactive use after bootstrap completes.

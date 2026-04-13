@@ -472,16 +472,42 @@ function validateNode(
     .filter(([, count]) => count >= 2)
     .map(([kw]) => kw);
 
+  // --- Node-level domain/keyword grounding ---
+  // Even without inspiration, a node's own domain and keywords can ground
+  // it against the fact graph.  This prevents the "empty inspiration = dead
+  // on arrival" problem that plagued earlier versions.
+  const nodeDomain = (node.domain ?? "").toLowerCase();
+  const nodeKws = new Set((node.keywords ?? []).map((k) => k.toLowerCase()));
+  let directDomainMatch = false;
+  let directKeywordMatches = 0;
+  for (const [eid, domain] of lookup.domains) {
+    if (nodeDomain && domain?.toLowerCase() === nodeDomain) {
+      directDomainMatch = true;
+    }
+    const entityKws = lookup.keywords.get(eid) ?? [];
+    for (const kw of entityKws) {
+      if (nodeKws.has(kw.toLowerCase())) directKeywordMatches++;
+    }
+  }
+
   // Split scoring for nodes
+  // Base: domain coherence from inspirations
   let plausibility =
     (uniqueDomains.length === 1 ? 0.35 : uniqueDomains.length <= 2 ? 0.2 : 0.05) +
     Math.min(sharedKeywords.length * 0.1, 0.35) +
     node.confidence * 0.15;
+  // Boost from direct domain/keyword grounding (new path for nodes with
+  // populated domain/keywords even if inspiration is sparse)
+  if (directDomainMatch) plausibility += 0.15;
+  plausibility += Math.min(directKeywordMatches * 0.03, 0.15);
   plausibility = Math.round(Math.min(Math.max(plausibility, 0), 1) * 100) / 100;
 
   let evidenceScore = groundingRatio * 0.5 +
     (uniqueDomains.length > 0 ? 0.2 : 0) +
     Math.min(sharedKeywords.length * 0.05, 0.15);
+  // Direct grounding contributes to evidence too
+  if (directDomainMatch) evidenceScore += 0.15;
+  evidenceScore += Math.min(directKeywordMatches * 0.02, 0.10);
   evidenceScore = Math.round(Math.min(Math.max(evidenceScore, 0), 1) * 100) / 100;
 
   const contradictionScore = 0; // nodes don't have structural contradictions
@@ -493,12 +519,17 @@ function validateNode(
     contradictionScore
   );
 
+  // Grounding gate: require EITHER inspiration grounding OR direct
+  // domain+keyword grounding.  The old hard requirement of
+  // groundingRatio >= 0.5 killed every node with sparse inspiration.
+  const hasDirectGrounding = directDomainMatch && directKeywordMatches >= 2;
+
   let outcome: NormalizationOutcome;
   let reason_code: NormalizationReasonCode;
   if (
     confidence >= promo.promotion_confidence &&
     plausibility >= promo.promotion_plausibility &&
-    groundingRatio >= 0.5
+    (groundingRatio >= 0.4 || hasDirectGrounding)
   ) {
     outcome = "validated";
     reason_code = "strong_evidence";
@@ -519,7 +550,7 @@ function validateNode(
     contradictions: [],
   };
 
-  const reason = `${existingInspirations.length}/${node.inspiration.length} inspirations grounded. ${uniqueDomains.length} domain(s). ${sharedKeywords.length} shared keywords.`;
+  const reason = `${existingInspirations.length}/${node.inspiration.length} inspirations grounded. ${uniqueDomains.length} domain(s). ${sharedKeywords.length} shared keywords.${directDomainMatch ? " Direct domain match." : ""}${directKeywordMatches > 0 ? ` ${directKeywordMatches} direct keyword matches.` : ""}`;
 
   const evidenceCount = countEvidence(evidenceObj);
 

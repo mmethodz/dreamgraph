@@ -58,7 +58,7 @@ Identifies existing edges rated "weak" in the fact graph and proposes stronger a
 Connects entities from different domains via shared keywords. These are often the most novel discoveries.
 
 ### 4. Missing Abstraction
-Proposes hypothetical new entities (features) that would unify multiple existing entities under a common abstraction.
+Proposes hypothetical new entities (features) that would unify multiple existing entities under a common abstraction. Triggers when **2 or more** entities share a domain/keyword cluster without a unifying hub node (reduced from 3 in v6.x to catch smaller clusters earlier).
 
 ### 5. Symmetry Completion
 Where only a one-directional edge exists (A→B but not B→A), proposes the reverse relationship.
@@ -88,6 +88,10 @@ LLM-powered creative dreaming. The dream engine sends a structured prompt to the
 
 When `strategy="all"`, all strategies run and their outputs are merged with duplicate suppression. LLM dream runs first when available, allocated 35% of the total budget. PGO wave gets 15%. The remaining 50% is split among structural strategies.
 
+#### Node Generation (v7.0)
+
+The LLM dreamer now **actively generates new dream nodes** alongside edges. The prompt explicitly demands 2–5 `new_nodes` per cycle — entities that the LLM believes are implied by the codebase but not yet in the fact graph. Each proposed node includes an `id`, `domain`, and `inspiration` field (a list of existing entities that inspired it). Node inspiration is populated from domain and keyword matching against the fact graph, ensuring every new concept is grounded in existing knowledge. The node budget is capped at `max_dreams / 2` to balance exploration with edge generation.
+
 ---
 
 ## Normalization Pipeline
@@ -104,7 +108,14 @@ Each edge receives four independent scores:
 | **Evidence** | 0.45 | Grounding — entity existence, shared connections, evidence count |
 | **Contradiction** | penalty | Conflicts — contradicts existing edges, invalid entity references |
 | **Bonus** | +0.10 max | Reinforcement bonus — edge seen in multiple cycles |
+#### Node Validation (v7.0)
 
+Dream nodes (hypothetical entities proposed by the LLM dreamer) undergo a separate validation pass. Each node is scored for **grounding** — how well it matches known entities in the fact graph via domain, keyword, and name similarity.
+
+- **Grounding gate:** Combined grounding score ≥ 0.4, OR the node has a **direct grounding path** (exact domain match + keyword overlap with any fact-graph entity)
+- **Direct grounding** allows novel but well-anchored concepts to pass even when the composite score is marginal
+- Nodes that fail grounding are discarded before edge generation
+- The LLM prompt explicitly requests 2–5 new dream nodes per cycle, with a budget cap of `max_dreams / 2`
 **Combined confidence:**
 ```
 confidence = plausibility × 0.45 + evidence × 0.45 + bonus − penalty
@@ -200,7 +211,7 @@ Created ──► Active (urgency decays each cycle)
 | `type` | `weak_connection`, `missing_edge`, `contradiction`, `data_gap`, `security_concern`, `performance_risk` |
 | `entities` | Entity IDs involved |
 | `description` | What the system is struggling with |
-| `urgency` | 0.0–1.0, decays each cycle |
+| `urgency` | 0.0–1.0, decays by 0.01 per cycle |
 | `domain` | Domain classification |
 | `resolved` | Whether closed |
 | `resolution` | `{type, authority, evidence, timestamp}` |
@@ -434,6 +445,18 @@ The scheduler integrates with the cognitive engine through two hooks:
 ## LLM Provider Integration
 
 Dreams don't work without an LLM. The deterministic strategies find structural patterns; the LLM provides the creative leap — proposing connections no graph algorithm would discover. The normalizer then filters hallucinations from insights.
+
+### v7.0: Zero-Touch Bootstrap
+
+New instances can be bootstrapped with **zero manual interaction**. When the engine starts on a fresh instance (empty `features.json`), the bootstrap system (`bootstrap.ts`) runs a five-phase onboarding sequence:
+
+1. **Scan** — `runScanProject()` discovers project structure, source files, and key entities
+2. **LLM Enrichment** — The scan uses the configured dreamer LLM to generate rich semantic entries for features, workflows, and data model entities
+3. **Auto-Dream** — A full dream cycle runs immediately after scan completes (triggered automatically by `scan_project` Phase 3)
+4. **ADR Discovery** — The bootstrap reads discovered features, workflows, and data model entities, builds an LLM prompt asking it to identify implicit architectural decisions, then records each discovered ADR via `recordADR()`. This captures design decisions that exist in the code but were never formally documented
+5. **Follow-Up Dreams** — Five dream cycles are scheduled at 5-minute intervals to allow the knowledge graph to grow and stabilize
+
+The entire process runs automatically on first startup. Subsequent restarts skip bootstrap (feature data already exists). This enables a true **“start the daemon and walk away”** workflow for new projects.
 
 ### Provider Hierarchy
 

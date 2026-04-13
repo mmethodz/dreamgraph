@@ -24,10 +24,10 @@ How the engine thinks: state machine internals, 10 dream strategies (incl. LLM d
 Complete catalog of all **67 MCP tools** (28 cognitive + 30 general + 9 discipline) and **26 MCP resources**, with parameters, types, defaults, and descriptions.
 
 ### [Data Model](data-model.md)
-All **15 data stores**: dream graph, candidate edges, validated edges, tension log, dream history, threat log, archetypes, ADR log, UI registry, fact graph, capabilities, system story, schedules, API surface, and lucid log. Full schemas and relationship map.
+All **17 data stores**: dream graph, candidate edges, validated edges, tension log, dream history, threat log, archetypes, ADR log, UI registry, fact graph, capabilities, system story, schedules, API surface, lucid log, meta log, and event log. Full schemas and relationship map.
 
 ### [Workflows](workflows.md)
-Step-by-step flows for all **14 operational processes**: dream cycle, nightmare cycle, normalization pipeline, tension lifecycle, edge promotion, federation, interruption protocol, living docs export, insight solidification, schedule execution, global install, daemon start, daemon stop, and dashboard request lifecycle.
+Step-by-step flows for all **15 operational processes**: dream cycle, nightmare cycle, normalization pipeline, tension lifecycle, edge promotion, federation, interruption protocol, living docs export, insight solidification, schedule execution, global install, daemon start, daemon stop, dashboard request lifecycle, and zero-touch bootstrap.
 
 ### [The DreamGraph Chronicle](narrative.md)
 The system's auto-generated autobiography — 6 chapters covering 60 dream cycles, cumulative statistics, weekly digest, and trend analysis. Written by DreamGraph about itself.
@@ -97,6 +97,10 @@ The daemon exposes Streamable HTTP at `http://localhost:<port>/mcp`. Point your 
 
 ### First Dream Cycle
 
+New instances **bootstrap automatically** — when a fresh instance starts, DreamGraph runs `scan_project`, triggers a dream cycle, discovers implicit ADRs, and schedules 5 follow-up dreams. No manual intervention needed.
+
+To trigger additional dream cycles manually:
+
 ```
 dream_cycle(strategy="all", max_dreams=100)
 ```
@@ -133,8 +137,8 @@ get_system_narrative(depth="technical")
 | Dream strategies | 10 |
 | MCP tools | 67 |
 | MCP resources | 26 |
-| Data stores | 20 |
-| Workflows | 14 |
+| Data stores | 17 |
+| Workflows | 15 |
 | Features | 36 |
 | CLI commands | 14 |
 | Promotion threshold | 0.62 confidence |

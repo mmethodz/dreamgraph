@@ -510,7 +510,7 @@ Both modes auto-strip template stubs (`_schema`, `_fields`, `_note` entries), in
 
 #### `scan_project`
 
-Automated project scan with LLM enrichment. Scans the project directory structure, reads key source files, then uses the configured dreamer LLM to generate rich semantic entries for features, workflows, and data model entities. Non-destructive — always uses merge mode. Falls back to structural-only analysis if no LLM is configured.
+Automated project scan with LLM enrichment. Scans the project directory structure, reads key source files, then uses the configured dreamer LLM to generate rich semantic entries for features, workflows, and data model entities. Non-destructive — always uses merge mode. Falls back to structural-only analysis if no LLM is configured. **Automatically triggers a full dream cycle** (`strategy="all"`) after scan completes (Phase 3), so the knowledge graph begins growing immediately.
 
 This is a convenience orchestrator. All individual tools (`init_graph`, `enrich_seed_data`, `register_ui_element`) remain available for manual or targeted enrichment.
 

@@ -18,7 +18,19 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider, vscode
   private _view: vscode.WebviewView | null = null;
   private _disposables: vscode.Disposable[] = [];
 
+  /** Daemon URL discovered at runtime by the instance resolver / connect command. */
+  private _daemonUrl: string | null = null;
+
   constructor(private readonly _extensionUri: vscode.Uri) {}
+
+  /**
+   * Update the daemon URL used by the dashboard iframe.
+   * Called by connectToInstance when the real port is discovered.
+   */
+  updateDaemonUrl(host: string, port: number): void {
+    this._daemonUrl = `http://${host}:${port}/status`;
+    this.refresh();
+  }
 
   /* ---- WebviewViewProvider ---- */
 
@@ -76,9 +88,12 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider, vscode
   /* ---- Helpers ---- */
 
   private _getDaemonUrl(): string {
+    // Prefer the runtime-discovered URL (set by connectToInstance)
+    if (this._daemonUrl) return this._daemonUrl;
+    // Fallback to settings (used before first connect)
     const config = vscode.workspace.getConfiguration("dreamgraph");
     const host = config.get<string>("daemonHost") ?? "127.0.0.1";
-    const port = config.get<number>("daemonPort") ?? 8010;
+    const port = config.get<number>("daemonPort") ?? 8100;
     return `http://${host}:${port}/status`;
   }
 
@@ -88,7 +103,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider, vscode
       try {
         return new URL(daemonUrl).origin;
       } catch {
-        return "http://127.0.0.1:8010";
+        return "http://127.0.0.1:8100";
       }
     })();
 

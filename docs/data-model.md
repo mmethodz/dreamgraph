@@ -1,6 +1,6 @@
 # DreamGraph Data Model
 
-> All 15 data stores that make up DreamGraph's persistent state.
+> All 17 data stores that make up DreamGraph's persistent state.
 
 ---
 
@@ -23,6 +23,8 @@ graph TB
     SCH[("Schedules<br/>(v5.2 scheduler)")]
     LL[("Lucid Log<br/>(interactive)")]
     API[("API Surface<br/>(operational)")]
+    ML[("Meta Log<br/>(self-tuning)")]
+    EL[("Event Log<br/>(reactive)")]
 
     FG -.->|validates against| DG
     DG -->|feeds into| CE
@@ -39,6 +41,9 @@ graph TB
     LL -->|promotes to| VE
     LL -->|may create| TL
     API -.->|grounds| DG
+    ML -.->|tunes| DG
+    EL -->|triggers| DG
+    EL -->|triggers| TH
 ```
 
 ---
@@ -113,14 +118,14 @@ Edges that passed the promotion gate. Generally stable and growing.
 
 ### Tension Log (`tension_log.json`)
 
-All tensions: unresolved questions, inconsistencies, discovered gaps. Active cap of **50** prevents cognitive overload. Resolved tensions are archived, not deleted.
+All tensions: unresolved questions, inconsistencies, discovered gaps. Active cap of **200** prevents cognitive overload while allowing rich autonomous exploration. Resolved tensions are archived, not deleted.
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `id` | string | UUID |
 | `description` | string | Human-readable description |
 | `type` | string | `missing_link` \| `weak_connection` \| `hard_query` \| `ungrounded_dream` \| `code_insight` |
-| `urgency` | number | 0.0–1.0, decays by 0.02/cycle |
+| `urgency` | number | 0.0–1.0, decays by 0.01/cycle |
 | `domain` | string | One of 11 domains: security, invoicing, sync, integration, data_model, auth, payroll, reporting, api, mobile, general |
 | `entities` | string[] | Related entity IDs |
 | `ttl` | number | Cycles until auto-expiry (default 30) |
@@ -396,3 +401,36 @@ Operational layer store for extracted programmatic API surfaces. Populated by `e
 | `kind` | string | `extracted` \| `pattern_inference` \| `manual` |
 | `source_files` | string[] | Files that contributed to this data |
 | `extracted_at` | string | ISO timestamp of extraction |
+
+---
+
+## v5.1: Meta Log (`meta_log.json`)
+
+Audit trail of metacognitive self-analysis. Every `metacognitive_analysis` run appends an entry documenting strategy performance, calibration measurements, and any auto-applied threshold adjustments. Served via the `dream://metacognition` resource.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `timestamp` | string | ISO timestamp of analysis |
+| `cycle` | number | Current dream cycle at time of analysis |
+| `mode` | string | `strategy_performance` \| `promotion_calibration` \| `domain_decay` |
+| `findings` | object | Mode-specific analysis results |
+| `recommendations` | object[] | Threshold adjustment recommendations |
+| `auto_applied` | boolean | Whether recommendations were auto-applied |
+| `safety_guards` | object | Min/max bounds that were enforced |
+
+---
+
+## v5.1: Event Log (`event_log.json`)
+
+Append-only log of cognitive events dispatched through the event router. Each event records the source, classification, entity scope, recommended action, and execution outcome. Served via the `dream://events` resource.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Unique event identifier |
+| `source` | string | `git_webhook` \| `ci_cd` \| `runtime_anomaly` \| `tension_threshold` \| `federation_import` \| `manual` |
+| `severity` | string | `low` \| `medium` \| `high` \| `critical` |
+| `entities` | string[] | Affected entity IDs (resolved from event payload) |
+| `recommended_action` | string | Cognitive action recommended (e.g. `dream_cycle`, `nightmare_cycle`) |
+| `action_taken` | boolean | Whether the recommended action was executed |
+| `result_summary` | string | Brief outcome description |
+| `timestamp` | string | ISO timestamp |

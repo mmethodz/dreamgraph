@@ -94,6 +94,81 @@ function nextADRId(existing: ArchitectureDecisionRecord[]): string {
 }
 
 // ---------------------------------------------------------------------------
+// Programmatic API — callable from bootstrap and other modules
+// ---------------------------------------------------------------------------
+
+/** Input shape for programmatic ADR recording */
+export interface RecordADRParams {
+  title: string;
+  decided_by: "human" | "system" | "collaborative";
+  problem: string;
+  constraints: string[];
+  affected_entities: string[];
+  related_tensions?: string[];
+  chosen: string;
+  alternatives?: Array<{ option: string; rejected_because: string }>;
+  expected_consequences: string[];
+  risks: string[];
+  guard_rails: string[];
+  tags?: string[];
+}
+
+/**
+ * Record an ADR programmatically (no MCP server required).
+ * Returns the created ADR record on success, or null on failure.
+ */
+export async function recordADR(params: RecordADRParams): Promise<ArchitectureDecisionRecord | null> {
+  try {
+    return await withFileLock("adr_log.json", async () => {
+      const log = await loadADRLog();
+      const id = nextADRId(log.decisions);
+      const now = new Date().toISOString();
+
+      const adr: ArchitectureDecisionRecord = {
+        id,
+        title: params.title,
+        date: now,
+        decided_by: params.decided_by,
+        status: "accepted",
+        context: {
+          problem: params.problem,
+          constraints: params.constraints,
+          affected_entities: params.affected_entities,
+          related_tensions: params.related_tensions,
+        },
+        decision: {
+          chosen: params.chosen,
+          alternatives: params.alternatives ?? [],
+        },
+        consequences: {
+          expected: params.expected_consequences,
+          risks: params.risks,
+        },
+        guard_rails: params.guard_rails,
+        tags: params.tags ?? [],
+      };
+
+      log.decisions.push(adr);
+      await saveADRLog(log);
+      logger.info(`recordADR: recorded ${id} — "${params.title}"`);
+      return adr;
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.warn(`recordADR: failed — ${msg}`);
+    return null;
+  }
+}
+
+/**
+ * Get the current count of ADRs (for bootstrap reporting).
+ */
+export async function getADRCount(): Promise<number> {
+  const log = await loadADRLog();
+  return log.decisions.length;
+}
+
+// ---------------------------------------------------------------------------
 // Tool Registration
 // ---------------------------------------------------------------------------
 

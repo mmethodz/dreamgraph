@@ -1427,13 +1427,13 @@ class CognitiveEngine {
       decay_config: this.decayConfig,
       llm: await (async () => {
         try {
-          const { getLlmProvider, getLlmConfig } = await import("./llm.js");
+          const { getLlmProvider, getLlmConfig, getDreamerLlmConfig } = await import("./llm.js");
           const cfg = getLlmConfig();
           const provider = getLlmProvider();
           const available = await provider.isAvailable();
           return {
             provider: cfg.provider,
-            model: cfg.model,
+            model: getDreamerLlmConfig().model,
             available,
           };
         } catch {

@@ -12,20 +12,20 @@
  *   3. None — structural-only fallback (degraded mode)
  *
  * Configuration (env vars):
- *   DREAMGRAPH_LLM_PROVIDER   = "ollama" | "openai" | "anthropic" | "sampling" | "none"
- *   DREAMGRAPH_LLM_MODEL      = model name (default: depends on provider)
- *   DREAMGRAPH_LLM_URL        = API base URL (default: http://localhost:11434 for Ollama)
- *   DREAMGRAPH_LLM_API_KEY    = API key for OpenAI-compatible providers
- *   DREAMGRAPH_LLM_TEMPERATURE = creativity (default: 0.7)
- *   DREAMGRAPH_LLM_MAX_TOKENS  = max response tokens (default: 2048)
+ *   Shared:
+ *     DREAMGRAPH_LLM_PROVIDER   = "ollama" | "openai" | "anthropic" | "sampling" | "none"
+ *     DREAMGRAPH_LLM_URL        = API base URL (default: http://localhost:11434 for Ollama)
+ *     DREAMGRAPH_LLM_API_KEY    = API key for OpenAI-compatible providers
  *
- * Per-component overrides (fall back to base DREAMGRAPH_LLM_* values):
- *   DREAMGRAPH_LLM_DREAMER_MODEL        = dreamer model override
- *   DREAMGRAPH_LLM_DREAMER_TEMPERATURE  = dreamer temperature override
- *   DREAMGRAPH_LLM_DREAMER_MAX_TOKENS   = dreamer max tokens override
- *   DREAMGRAPH_LLM_NORMALIZER_MODEL     = normalizer model override
- *   DREAMGRAPH_LLM_NORMALIZER_TEMPERATURE = normalizer temperature override
- *   DREAMGRAPH_LLM_NORMALIZER_MAX_TOKENS = normalizer max tokens override
+ *   Dreamer (creative dream generation):
+ *     DREAMGRAPH_LLM_DREAMER_MODEL       = model name (default: provider-specific)
+ *     DREAMGRAPH_LLM_DREAMER_TEMPERATURE = creativity (default: 0.7)
+ *     DREAMGRAPH_LLM_DREAMER_MAX_TOKENS  = max response tokens (default: 2048)
+ *
+ *   Normalizer (semantic validation):
+ *     DREAMGRAPH_LLM_NORMALIZER_MODEL       = model name (default: provider-specific)
+ *     DREAMGRAPH_LLM_NORMALIZER_TEMPERATURE = temperature (default: 0.7)
+ *     DREAMGRAPH_LLM_NORMALIZER_MAX_TOKENS  = max response tokens (default: 2048)
  */
 
 import { logger } from "../utils/logger.js";
@@ -479,8 +479,13 @@ class NullProvider implements LlmProvider {
 
 export function parseLlmConfig(): LlmConfig {
   const provider = (process.env.DREAMGRAPH_LLM_PROVIDER ?? "ollama") as LlmProviderType;
-  const temperature = parseFloat(process.env.DREAMGRAPH_LLM_TEMPERATURE ?? "0.7");
-  const maxTokens = parseInt(process.env.DREAMGRAPH_LLM_MAX_TOKENS ?? "2048", 10);
+
+  // Provider defaults — model/temperature/maxTokens serve as fallbacks
+  // for per-component configs (dreamer, normalizer) when their env vars
+  // are not set.  There are no base MODEL/TEMPERATURE/MAX_TOKENS env vars;
+  // each component manages its own.
+  const temperature = 0.7;
+  const maxTokens = 2048;
 
   let model: string;
   let baseUrl: string;
@@ -488,22 +493,22 @@ export function parseLlmConfig(): LlmConfig {
 
   switch (provider) {
     case "ollama":
-      model = process.env.DREAMGRAPH_LLM_MODEL ?? "qwen3:8b";
+      model = "qwen3:8b";
       baseUrl = process.env.DREAMGRAPH_LLM_URL ?? "http://localhost:11434";
       apiKey = "";
       break;
     case "openai":
-      model = process.env.DREAMGRAPH_LLM_MODEL ?? "gpt-4o-mini";
+      model = "gpt-4o-mini";
       baseUrl = process.env.DREAMGRAPH_LLM_URL ?? "https://api.openai.com/v1";
       apiKey = process.env.DREAMGRAPH_LLM_API_KEY ?? "";
       break;
     case "anthropic":
-      model = process.env.DREAMGRAPH_LLM_MODEL ?? "claude-sonnet-4-20250514";
+      model = "claude-sonnet-4-20250514";
       baseUrl = process.env.DREAMGRAPH_LLM_URL ?? "https://api.anthropic.com/v1";
       apiKey = process.env.DREAMGRAPH_LLM_API_KEY ?? "";
       break;
     case "sampling":
-      model = process.env.DREAMGRAPH_LLM_MODEL ?? "client";
+      model = "client";
       baseUrl = "";
       apiKey = "";
       break;
@@ -522,9 +527,9 @@ export function parseLlmConfig(): LlmConfig {
 // ---------------------------------------------------------------------------
 
 /**
- * Parse per-component LLM overrides.
+ * Parse per-component LLM settings.
  * Reads DREAMGRAPH_LLM_{COMPONENT}_MODEL / TEMPERATURE / MAX_TOKENS,
- * falling back to the base LlmConfig values.
+ * falling back to provider-specific defaults from the base LlmConfig.
  */
 function parseComponentConfig(
   component: "DREAMER" | "NORMALIZER",

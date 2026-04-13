@@ -74,3 +74,6 @@ export {
 } from "./policies.js";
 
 export type { PolicyValidationResult } from "./policies.js";
+
+// Bootstrap
+export { bootstrapNewInstance } from "./bootstrap.js";
