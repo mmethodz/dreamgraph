@@ -39,6 +39,7 @@ import type { LlmMessage } from "../cognitive/llm.js";
 import { dream } from "../cognitive/dreamer.js";
 import { normalize } from "../cognitive/normalizer.js";
 import { engine } from "../cognitive/engine.js";
+import { discoverAndRecordADRs, isFreshInstance, scheduleFollowUpDreams } from "../instance/bootstrap.js";
 import type {
   Feature,
   Workflow,
@@ -824,6 +825,45 @@ export async function runScanProject(opts: RunScanOptions = {}): Promise<ScanPro
     ? ` Dream: ${dreamCycleResult.edges_created} edges, ${dreamCycleResult.nodes_created} nodes, ${dreamCycleResult.edges_promoted ?? 0} promoted.`
     : "";
 
+  // Phase 4: ADR discovery — if this is a fresh instance, use LLM to find implicit ADRs
+  let adrsRecorded = 0;
+  const wasFresh = await isFreshInstance().catch(() => false);
+  // Fresh check may still return true at this point because features were
+  // written above – re-check by looking at actual populated seed counts.
+  const hasRealSeeds = featureResult.total > 0 || workflowResult.total > 0 || dataModelResult.total > 0;
+
+  if (hasRealSeeds && llmAvailable) {
+    try {
+      const repoName = Object.keys(config.repos)[0] ?? "project";
+      progress("Phase 4 — discovering architecture decisions…");
+      logger.info("scan_project: Phase 4 — ADR discovery");
+      adrsRecorded = await discoverAndRecordADRs(repoName);
+      if (adrsRecorded > 0) {
+        progress(`ADR discovery: ${adrsRecorded} decisions recorded`);
+        logger.info(`scan_project: ADR discovery complete — ${adrsRecorded} ADRs recorded`);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push(`ADR discovery failed: ${msg}`);
+      logger.warn(`scan_project: ADR discovery error: ${msg}`);
+    }
+  }
+
+  // Phase 5: Schedule follow-up dreams for fresh instances
+  if (hasRealSeeds && dreamCycleResult) {
+    try {
+      progress("Phase 5 — scheduling follow-up dream cycles…");
+      logger.info("scan_project: Phase 5 — scheduling follow-up dreams");
+      await scheduleFollowUpDreams();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push(`Follow-up scheduling failed: ${msg}`);
+      logger.warn(`scan_project: follow-up scheduling error: ${msg}`);
+    }
+  }
+
+  const adrSummary = adrsRecorded > 0 ? ` ADRs: ${adrsRecorded} discovered.` : "";
+
   const summary =
     `Scan complete: ${scans.length} repo(s), ${totalFiles} files. ` +
     `${llmAvailable ? `LLM enrichment (${dreamerConfig.model}, ${totalTokens} tokens)` : "Structural-only (no LLM)"}. ` +
@@ -832,6 +872,7 @@ export async function runScanProject(opts: RunScanOptions = {}): Promise<ScanPro
     `Data model: ${dataModelResult.inserted} new / ${dataModelResult.total} total. ` +
     `Index: ${indexEntries} entries.` +
     dreamSummary +
+    adrSummary +
     (errors.length > 0 ? ` ${errors.length} warning(s).` : "");
 
   logger.info(`scan_project: ${summary}`);

@@ -446,9 +446,9 @@ The scheduler integrates with the cognitive engine through two hooks:
 
 Dreams don't work without an LLM. The deterministic strategies find structural patterns; the LLM provides the creative leap — proposing connections no graph algorithm would discover. The normalizer then filters hallucinations from insights.
 
-### v7.0: Zero-Touch Bootstrap
+### v7.0: Scan-Triggered Bootstrap
 
-New instances can be bootstrapped with **zero manual interaction**. When the engine starts on a fresh instance (empty `features.json`), the bootstrap system (`bootstrap.ts`) runs a five-phase onboarding sequence:
+New instances are bootstrapped by running `dg scan <instance>` after configuring LLM settings. The `scan_project` tool runs a five-phase pipeline:
 
 1. **Scan** — `runScanProject()` discovers project structure, source files, and key entities
 2. **LLM Enrichment** — The scan uses the configured dreamer LLM to generate rich semantic entries for features, workflows, and data model entities
@@ -456,7 +456,7 @@ New instances can be bootstrapped with **zero manual interaction**. When the eng
 4. **ADR Discovery** — The bootstrap reads discovered features, workflows, and data model entities, builds an LLM prompt asking it to identify implicit architectural decisions, then records each discovered ADR via `recordADR()`. This captures design decisions that exist in the code but were never formally documented
 5. **Follow-Up Dreams** — Five dream cycles are scheduled at 5-minute intervals to allow the knowledge graph to grow and stabilize
 
-The entire process runs automatically on first startup. Subsequent restarts skip bootstrap (feature data already exists). This enables a true **“start the daemon and walk away”** workflow for new projects.
+**The daemon does NOT auto-scan on startup.** The user must configure LLM settings first (dashboard `/config` or `engine.env`), then run `dg scan`. This ensures the LLM is available for enrichment, dreaming, and ADR discovery. Subsequent scans are incremental (merge mode).
 
 ### Provider Hierarchy
 

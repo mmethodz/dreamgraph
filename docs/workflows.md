@@ -285,21 +285,22 @@ candidate → [normalization] → validated (promoted)
 
 ---
 
-## 15. Zero-Touch Bootstrap (`bootstrap_flow`)
+## 15. Project Bootstrap via `dg scan` (`bootstrap_flow`)
 
-**Automated onboarding for new instances.** Runs once on first startup when the fact graph is empty.
+**Onboarding for new instances.** Triggered by the user running `dg scan <instance>` after configuring LLM settings.
 
-**Trigger:** `bootstrapNewInstance()` called during server startup  
-**Guard:** Skips if `features.json` already contains real entries (non-stub)  
-**Source:** [src/instance/bootstrap.ts](../src/instance/bootstrap.ts)
+**Trigger:** `dg scan` → `scan_project` MCP tool (Phases 1–5)
+**Guard:** ADR discovery and follow-up scheduling only run when seed data is populated and LLM is available
+**Source:** [src/tools/scan-project.ts](../src/tools/scan-project.ts), [src/instance/bootstrap.ts](../src/instance/bootstrap.ts)
 
-| Step | Name | Description |
-|------|------|-------------|
-| 1 | Detect fresh instance | Check if `features.json` is empty or contains only template stubs. If populated, skip bootstrap entirely. |
-| 2 | Project scan | Call `runScanProject()` to discover directory structure, read key source files, and populate features, workflows, and data model entities via merge mode. |
-| 3 | LLM enrichment | If an LLM is configured, the scan uses it to generate rich semantic descriptions for discovered entities. Falls back to structural-only analysis otherwise. |
-| 4 | Auto-dream | `scan_project` Phase 3 automatically triggers a full dream cycle (`strategy="all"`) after scan completes. This generates initial speculative edges and validates them against the newly populated fact graph. |
-| 5 | ADR discovery | If an LLM is available, build a comprehensive prompt from discovered features, workflows, and data model entities. The LLM identifies implicit architectural decisions embedded in the codebase. Each discovered ADR is recorded via `recordADR()` with `decided_by: "system"`. |
-| 6 | Schedule follow-up dreams | Five dream cycles are scheduled at 5-minute intervals (`after_cycles` trigger) to allow the knowledge graph to grow and stabilize post-bootstrap. |
+| Step | Phase | Description |
+|------|-------|-------------|
+| 1 | Phase 1 — File scan | Discover directory structure, read key source files, classify by type. |
+| 2 | Phase 2 — LLM enrichment | If an LLM is configured, generate rich semantic descriptions for features, workflows, and data model entities. Falls back to structural-only analysis otherwise. |
+| 3 | Phase 3 — Auto-dream | Trigger a full dream cycle (`strategy="all"`) to generate initial speculative edges and validate them against the newly populated fact graph. |
+| 4 | Phase 4 — ADR discovery | Build an LLM prompt from discovered entities to identify implicit architectural decisions. Each discovered ADR is recorded via `recordADR()` with `decided_by: "system"`. |
+| 5 | Phase 5 — Schedule follow-ups | Five dream cycles are scheduled at 5-minute intervals to allow the knowledge graph to grow and stabilize. |
 
-**Output:** Log messages indicating each phase’s completion. The instance is ready for interactive use after bootstrap completes.
+**Important:** The daemon does NOT auto-scan on startup. The user must configure LLM settings first (via dashboard at `/config` or by editing `engine.env`), then run `dg scan <instance>`.
+
+**Output:** Log messages and CLI output indicating each phase's completion. The instance is ready for interactive use after the scan completes.

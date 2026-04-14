@@ -1,18 +1,15 @@
 /**
- * DreamGraph v7.0 "El Alarife" — New Instance Auto-Bootstrap
+ * DreamGraph v7.0 "El Alarife" — Instance Bootstrap Utilities
  *
- * When the daemon starts for a freshly created instance (no scan yet),
- * this module automatically:
- *   1. Detects that seed data is still template stubs
- *   2. Runs a full project scan (scan_project with Phase 3 auto-dream)
- *   3. Discovers and records Architecture Decision Records (ADRs) via LLM
- *   4. Schedules 5 follow-up dream cycles at 5-minute intervals
+ * Provides helpers used by scan_project to perform first-scan bootstrapping:
+ *   1. Detect whether the instance has been scanned yet (isFreshInstance)
+ *   2. Discover and record Architecture Decision Records via LLM
+ *   3. Schedule follow-up dream cycles
  *
- * This replaces the manual "dg init → scan_project → scan for ADRs →
- * schedule_dream" onboarding workflow with zero-touch instance activation.
- *
- * The bootstrap runs asynchronously after the MCP server is accepting
- * connections, so it never blocks the transport startup.
+ * These are NOT triggered automatically on daemon start — the user must
+ * configure their LLM provider first, then run `dg scan <instance>`.
+ * The scan_project tool calls discoverAndRecordADRs() and
+ * scheduleFollowUpDreams() as Phase 4 and Phase 5 of the scan pipeline.
  */
 
 import { existsSync } from "node:fs";
@@ -39,7 +36,7 @@ import type { Feature, Workflow, DataModelEntity } from "../types/index.js";
  * `id` and `name` fields.  If features.json is still a template, the
  * instance has never been scanned.
  */
-async function isFreshInstance(): Promise<boolean> {
+export async function isFreshInstance(): Promise<boolean> {
   try {
     const featuresPath = dataPath("features.json");
     if (!existsSync(featuresPath)) return true; // no data at all
@@ -180,7 +177,7 @@ function ensureStrArr(val: unknown): string[] {
  * Discover architecture decisions from seed data using the LLM,
  * then record each one via the ADR historian.
  */
-async function discoverAndRecordADRs(repoName: string): Promise<number> {
+export async function discoverAndRecordADRs(repoName: string): Promise<number> {
   const llmOk = await isLlmAvailable();
   if (!llmOk) {
     logger.info("[bootstrap] LLM unavailable — skipping ADR discovery");
@@ -300,7 +297,7 @@ async function discoverAndRecordADRs(repoName: string): Promise<number> {
  * Schedule 5 dream cycles at 5-minute intervals, strategy "all".
  * Uses the existing scheduler infrastructure.
  */
-async function scheduleFollowUpDreams(): Promise<void> {
+export async function scheduleFollowUpDreams(): Promise<void> {
   try {
     const schedule = await createSchedule({
       name: "bootstrap_follow_up_dreams",
@@ -325,11 +322,12 @@ async function scheduleFollowUpDreams(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 /**
- * Check if this is a fresh instance and, if so, run the initial
- * project scan + dream cycle + ADR discovery + schedule follow-up dreams.
+ * Legacy bootstrap entry point — retained for programmatic use.
  *
- * Call this after the MCP server and all tools are registered.
- * Runs fire-and-forget so it does not block transport startup.
+ * In v7.0+, this is NOT called automatically on daemon start.
+ * Users must configure LLM settings first, then run `dg scan <instance>`.
+ * The scan_project tool handles ADR discovery and follow-up scheduling
+ * as Phase 4 and Phase 5.
  */
 export async function bootstrapNewInstance(): Promise<void> {
   // Must have repos configured — otherwise there's nothing to scan

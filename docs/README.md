@@ -44,7 +44,7 @@ dg start my-project --http
 code /path/to/repo
 ```
 
-New instances bootstrap automatically: scan, initial dream cycle, ADR discovery, and 5 follow-up dreams. No manual intervention needed.
+After starting the daemon, configure your LLM (dashboard or `engine.env`), then run `dg scan <name>` to bootstrap the knowledge graph — scan, dream, ADR discovery, and follow-up scheduling all happen in one command.
 
 ---
 

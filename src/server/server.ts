@@ -46,7 +46,7 @@ Use these repo names as the \`repo\` parameter for read_source_code, list_direct
 
 ## Quick-Start Workflow
 1. **Discover** — Read \`system://capabilities\` or call \`cognitive_status\` to see current state.
-2. **Bootstrap** — If the knowledge graph is empty, call \`init_graph\` to scan repos and populate seed data.
+2. **Bootstrap** — If the knowledge graph is empty, configure LLM settings then call \`scan_project\` (or \`init_graph\`) to scan repos and populate seed data.
 3. **Read code** — Use \`read_source_code\` and \`list_directory\` with repo="${repoNames[0] ?? "REPO_NAME"}".
 4. **Git history** — Use \`git_log\` and \`git_blame\` with the same repo name.
 5. **Enrich** — Call \`enrich_seed_data\` with target="features"|"workflows"|"data_model"|"capabilities".

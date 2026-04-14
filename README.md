@@ -73,10 +73,16 @@ This builds the server, installs the `dg` CLI globally, and **automatically inst
 dg init my-project                        # Create a DreamGraph instance
 dg attach my-project /path/to/your/repo   # Bind to your project
 dg start my-project --http                # Start the daemon
+```
+
+Configure your LLM — either edit `~/.dreamgraph/instances/<uuid>/config/engine.env` or open the web dashboard at `http://localhost:<port>/config`. Then scan:
+
+```bash
+dg scan my-project                        # Scan, dream, discover ADRs, schedule follow-ups
 code /path/to/your/repo                   # Extension auto-connects
 ```
 
-The daemon auto-bootstraps: scans your project, runs an initial dream cycle, discovers implicit ADRs, and schedules follow-up dreams. Open the Chat panel and start asking immediately.
+The scan populates the knowledge graph, runs an initial dream cycle, discovers implicit ADRs, and schedules follow-up dreams. Open the Chat panel and start asking immediately.
 
 ### Onboard the Extension
 
@@ -87,6 +93,8 @@ The daemon auto-bootstraps: scans your project, runs an initial dream cycle, dis
 5. Configure model: VS Code Settings → `dreamgraph.architect.provider` / `dreamgraph.architect.model`.
 
 You can change provider and model at any time — the graph-grounded context is independent of the LLM session, so switching from Sonnet to Opus (or to a local Ollama model) loses nothing.
+
+> **Note:** The daemon does NOT auto-scan on startup. You must configure LLM settings first, then run `dg scan` to bootstrap the knowledge graph.
 
 ### Configure LLM
 

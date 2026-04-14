@@ -19,7 +19,7 @@
 import { createServer } from "./server/server.js";
 import { handleDashboardRoute, setDashboardContext } from "./server/dashboard.js";
 import { handleApiRoute } from "./api/routes.js";
-import { resolveInstanceAtStartup, updateInstanceCounters, bootstrapNewInstance } from "./instance/index.js";
+import { resolveInstanceAtStartup, updateInstanceCounters } from "./instance/index.js";
 import { engine } from "./cognitive/engine.js";
 import { initLlmProvider } from "./cognitive/llm.js";
 import { logger } from "./utils/logger.js";
@@ -270,11 +270,6 @@ resolveInstanceAtStartup()
     // Start transport
     const transportPromise = opts.transport === "http" ? startHTTP(opts.port) : startStdio();
     await transportPromise;
-
-    // Fire-and-forget: auto-scan fresh instances after transport is ready
-    bootstrapNewInstance().catch((err) => {
-      logger.warn(`Bootstrap error (non-fatal): ${err}`);
-    });
   })
   .catch((err) => {
     logger.error("Fatal error:", err);

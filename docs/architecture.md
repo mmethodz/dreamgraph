@@ -239,7 +239,7 @@ src/
 │   ├── scope.ts             # InstanceScope — file-system isolation enforcement
 │   ├── registry.ts          # Master registry CRUD (~/.dreamgraph/instances.json)
 │   ├── lifecycle.ts         # Create, load, resolve, migrate instances
-│   ├── bootstrap.ts         # Zero-touch bootstrap — auto-scan, auto-dream, ADR discovery (v7.0)
+│   ├── bootstrap.ts         # Bootstrap utilities — ADR discovery, follow-up scheduling (v7.0)
 │   ├── policies.ts          # policies.json parser, validator, runtime queries
 │   └── index.ts             # Barrel re-exports
 ├── cli/                     # CLI instance manager — `dg` binary (v6.0 La Catedral)
