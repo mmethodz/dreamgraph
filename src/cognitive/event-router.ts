@@ -18,7 +18,8 @@
  * - Full audit trail in data/event_log.json
  */
 
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
+import { atomicWriteFile } from "../utils/atomic-write.js";
 import { existsSync } from "node:fs";
 import { engine } from "./engine.js";
 import { logger } from "../utils/logger.js";
@@ -87,7 +88,7 @@ async function saveEventLog(log: EventLogFile): Promise<void> {
     log.events.length > 0
       ? log.events[log.events.length - 1].timestamp
       : null;
-  await writeFile(eventLogPath(), JSON.stringify(log, null, 2), "utf-8");
+  await atomicWriteFile(eventLogPath(), JSON.stringify(log, null, 2));
 }
 
 // ---------------------------------------------------------------------------

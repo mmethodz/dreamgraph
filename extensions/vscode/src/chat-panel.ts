@@ -870,14 +870,91 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
 
     try {
       const parsed = JSON.parse(raw);
-      if (typeof parsed === 'object' && parsed !== null && 'ok' in parsed) {
-        if (parsed.ok && parsed.data) return this._summarizeObject(toolName, parsed.data, MAX);
-        if (!parsed.ok && parsed.error) return JSON.stringify({ ok: false, error: parsed.error }).slice(0, MAX);
+      if (typeof parsed !== 'object' || parsed === null) {
+        return raw.slice(0, MAX) + `\n... [condensed, ${raw.length} chars total]`;
       }
+
+      // Local tools use { success, data }, MCP tools use { ok, data }
+      const isSuccess = ('success' in parsed && parsed.success) || ('ok' in parsed && parsed.ok);
+      const isFailure = ('success' in parsed && !parsed.success) || ('ok' in parsed && !parsed.ok);
+      const data = parsed.data;
+
+      if (isFailure && (parsed.error || data?.error)) {
+        return JSON.stringify({ success: false, error: parsed.error ?? data?.error }).slice(0, MAX);
+      }
+
+      // Content-bearing results (file reads): condense the content instead of dropping it
+      if (isSuccess && data && typeof data === 'object' && typeof data.content === 'string') {
+        return this._condenseContentResult(toolName, data, MAX);
+      }
+
+      // Other successful results with a data payload
+      if (isSuccess && data !== undefined) {
+        return this._summarizeObject(toolName, data, MAX);
+      }
+
       return this._summarizeObject(toolName, parsed, MAX);
     } catch {
-      return raw.slice(0, MAX) + `\n... [truncated, ${raw.length} chars total]`;
+      return raw.slice(0, MAX) + `\n... [condensed, ${raw.length} chars total]`;
     }
+  }
+
+  /**
+   * Condense a content-bearing tool result (read_local_file, read_source_code).
+   * Keeps the first and last lines to preserve context, elides the middle.
+   */
+  private _condenseContentResult(
+    toolName: string,
+    data: Record<string, unknown>,
+    max: number,
+  ): string {
+    const content = data.content as string;
+    const meta: Record<string, unknown> = { success: true, data: {} };
+    const metaData = meta.data as Record<string, unknown>;
+
+    // Copy all non-content metadata (filePath, totalLines, range, etc.)
+    for (const k of Object.keys(data)) {
+      if (k !== 'content') metaData[k] = data[k];
+    }
+
+    // Calculate how much space we have for content
+    metaData.content = '';
+    const envelope = JSON.stringify(meta, null, 2).length;
+    const budget = max - envelope - 100; // 100 chars for the elision marker
+
+    if (budget <= 0 || content.length <= budget) {
+      metaData.content = content.slice(0, Math.max(budget, 500));
+      return JSON.stringify(meta, null, 2).slice(0, max);
+    }
+
+    // Keep first ~60% and last ~30% of the budget to preserve head + tail context
+    const lines = content.split('\n');
+    const headBudget = Math.floor(budget * 0.6);
+    const tailBudget = Math.floor(budget * 0.3);
+
+    let headLines = 0;
+    let headLen = 0;
+    for (let i = 0; i < lines.length && headLen < headBudget; i++) {
+      headLen += lines[i].length + 1;
+      headLines++;
+    }
+
+    let tailLines = 0;
+    let tailLen = 0;
+    for (let i = lines.length - 1; i >= headLines && tailLen < tailBudget; i--) {
+      tailLen += lines[i].length + 1;
+      tailLines++;
+    }
+
+    const elidedCount = lines.length - headLines - tailLines;
+    const head = lines.slice(0, headLines).join('\n');
+    const tail = tailLines > 0 ? lines.slice(lines.length - tailLines).join('\n') : '';
+    const elision = elidedCount > 0
+      ? `\n\n... [${elidedCount} lines condensed — ${content.length} chars total, showing L1-${headLines} and L${lines.length - tailLines + 1}-${lines.length}]\n\n`
+      : '';
+
+    metaData.content = head + elision + tail;
+    return JSON.stringify(meta, null, 2).slice(0, max);
   }
 
   private _summarizeObject(toolName: string, obj: unknown, max: number): string {
@@ -899,25 +976,33 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
     if (typeof obj === 'object' && obj !== null) {
       const record = obj as Record<string, unknown>;
       const summaryKeys = [
-        'message', 'summary', 'status', 'ok', 'error',
+        'message', 'summary', 'status', 'ok', 'success', 'error',
         'entries_received', 'entries_inserted', 'entries_updated',
         'total_entries', 'index_entries', 'target', 'file', 'mode',
         'validation_errors', 'count', 'name', 'id', 'repos',
         'features_count', 'workflows_count', 'data_model_count',
         'capabilities_count', 'total_files', 'total_entities',
+        'content', 'filePath', 'totalLines', 'range',
       ];
       const compact: Record<string, unknown> = { _tool: toolName };
       for (const k of summaryKeys) {
         if (k in record) {
           const val = record[k];
-          compact[k] = Array.isArray(val) ? (val.length <= 5 ? val : `[${val.length} items]`) : val;
+          if (typeof val === 'string' && val.length > 500) {
+            compact[k] = val.slice(0, 500) + `... [${val.length} chars]`;
+          } else if (Array.isArray(val)) {
+            compact[k] = val.length <= 5 ? val : `[${val.length} items]`;
+          } else {
+            compact[k] = val;
+          }
         }
       }
       if (Object.keys(compact).length <= 1) {
         compact._keys = Object.keys(record).slice(0, 20);
-        for (const k of Object.keys(record).slice(0, 5)) {
+        for (const k of Object.keys(record).slice(0, 8)) {
           const v = record[k];
-          if (typeof v === 'string' && v.length <= 200) compact[k] = v;
+          if (typeof v === 'string' && v.length <= 500) compact[k] = v;
+          else if (typeof v === 'string') compact[k] = v.slice(0, 500) + `... [${v.length} chars]`;
           else if (typeof v === 'number' || typeof v === 'boolean') compact[k] = v;
           else if (Array.isArray(v)) compact[k] = `[${v.length} items]`;
         }

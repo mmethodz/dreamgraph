@@ -1648,7 +1648,7 @@ export interface DreamResult {
 const strategyHistory = new Map<DreamStrategy, number[]>();
 
 /** Number of consecutive 0-yield cycles before a strategy gets skipped */
-const SKIP_AFTER_BARREN_CYCLES = 3;
+const SKIP_AFTER_BARREN_CYCLES = Number(process.env.DG_BARREN_THRESHOLD) || 3;
 
 /**
  * Record strategy yield and return whether the strategy should run.
@@ -1668,8 +1668,8 @@ function shouldRunStrategy(strategy: DreamStrategy, currentCycle: number): boole
 
   if (!allBarren) return true;
 
-  // Benched! But allow a probe every 6 cycles to re-check
-  const probeInterval = 6;
+  // Benched! But allow a probe every N cycles to re-check
+  const probeInterval = Number(process.env.DG_PROBE_INTERVAL) || 6;
   if (currentCycle % probeInterval === 0) {
     logger.debug(`Adaptive probe: re-enabling "${strategy}" for probe cycle ${currentCycle}`);
     return true;
@@ -1682,8 +1682,9 @@ function shouldRunStrategy(strategy: DreamStrategy, currentCycle: number): boole
 function recordStrategyYield(strategy: DreamStrategy, newEdges: number): void {
   const history = strategyHistory.get(strategy) ?? [];
   history.push(newEdges);
-  // Keep last 12 entries
-  if (history.length > 12) history.splice(0, history.length - 12);
+  // Keep last N entries
+  const maxHistory = Number(process.env.DG_STRATEGY_HISTORY) || 12;
+  if (history.length > maxHistory) history.splice(0, history.length - maxHistory);
   strategyHistory.set(strategy, history);
 }
 
@@ -1750,8 +1751,10 @@ export async function dream(
   const hasLlm = strategiesToRun.includes("llm_dream");
   const hasPgo = strategiesToRun.includes("pgo_wave");
   const structuralCount = strategiesToRun.length - (hasLlm ? 1 : 0) - (hasPgo ? 1 : 0);
-  const llmBudget = hasLlm ? Math.ceil(maxDreams * 0.35) : 0;
-  const pgoBudget = hasPgo ? Math.ceil(maxDreams * 0.15) : 0;
+  const llmFrac = Number(process.env.DG_LLM_BUDGET) || 0.35;
+  const pgoFrac = Number(process.env.DG_PGO_BUDGET) || 0.15;
+  const llmBudget = hasLlm ? Math.ceil(maxDreams * llmFrac) : 0;
+  const pgoBudget = hasPgo ? Math.ceil(maxDreams * pgoFrac) : 0;
   const structuralBudget = maxDreams - llmBudget - pgoBudget;
   const perStrategy = structuralCount > 0 ? Math.ceil(structuralBudget / structuralCount) : maxDreams;
 

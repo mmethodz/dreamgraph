@@ -17,7 +17,8 @@
  * No proprietary code or data leaves the instance.
  */
 
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
+import { atomicWriteFile } from "../utils/atomic-write.js";
 import { existsSync } from "node:fs";
 import { engine } from "./engine.js";
 import { logger } from "../utils/logger.js";
@@ -143,7 +144,7 @@ async function loadArchetypes(): Promise<FederatedExchangeFile> {
 }
 
 async function saveArchetypes(data: FederatedExchangeFile): Promise<void> {
-  await writeFile(archetypesPath(), JSON.stringify(data, null, 2), "utf-8");
+  await atomicWriteFile(archetypesPath(), JSON.stringify(data, null, 2));
 }
 
 function emptyExchangeFile(): FederatedExchangeFile {

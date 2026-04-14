@@ -33,6 +33,7 @@ import { dataPath } from "../utils/paths.js";
 import { loadJsonArray, invalidateCache } from "../utils/cache.js";
 import { success, error, safeExecute } from "../utils/errors.js";
 import { logger } from "../utils/logger.js";
+import { atomicWriteFile } from "../utils/atomic-write.js";
 import { getLlmProvider, getDreamerLlmConfig, isLlmAvailable } from "../cognitive/llm.js";
 import type { LlmMessage } from "../cognitive/llm.js";
 import { dream } from "../cognitive/dreamer.js";
@@ -464,13 +465,13 @@ async function rebuildIndex(): Promise<number> {
   }
 
   const index: ResourceIndex = { entities };
-  await fs.writeFile(dataPath("index.json"), JSON.stringify(index, null, 2), "utf-8");
+  await atomicWriteFile(dataPath("index.json"), JSON.stringify(index, null, 2));
   invalidateCache("index.json");
   return Object.keys(entities).length;
 }
 
 async function writeSeed(filename: string, data: unknown): Promise<void> {
-  await fs.writeFile(dataPath(filename), JSON.stringify(data, null, 2), "utf-8");
+  await atomicWriteFile(dataPath(filename), JSON.stringify(data, null, 2));
   invalidateCache(filename);
 }
 

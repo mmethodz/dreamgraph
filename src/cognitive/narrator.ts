@@ -23,7 +23,8 @@
  *   `maybeAutoNarrate()` is hooked into dream_cycle completion.
  */
 
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
+import { atomicWriteFile } from "../utils/atomic-write.js";
 import { existsSync } from "node:fs";
 import { engine } from "./engine.js";
 import { logger } from "../utils/logger.js";
@@ -407,7 +408,7 @@ async function loadStory(): Promise<SystemStoryFile> {
 async function saveStory(story: SystemStoryFile): Promise<void> {
   story.metadata.total_chapters = story.chapters.length;
   story.metadata.last_updated = new Date().toISOString();
-  await writeFile(storyPath(), JSON.stringify(story, null, 2), "utf-8");
+  await atomicWriteFile(storyPath(), JSON.stringify(story, null, 2));
 }
 
 // ---------------------------------------------------------------------------

@@ -18,7 +18,8 @@
  * "Dream freely. Schedule wisely. Execute deterministically."
  */
 
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
+import { atomicWriteFile } from "../utils/atomic-write.js";
 import { existsSync } from "node:fs";
 import { engine } from "./engine.js";
 import { dataPath } from "../utils/paths.js";
@@ -102,7 +103,7 @@ async function saveScheduleFile(file: ScheduleFile): Promise<void> {
   // Stamp instance UUID when running in instance mode
   const scope = getActiveScope();
   if (scope) file.metadata.instance_uuid = scope.uuid;
-  await writeFile(schedulesPath(), JSON.stringify(file, null, 2), "utf-8");
+  await atomicWriteFile(schedulesPath(), JSON.stringify(file, null, 2));
 }
 
 // ---------------------------------------------------------------------------
@@ -330,6 +331,20 @@ async function executeAction(schedule: DreamSchedule): Promise<string> {
           promoted: normResult.promotedEdges.length,
           promoted_entities: normResult.promotedNodes,
           blocked_by_gate: normResult.blockedByGate,
+          // Entity-level detail so cycles don't run blind
+          promoted_details: normResult.promotedEdges.map(e => ({
+            id: e.id,
+            from: e.from,
+            to: e.to,
+            relation: e.relation,
+            confidence: e.confidence,
+          })),
+          tension_details: normResult.tensionCandidates.map(tc => ({
+            from: tc.from,
+            to: tc.to,
+            reason: tc.reason,
+            confidence: tc.confidence,
+          })),
         },
         tension_signals_created: tensionsCreated,
         tension_signals_resolved: tensionsResolved,

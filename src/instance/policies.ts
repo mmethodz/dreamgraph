@@ -1,5 +1,5 @@
 /**
- * DreamGraph v6.0 "La Catedral" — Policies Parser & Validator.
+ * DreamGraph v7.0 "El Alarife" — Policies Parser & Validator.
  *
  * Loads, validates, and provides runtime access to the per-instance
  * discipline policy configuration stored at `<instance>/config/policies.json`.
@@ -8,7 +8,8 @@
  * are used — equivalent to the "balanced" profile.
  */
 
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, mkdir } from "node:fs/promises";
+import { atomicWriteFile } from "../utils/atomic-write.js";
 import { existsSync } from "node:fs";
 import { dirname } from "node:path";
 import type {
@@ -364,7 +365,7 @@ export async function savePolicies(policies: PoliciesFile): Promise<void> {
     await mkdir(dir, { recursive: true });
   }
 
-  await writeFile(policiesPath, JSON.stringify(policies, null, 2) + "\n", "utf-8");
+  await atomicWriteFile(policiesPath, JSON.stringify(policies, null, 2) + "\n");
   logger.info(`Policies: saved to ${policiesPath}`);
 }
 

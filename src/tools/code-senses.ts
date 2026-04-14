@@ -647,8 +647,13 @@ export function registerCodeSensesTools(server: McpServer): void {
             return error("READ_ERROR", `Cannot read file: ${msg}`);
           }
 
-          // Count occurrences
-          const occurrences = content.split(old_text).length - 1;
+          // Count occurrences — normalize line endings for matching tolerance.
+          // LLM-generated old_text may use \n while the file has \r\n (or vice versa).
+          // We match against normalized copies but apply the edit to the original content.
+          const normContent = content.replace(/\r\n/g, "\n");
+          const normOldText = old_text.replace(/\r\n/g, "\n");
+
+          const occurrences = normContent.split(normOldText).length - 1;
           if (occurrences === 0) {
             return error(
               "NOT_FOUND",
@@ -662,8 +667,14 @@ export function registerCodeSensesTools(server: McpServer): void {
             );
           }
 
-          // Apply the replacement
-          const newContent = content.replace(old_text, new_text);
+          // Apply the replacement — use the normalized copy so the match succeeds
+          // even when line endings differ, then restore original line-ending style.
+          const fileUsesCRLF = content.includes("\r\n");
+          let newContent = normContent.replace(normOldText, new_text.replace(/\r\n/g, "\n"));
+          if (fileUsesCRLF) {
+            // Restore \r\n for files that originally used Windows line endings
+            newContent = newContent.replace(/\n/g, "\r\n");
+          }
           try {
             await fs.writeFile(safePath, newContent, "utf-8");
             const linesChanged = old_text.split("\n").length;

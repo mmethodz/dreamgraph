@@ -30,6 +30,8 @@ import { logger } from "../utils/logger.js";
 import { dataPath } from "../utils/paths.js";
 import { loadJsonArray, invalidateCache } from "../utils/cache.js";
 import { getActiveCognitiveTuning } from "../instance/index.js";
+import { atomicWriteFile } from "../utils/atomic-write.js";
+import { withFileLock } from "../utils/mutex.js";
 import type {
   CognitiveStateName,
   CognitiveState,
@@ -101,7 +103,7 @@ class CognitiveEngine {
    * Memory entries expire after 30 cycles of inactivity.
    */
   private reinforcementMemory = new Map<string, ReinforcementMemory>();
-  private static readonly MEMORY_TTL_CYCLES = 30;
+  private static readonly MEMORY_TTL_CYCLES = Number(process.env.DG_MEMORY_TTL_CYCLES) || 30;
 
   /**
    * Hydrate counters from the persisted dream graph.
@@ -124,8 +126,11 @@ class CognitiveEngine {
           `Cognitive engine hydrated: ${this.totalDreamCycles} dream cycles, ${this.totalNormalizationCycles} normalization cycles`
         );
       }
-    } catch {
-      // Fresh start — no graph yet
+    } catch (err) {
+      // Fresh start — no graph yet (file missing is OK, parse error is not)
+      if (existsSync(dreamGraphPath())) {
+        logger.warn(`Cognitive hydrate: dream_graph.json exists but failed to parse — possible corruption: ${err instanceof Error ? err.message : err}`);
+      }
     }
   }
 
@@ -329,7 +334,11 @@ class CognitiveEngine {
         nodes: Array.isArray(p.nodes) ? p.nodes : [],
         edges: Array.isArray(p.edges) ? p.edges : [],
       };
-    } catch {
+    } catch (err) {
+      logger.warn(
+        `loadDreamGraph: failed to read/parse dream_graph.json — returning empty graph. ` +
+        `Error: ${err instanceof Error ? err.message : err}`
+      );
       return this.emptyDreamGraphFile();
     }
   }
@@ -355,7 +364,9 @@ class CognitiveEngine {
     data.metadata.total_cycles = this.totalDreamCycles;
     data.metadata.total_normalization_cycles = this.totalNormalizationCycles;
     if (this.lastNormalization) data.metadata.last_normalization = this.lastNormalization;
-    await writeFile(dreamGraphPath(), JSON.stringify(data, null, 2), "utf-8");
+    await withFileLock("dream_graph.json", async () => {
+      await atomicWriteFile(dreamGraphPath(), JSON.stringify(data, null, 2));
+    });
     logger.debug("Dream graph saved to disk");
   }
 
@@ -409,7 +420,9 @@ class CognitiveEngine {
       for (const t of tensions) {
         for (const eid of t.entities) tensionEntityIds.add(eid);
       }
-    } catch { /* ignore — decay proceeds without protection */ }
+    } catch (err) {
+      logger.debug(`applyDecay: could not load tensions for decay protection: ${err instanceof Error ? err.message : err}`);
+    }
 
     // Decay edges
     const survivingEdges: DreamEdge[] = [];
@@ -656,7 +669,11 @@ class CognitiveEngine {
         metadata: { ...e.metadata, ...(p.metadata && typeof p.metadata === "object" ? p.metadata : {}) },
         results: Array.isArray(p.results) ? p.results : [],
       };
-    } catch {
+    } catch (err) {
+      logger.warn(
+        `loadCandidateEdges: failed to read/parse candidate_edges.json — returning empty. ` +
+        `Error: ${err instanceof Error ? err.message : err}`
+      );
       return this.emptyCandidateEdgesFile();
     }
   }
@@ -675,11 +692,9 @@ class CognitiveEngine {
   }
 
   async saveCandidateEdges(data: CandidateEdgesFile): Promise<void> {
-    await writeFile(
-      candidateEdgesPath(),
-      JSON.stringify(data, null, 2),
-      "utf-8"
-    );
+    await withFileLock("candidate_edges.json", async () => {
+      await atomicWriteFile(candidateEdgesPath(), JSON.stringify(data, null, 2));
+    });
     logger.debug("Candidate edges saved to disk");
   }
 
@@ -706,7 +721,11 @@ class CognitiveEngine {
         metadata: { ...e.metadata, ...(p.metadata && typeof p.metadata === "object" ? p.metadata : {}) },
         edges: Array.isArray(p.edges) ? p.edges : [],
       };
-    } catch {
+    } catch (err) {
+      logger.warn(
+        `loadValidatedEdges: failed to read/parse validated_edges.json — returning empty. ` +
+        `Error: ${err instanceof Error ? err.message : err}`
+      );
       return this.emptyValidatedEdgesFile();
     }
   }
@@ -725,11 +744,9 @@ class CognitiveEngine {
   }
 
   async saveValidatedEdges(data: ValidatedEdgesFile): Promise<void> {
-    await writeFile(
-      validatedEdgesPath(),
-      JSON.stringify(data, null, 2),
-      "utf-8"
-    );
+    await withFileLock("validated_edges.json", async () => {
+      await atomicWriteFile(validatedEdgesPath(), JSON.stringify(data, null, 2));
+    });
     logger.debug("Validated edges saved to disk");
   }
 
@@ -857,7 +874,9 @@ class CognitiveEngine {
     const writes: Promise<void>[] = [];
 
     const writeSeed = async (filename: string, data: unknown) => {
-      await writeFile(dataPath(filename), JSON.stringify(data, null, 2), "utf-8");
+      await withFileLock(filename, async () => {
+        await atomicWriteFile(dataPath(filename), JSON.stringify(data, null, 2));
+      });
       invalidateCache(filename);
     };
 
@@ -878,7 +897,9 @@ class CognitiveEngine {
       entities[d.id] = { type: "data_model", uri: `dreamgraph://resource/data_model/${d.id}`, name: d.name, source_repo: d.source_repo };
     }
     const index: ResourceIndex = { entities };
-    await writeFile(dataPath("index.json"), JSON.stringify(index, null, 2), "utf-8");
+    await withFileLock("index.json", async () => {
+      await atomicWriteFile(dataPath("index.json"), JSON.stringify(index, null, 2));
+    });
     invalidateCache("index.json");
 
     // Save dream graph with promoted_at markers
@@ -922,7 +943,11 @@ class CognitiveEngine {
         signals: Array.isArray(p.signals) ? p.signals : [],
         resolved_tensions: Array.isArray(p.resolved_tensions) ? p.resolved_tensions : [],
       };
-    } catch {
+    } catch (err) {
+      logger.warn(
+        `loadTensions: failed to read/parse tension_log.json — returning empty. ` +
+        `Error: ${err instanceof Error ? err.message : err}`
+      );
       return this.emptyTensionFile();
     }
   }
@@ -931,7 +956,9 @@ class CognitiveEngine {
     data.metadata.total_signals = data.signals.length;
     data.metadata.total_resolved = data.resolved_tensions?.length ?? 0;
     data.metadata.last_updated = new Date().toISOString();
-    await writeFile(tensionPath(), JSON.stringify(data, null, 2), "utf-8");
+    await withFileLock("tension_log.json", async () => {
+      await atomicWriteFile(tensionPath(), JSON.stringify(data, null, 2));
+    });
     logger.debug("Tension log saved to disk");
   }
 
@@ -1251,7 +1278,11 @@ class CognitiveEngine {
         metadata: { ...e.metadata, ...(p.metadata && typeof p.metadata === "object" ? p.metadata : {}) },
         sessions: Array.isArray(p.sessions) ? p.sessions : [],
       };
-    } catch {
+    } catch (err) {
+      logger.warn(
+        `loadDreamHistory: failed to read/parse dream_history.json — returning empty. ` +
+        `Error: ${err instanceof Error ? err.message : err}`
+      );
       return this.emptyHistoryFile();
     }
   }
@@ -1260,7 +1291,9 @@ class CognitiveEngine {
     const history = await this.loadDreamHistory();
     history.sessions.push(entry);
     history.metadata.total_sessions = history.sessions.length;
-    await writeFile(historyPath(), JSON.stringify(history, null, 2), "utf-8");
+    await withFileLock("dream_history.json", async () => {
+      await atomicWriteFile(historyPath(), JSON.stringify(history, null, 2));
+    });
     logger.debug(`Dream history entry recorded: session ${entry.session_id}`);
   }
 
@@ -1301,11 +1334,9 @@ class CognitiveEngine {
   }
 
   async clearHistory(): Promise<void> {
-    await writeFile(
-      historyPath(),
-      JSON.stringify(this.emptyHistoryFile(), null, 2),
-      "utf-8"
-    );
+    await withFileLock("dream_history.json", async () => {
+      await atomicWriteFile(historyPath(), JSON.stringify(this.emptyHistoryFile(), null, 2));
+    });
     logger.info("Dream history cleared");
   }
 
@@ -1369,8 +1400,8 @@ class CognitiveEngine {
         avg_reinforcement: Math.round(avgReinf * 100) / 100,
         avg_activation: Math.round(avgActivation * 100) / 100,
       };
-    } catch {
-      // Files might not exist yet
+    } catch (err) {
+      logger.debug(`getStatus: dream graph stats unavailable: ${err instanceof Error ? err.message : err}`);
     }
 
     try {
@@ -1380,8 +1411,8 @@ class CognitiveEngine {
         else if (r.status === "latent") validatedStats.latent++;
         else validatedStats.rejected++;
       }
-    } catch {
-      // Files might not exist yet
+    } catch (err) {
+      logger.debug(`getStatus: candidate edges stats unavailable: ${err instanceof Error ? err.message : err}`);
     }
 
     try {
@@ -1395,8 +1426,8 @@ class CognitiveEngine {
             ? unresolved.sort((a, b) => b.urgency - a.urgency)[0]
             : null,
       };
-    } catch {
-      // OK
+    } catch (err) {
+      logger.debug(`getStatus: tension stats unavailable: ${err instanceof Error ? err.message : err}`);
     }
 
     return {
@@ -1420,7 +1451,8 @@ class CognitiveEngine {
             retention_plausibility: tuning.retention_plausibility,
             max_contradiction: tuning.max_contradiction,
           };
-        } catch {
+        } catch (err) {
+          logger.debug(`getStatus: promotion config unavailable: ${err instanceof Error ? err.message : err}`);
           return DEFAULT_PROMOTION;
         }
       })(),
@@ -1436,7 +1468,8 @@ class CognitiveEngine {
             model: getDreamerLlmConfig().model,
             available,
           };
-        } catch {
+        } catch (err) {
+          logger.debug(`getStatus: LLM info unavailable: ${err instanceof Error ? err.message : err}`);
           return { provider: "none", model: "", available: false };
         }
       })(),

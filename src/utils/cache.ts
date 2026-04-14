@@ -7,7 +7,7 @@
  * rapid bursts within a single operation, while guaranteeing fresh data
  * between dream cycles (even back-to-back ones).
  *
- * v6.0 La Catedral: The cache resolves data files through a pluggable
+ * v7.0 El Alarife: The cache resolves data files through a pluggable
  * `resolveDataPath` function so it works in both legacy (flat data/)
  * and UUID-scoped instance modes.
  */

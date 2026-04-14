@@ -234,6 +234,15 @@ if ($codeCmd) {
                     New-Item -ItemType Directory -Path "$ExtDest\dist" -Force | Out-Null
                     Copy-Item -Path "dist\*" -Destination "$ExtDest\dist\" -Recurse -Force
                     Copy-Item -Path "package.json" -Destination "$ExtDest\package.json" -Force
+                    # Copy media assets (activity bar icon, marketplace icon)
+                    if (Test-Path "media") {
+                        New-Item -ItemType Directory -Path "$ExtDest\media" -Force | Out-Null
+                        Copy-Item -Path "media\*" -Destination "$ExtDest\media\" -Recurse -Force
+                    }
+                    # Copy README for marketplace / extension details
+                    if (Test-Path "README.md") {
+                        Copy-Item -Path "README.md" -Destination "$ExtDest\README.md" -Force
+                    }
                     # Copy node_modules for runtime dependencies (@modelcontextprotocol/sdk)
                     & npm install --omit=dev 2>&1 | Out-Null
                     if (Test-Path "node_modules") {

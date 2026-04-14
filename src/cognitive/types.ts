@@ -111,8 +111,8 @@ export interface DecayConfig {
 
 /** Default decay settings — TTL must survive at least one full 6-strategy rotation */
 export const DEFAULT_DECAY: DecayConfig = {
-  ttl: 8,
-  decay_rate: 0.05,
+  ttl: Number(process.env.DG_DECAY_TTL) || 8,
+  decay_rate: Number(process.env.DG_DECAY_RATE) || 0.05,
 };
 
 // ---------------------------------------------------------------------------
@@ -136,12 +136,12 @@ export interface PromotionConfig {
 }
 
 export const DEFAULT_PROMOTION: PromotionConfig = {
-  promotion_confidence: 0.62,
-  promotion_plausibility: 0.45,
-  promotion_evidence: 0.4,
-  promotion_evidence_count: 2,
-  retention_plausibility: 0.35,
-  max_contradiction: 0.3,
+  promotion_confidence: Number(process.env.DG_PROMOTION_CONFIDENCE) || 0.62,
+  promotion_plausibility: Number(process.env.DG_PROMOTION_PLAUSIBILITY) || 0.45,
+  promotion_evidence: Number(process.env.DG_PROMOTION_EVIDENCE) || 0.4,
+  promotion_evidence_count: Number(process.env.DG_PROMOTION_EVIDENCE_COUNT) || 2,
+  retention_plausibility: Number(process.env.DG_RETENTION_PLAUSIBILITY) || 0.35,
+  max_contradiction: Number(process.env.DG_MAX_CONTRADICTION) || 0.3,
 };
 
 // ---------------------------------------------------------------------------
@@ -533,10 +533,10 @@ export interface TensionConfig {
 }
 
 export const DEFAULT_TENSION_CONFIG: TensionConfig = {
-  max_active_tensions: 200,
-  default_tension_ttl: 30,
-  tension_urgency_decay: 0.01,
-  min_urgency_threshold: 0.05,
+  max_active_tensions: Number(process.env.DG_MAX_ACTIVE_TENSIONS) || 200,
+  default_tension_ttl: Number(process.env.DG_TENSION_TTL) || 30,
+  tension_urgency_decay: Number(process.env.DG_TENSION_URGENCY_DECAY) || 0.01,
+  min_urgency_threshold: Number(process.env.DG_TENSION_MIN_URGENCY) || 0.05,
 };
 
 export interface TensionFile {
@@ -577,6 +577,21 @@ export interface DreamHistoryEntry {
     promoted_entities?: number;
     /** Edges blocked by promotion gate */
     blocked_by_gate: number;
+    /** Entity-level detail of edges promoted to the validated graph */
+    promoted_details?: Array<{
+      id: string;
+      from: string;
+      to: string;
+      relation: string;
+      confidence: number;
+    }>;
+    /** Entity-level detail of tension-worthy rejected edges */
+    tension_details?: Array<{
+      from: string;
+      to: string;
+      reason: string;
+      confidence: number;
+    }>;
   };
   tension_signals_created: number;
   tension_signals_resolved: number;
@@ -1638,10 +1653,10 @@ export interface EventRouterConfig {
 }
 
 export const DEFAULT_EVENT_ROUTER_CONFIG: EventRouterConfig = {
-  tension_threshold: 0.8,
-  runtime_error_threshold: 0.05,
-  cooldown_ms: 60_000,
-  max_auto_cycles_per_hour: 10,
+  tension_threshold: Number(process.env.DG_EVENT_TENSION_THRESHOLD) || 0.8,
+  runtime_error_threshold: Number(process.env.DG_EVENT_ERROR_THRESHOLD) || 0.05,
+  cooldown_ms: Number(process.env.DG_EVENT_COOLDOWN) || 60_000,
+  max_auto_cycles_per_hour: Number(process.env.DG_EVENT_MAX_CYCLES_HR) || 10,
 };
 
 // ===========================================================================
@@ -1707,10 +1722,12 @@ export interface NarrativeConfig {
 }
 
 export const DEFAULT_NARRATIVE_CONFIG: NarrativeConfig = {
-  narrative_interval: 10,
-  digest_interval: 50,
-  max_chapters: 100,
-  auto_narrate: true,
+  narrative_interval: Number(process.env.DG_NARRATIVE_INTERVAL) || 10,
+  digest_interval: Number(process.env.DG_NARRATIVE_DIGEST_INTERVAL) || 50,
+  max_chapters: Number(process.env.DG_NARRATIVE_MAX_CHAPTERS) || 100,
+  auto_narrate: process.env.DG_NARRATIVE_AUTO !== undefined
+    ? process.env.DG_NARRATIVE_AUTO !== "false"
+    : true,
 };
 
 // ===========================================================================
@@ -1816,13 +1833,15 @@ export interface SchedulerConfig {
 }
 
 export const DEFAULT_SCHEDULER_CONFIG: SchedulerConfig = {
-  enabled: true,
-  tick_interval_ms: 30_000,
-  max_runs_per_hour: 30,
-  global_cooldown_ms: 10_000,
-  nightmare_cooldown_ms: 300_000,
-  max_history: 500,
-  max_error_streak: 3,
+  enabled: process.env.DG_SCHEDULER_ENABLED !== undefined
+    ? process.env.DG_SCHEDULER_ENABLED !== "false"
+    : true,
+  tick_interval_ms: Number(process.env.DG_SCHEDULER_TICK) || 30_000,
+  max_runs_per_hour: Number(process.env.DG_SCHEDULER_MAX_RUNS_HR) || 30,
+  global_cooldown_ms: Number(process.env.DG_SCHEDULER_COOLDOWN) || 10_000,
+  nightmare_cooldown_ms: Number(process.env.DG_SCHEDULER_NIGHTMARE_COOLDOWN) || 300_000,
+  max_history: Number(process.env.DG_SCHEDULER_MAX_HISTORY) || 500,
+  max_error_streak: Number(process.env.DG_SCHEDULER_MAX_ERROR_STREAK) || 3,
 };
 
 // ===========================================================================

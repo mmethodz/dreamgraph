@@ -11,7 +11,9 @@
  *   dg detach [--instance <uuid>]
  *   dg instances [list] [--status <active|archived>]
  *   dg instances switch <uuid|name>
- *   dg status [--instance <uuid>]
+ *   dg status [<uuid|name>] [--instance <uuid>]
+ *   dg scan <uuid|name> [--depth shallow|deep] [--targets ...]
+ *   dg schedule <uuid|name> [--add|--delete|--run|--pause|--resume|--history]
  *   dg archive <uuid|name>
  *   dg destroy <uuid|name> [--confirm]
  *   dg export <uuid|name> --format <snapshot|docs|archetypes>
@@ -30,6 +32,8 @@ import { cmdMigrate } from "./commands/migrate.js";
 import { cmdStart } from "./commands/start.js";
 import { cmdStop } from "./commands/stop.js";
 import { cmdRestart } from "./commands/restart.js";
+import { cmdScan } from "./commands/scan.js";
+import { cmdSchedule } from "./commands/schedule.js";
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                           */
@@ -37,7 +41,7 @@ import { cmdRestart } from "./commands/restart.js";
 
 function printUsage(): void {
   console.log(`
-DreamGraph CLI — Instance Management (v6.0 La Catedral)
+DreamGraph CLI — Instance Management (v7.0 El Alarife)
 
 Usage:
   dg <command> [options]
@@ -48,7 +52,9 @@ Commands:
   detach                      Unbind an instance from its project
   instances [list]            List all known instances
   instances switch <query>    Set the active instance for the current shell
-  status                      Show instance cognitive state
+  status <query>              Show instance cognitive state
+  scan <query>                Trigger a project scan on a running instance
+  schedule <query> [--add|…]  Manage dream schedules on a running instance
   start <query> [--http]      Start a daemon server process
   stop <query> [--force]      Stop a running daemon process
   restart <query>             Restart a daemon process
@@ -162,6 +168,14 @@ async function main(): Promise<void> {
 
       case "status":
         await cmdStatus(positional.slice(1), flags);
+        break;
+
+      case "scan":
+        await cmdScan(positional.slice(1), flags);
+        break;
+
+      case "schedule":
+        await cmdSchedule(positional.slice(1), flags);
         break;
 
       case "start":

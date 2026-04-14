@@ -12,7 +12,8 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { readFile, writeFile, mkdir, readdir } from "node:fs/promises";
+import { readFile, mkdir, readdir } from "node:fs/promises";
+import { atomicWriteFile } from "../utils/atomic-write.js";
 import { resolve } from "node:path";
 import { getDataDir } from "../utils/paths.js";
 import { logger } from "../utils/logger.js";
@@ -332,7 +333,7 @@ export async function listSessions(): Promise<{ id: string; status: string; task
 async function persistSession(session: TaskSession): Promise<void> {
   const dir = sessionsDir();
   await mkdir(dir, { recursive: true });
-  await writeFile(sessionPath(session.id), JSON.stringify(session, null, 2));
+  await atomicWriteFile(sessionPath(session.id), JSON.stringify(session, null, 2));
 }
 
 /**

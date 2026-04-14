@@ -18,7 +18,8 @@
  * Design: "Think about how you think. Tune how you tune."
  */
 
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
+import { atomicWriteFile } from "../utils/atomic-write.js";
 import { existsSync } from "node:fs";
 import { engine } from "./engine.js";
 import { logger } from "../utils/logger.js";
@@ -389,7 +390,7 @@ async function saveMetaLog(log: MetaLogFile): Promise<void> {
   log.metadata.last_analysis = log.entries.length > 0
     ? log.entries[log.entries.length - 1].timestamp
     : null;
-  await writeFile(metaLogPath(), JSON.stringify(log, null, 2), "utf-8");
+  await atomicWriteFile(metaLogPath(), JSON.stringify(log, null, 2));
 }
 
 // ---------------------------------------------------------------------------

@@ -27,6 +27,7 @@ import { dataPath } from "../utils/paths.js";
 import { invalidateCache, loadJsonData } from "../utils/cache.js";
 import { success, error, safeExecute } from "../utils/errors.js";
 import { logger } from "../utils/logger.js";
+import { atomicWriteFile } from "../utils/atomic-write.js";
 import { recordSymbolLookup } from "../utils/metrics.js";
 import { withFileLock } from "../utils/mutex.js";
 import type {
@@ -158,7 +159,7 @@ async function loadSurface(): Promise<ApiSurface> {
 
 async function saveSurface(data: ApiSurface): Promise<void> {
   data.extracted_at = new Date().toISOString();
-  await fs.writeFile(surfacePath(), JSON.stringify(data, null, 2), "utf-8");
+  await atomicWriteFile(surfacePath(), JSON.stringify(data, null, 2));
   invalidateCache("api_surface.json");
   logger.debug("API surface saved to disk");
 }

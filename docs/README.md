@@ -1,151 +1,68 @@
 # DreamGraph Documentation
 
-> **v7.0.0 "El Alarife"** — Comprehensive documentation generated from DreamGraph's own knowledge graph.
+> **v7.0.0 "El Alarife"** — Documentation generated from DreamGraph's own knowledge graph.
 
 ---
 
 ## What is DreamGraph?
 
-DreamGraph is a **daemon-backed cognitive layer** and dreaming engine for software systems that builds a validated knowledge graph from code, workflows, schemas, and runtime signals, then continuously explores and verifies new relationships. It includes a built-in **web dashboard** for browser-based monitoring, schedule management, and runtime configuration.
+DreamGraph is a model-agnostic, graph-grounded development agent. It builds a validated knowledge graph from code, workflows, schemas, and runtime signals, then continuously explores, verifies, and refines relationships through speculative reasoning. It ships with a **CLI** (`dg`), an **MCP daemon**, a **VS Code extension**, and a **web dashboard**.
 
-It thinks in cycles: **dream → validate → learn → repeat** — and now schedules its own cognitive work autonomously.
+It thinks in cycles: **dream → validate → learn → repeat** — and schedules its own cognitive work autonomously.
 
 ---
 
 ## Documentation Map
 
-### [Architecture](architecture.md)
-System overview, cognitive states, state machine, promotion pipeline, feature dependency diagram, source layout, data directory, and configuration reference.
-
-### [Cognitive Engine — Deep Dive](cognitive-engine.md)
-How the engine thinks: state machine internals, 10 dream strategies (incl. LLM dream + PGO wave), normalization pipeline, speculative memory lifecycle, tension system, adversarial dreaming, causal/temporal analysis, v5.1 capabilities (metacognitive self-tuning, event-driven dreaming, continuous narrative), and v5.2 dream scheduling.
-
-### [Tools Reference](tools-reference.md)
-Complete catalog of all **67 MCP tools** (28 cognitive + 30 general + 9 discipline) and **26 MCP resources**, with parameters, types, defaults, and descriptions.
-
-### [Data Model](data-model.md)
-All **17 data stores**: dream graph, candidate edges, validated edges, tension log, dream history, threat log, archetypes, ADR log, UI registry, fact graph, capabilities, system story, schedules, API surface, lucid log, meta log, and event log. Full schemas and relationship map.
-
-### [Workflows](workflows.md)
-Step-by-step flows for all **15 operational processes**: dream cycle, nightmare cycle, normalization pipeline, tension lifecycle, edge promotion, federation, interruption protocol, living docs export, insight solidification, schedule execution, global install, daemon start, daemon stop, dashboard request lifecycle, and zero-touch bootstrap.
-
-### [The DreamGraph Chronicle](narrative.md)
-The system's auto-generated autobiography — 6 chapters covering 60 dream cycles, cumulative statistics, weekly digest, and trend analysis. Written by DreamGraph about itself.
-
-### Real-World Case Studies
-The root [README](../README.md) includes three proof-of-concept stories:
-- **Wake-Up Report** — Overnight autonomous bug-hunting on a production B2B SaaS (15 cycles, 8 tensions resolved, 0 critical bugs remaining)
-- **The SiteLedger Story** — 1,243 dream cycles building a validated knowledge graph of a Finnish construction platform (491 connections, 32K edges rejected)
-- **Cross-Platform Transcompilation** — One knowledge graph, four platforms (MAUI mobile → WPF desktop → PySide6 desktop → CLI) with zero guidance and 100% behavioral integrity
+| Document | Coverage |
+|---|---|
+| [Architecture](architecture.md) | System architecture, Mermaid diagrams, source layout, data directory, config tables |
+| [Cognitive Engine](cognitive-engine.md) | State machine, 10 dream strategies, normalization, tensions, adversarial, temporal, metacognition, scheduling |
+| [Tools Reference](tools-reference.md) | Complete 68-tool catalog with parameter tables and 26 resource URIs |
+| [Data Model](data-model.md) | All 21 data store schemas and relationship map |
+| [Workflows](workflows.md) | 15 step-by-step operational process flows |
+| [The Chronicle](narrative.md) | Auto-generated system autobiography — written by DreamGraph about itself |
+| [VS Code Extension](../extensions/vscode/) | Chat, Dashboard, Files Changed panels — installed automatically by the global install script |
 
 ---
 
 ## Quick Start
 
-### Installation
-
-**From source (dev mode):**
-
 ```bash
-npm install
-npm run build
+# Install (builds server, CLI, and VS Code extension)
+git clone https://github.com/mmethodz/dreamgraph.git
+cd dreamgraph
+.\scripts\install.ps1 -Force    # Windows
+# bash scripts/install.sh       # Linux / macOS
+
+# Create and start
+dg init my-project
+dg attach my-project /path/to/repo
+dg start my-project --http
+
+# Open in VS Code — extension auto-connects
+code /path/to/repo
 ```
 
-**Global install (adds `dg` and `dreamgraph` to PATH):**
-
-```powershell
-# Windows PowerShell
-.\scripts\install.ps1
-
-# Linux / macOS
-bash scripts/install.sh
-```
-
-After install, `dg --version` and `dreamgraph --help` work from any directory.
-
-### Create an Instance and Start the Daemon
-
-```bash
-# Create a UUID-scoped instance bound to your project
-dg init --name my-project --project /path/to/my-repo
-
-# Start the HTTP daemon
-dg start my-project
-
-# Check status
-dg status my-project
-```
-
-### Connect Your IDE
-
-The daemon exposes Streamable HTTP at `http://localhost:<port>/mcp`. Point your MCP client at it:
-
-**VS Code / Cursor** (`.vscode/mcp.json`):
-
-```json
-{
-  "servers": {
-    "dreamgraph": {
-      "type": "http",
-      "url": "http://localhost:8500/mcp"
-    }
-  }
-}
-```
-
-> STDIO mode is also available via `dg start my-project --foreground` for single-client setups where the MCP client manages the process.
-
-### First Dream Cycle
-
-New instances **bootstrap automatically** — when a fresh instance starts, DreamGraph runs `scan_project`, triggers a dream cycle, discovers implicit ADRs, and schedules 5 follow-up dreams. No manual intervention needed.
-
-To trigger additional dream cycles manually:
-
-```
-dream_cycle(strategy="all", max_dreams=100)
-```
-
-### Browse the Web Dashboard
-
-Once the daemon is running, open `http://localhost:<port>/` in your browser to access the web dashboard — live cognitive status, schedule management, runtime configuration, and knowledge graph documentation.
-
-### Schedule Recurring Dreams
-
-```
-schedule_dream(name="nightly", action="dream_cycle", trigger_type="interval", interval_seconds=300, max_runs=50)
-```
-
-### Check Status
-
-```
-cognitive_status()
-```
-
-### Read What It Learned
-
-```
-get_system_narrative(depth="technical")
-```
+New instances bootstrap automatically: scan, initial dream cycle, ADR discovery, and 5 follow-up dreams. No manual intervention needed.
 
 ---
 
-## Key Numbers (after 90 cycles)
+## Key Numbers
 
 | Metric | Value |
-|--------|-------|
-| Validated connections | 280+ |
-| Dream strategies | 10 |
-| MCP tools | 67 |
+|---|---|
+| MCP tools | 68 (28 cognitive · 31 sense/knowledge · 9 discipline) |
 | MCP resources | 26 |
-| Data stores | 17 |
+| Dream strategies | 10 (auto-adapting) |
+| CLI commands | 16 |
+| Cognitive states | 5 |
+| Data stores | 21 |
 | Workflows | 15 |
-| Features | 36 |
-| CLI commands | 14 |
-| Promotion threshold | 0.62 confidence |
-| Calibrated accuracy | 97.5%+ above threshold |
+| Promotion threshold | ≥ 0.62 combined confidence |
 
 ---
 
 ## License
 
-DreamGraph License v1.0
+DreamGraph License v1.0 (BSL-based) — see [LICENSE](../LICENSE)

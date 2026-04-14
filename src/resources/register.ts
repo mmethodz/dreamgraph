@@ -159,33 +159,36 @@ export function registerResources(server: McpServer): void {
         },
         tools: {
           foundation: {
-            count: 22,
+            count: 31,
             categories: [
-              "Code Senses (read_source_code, list_directory)",
+              "Code Senses (read_source_code, list_directory, create_file, edit_file, delete_file, rename_file)",
               "Git Senses (git_log, git_blame)",
               "Web Senses (fetch_web_page)",
               "DB Senses (query_db_schema)" + (config.database.connectionString ? " — configured" : " — not configured"),
-              "Runtime Senses (query_runtime_metrics)",
-              "Knowledge Tools (init_graph, get_workflow, search_data_model, query_resource)",
+              "Runtime Senses (query_runtime_metrics, query_self_metrics)",
+              "Knowledge Tools (init_graph, scan_project, get_workflow, search_data_model, query_resource)",
               "Enrichment (enrich_seed_data — targets: features, workflows, data_model, capabilities)",
               "Visual Architect (generate_visual_flow)",
               "ADR Historian (record/query/deprecate_architecture_decision)",
               "UI Registry (register/query_ui_elements, generate_ui_migration_plan)",
               "Insight Injection (solidify_cognitive_insight)",
               "Living Docs (export_living_docs)",
+              "API Surface (extract/query/modify_api_surface)",
             ],
           },
           cognitive: {
-            count: 23,
+            count: 28,
             categories: [
               "Core Cycle (dream_cycle, normalize_dreams, nightmare_cycle)",
-              "Introspection (cognitive_status, get_dream_insights, metacognitive_analysis)",
+              "Introspection (cognitive_status, get_dream_insights, query_dreams, metacognitive_analysis)",
               "Temporal & Causal (get_temporal_insights, get_causal_insights)",
               "Tension (resolve_tension, get_remediation_plan)",
               "Federation (export/import_dream_archetypes)",
               "Narrative (get_system_story, get_system_narrative)",
               "Scheduling (schedule_dream, list/update/delete/run_schedule, get_schedule_history)",
               "Events (dispatch_cognitive_event, clear_dreams)",
+              "Knowledge Backbone (graph_rag_retrieve, get_cognitive_preamble)",
+              "Lucid Dreaming (lucid_dream, lucid_action, wake_from_lucid)",
             ],
           },
           discipline: {
@@ -201,7 +204,9 @@ export function registerResources(server: McpServer): void {
           "dream://adrs", "dream://ui-registry", "dream://threats",
           "dream://archetypes", "dream://metacognition", "dream://events",
           "dream://story", "dream://schedules", "dream://schedule-history",
+          "dream://context", "dream://lucid",
           "discipline://manifest",
+          "ops://api-surface", "ops://metrics",
         ],
         cognitive_engine: {
           states: ["AWAKE", "REM", "NORMALIZING", "NIGHTMARE"],
@@ -262,8 +267,6 @@ export function registerResources(server: McpServer): void {
       };
     }
   );
-
-  logger.info("Registered 6 resources");
 
   // -----------------------------------------------------------------------
   // ops://metrics — Runtime instrumentation snapshot

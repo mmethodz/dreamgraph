@@ -1,5 +1,5 @@
 /**
- * DreamGraph v6.0 "La Catedral" — Instance Architecture Types.
+ * DreamGraph v7.0 "El Alarife" — Instance Architecture Types.
  *
  * Defines the identity model, master registry schema, policy profiles,
  * and project binding types for UUID-isolated DreamGraph instances.

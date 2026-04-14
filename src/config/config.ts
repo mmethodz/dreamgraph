@@ -98,14 +98,14 @@ export const config = {
    */
   database: {
     connectionString: process.env.DATABASE_URL ?? "",
-    maxConnections: 3,
-    statementTimeoutMs: 5_000,
+    maxConnections: Number(process.env.DG_DB_MAX_CONNECTIONS) || 3,
+    statementTimeoutMs: Number(process.env.DG_DB_STATEMENT_TIMEOUT) || 5_000,
     /** Max ms to wait for a free connection from the pool (0 = forever). */
-    connectionTimeoutMs: 5_000,
+    connectionTimeoutMs: Number(process.env.DG_DB_CONNECTION_TIMEOUT) || 5_000,
     /** Close idle connections after this many ms to avoid stale sockets. */
-    idleTimeoutMs: 30_000,
+    idleTimeoutMs: Number(process.env.DG_DB_IDLE_TIMEOUT) || 30_000,
     /** Hard cap on the entire query_db_schema operation (acquire + query). */
-    operationTimeoutMs: 10_000,
+    operationTimeoutMs: Number(process.env.DG_DB_OPERATION_TIMEOUT) || 10_000,
   },
 
   /**
@@ -122,7 +122,7 @@ export const config = {
   },
 
   /**
-   * v6.0 La Catedral — Instance architecture configuration.
+   * v7.0 El Alarife — Instance architecture configuration.
    */
   instance: {
     /** UUID of the active instance (if running in instance mode). */
@@ -140,7 +140,7 @@ export const config = {
   /** v5.2 — Dream scheduler configuration */
   scheduler: parseSchedulerConfig(),
 
-  /** v6.0.1 — LLM provider configuration for dream engine */
+  /** v7.0 — LLM provider configuration for dream engine */
   llm: parseLlmConfig(),
 } as const;
 

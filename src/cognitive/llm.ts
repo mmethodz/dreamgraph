@@ -24,7 +24,7 @@
  *
  *   Normalizer (semantic validation):
  *     DREAMGRAPH_LLM_NORMALIZER_MODEL       = model name (default: provider-specific)
- *     DREAMGRAPH_LLM_NORMALIZER_TEMPERATURE = temperature (default: 0.7)
+ *     DREAMGRAPH_LLM_NORMALIZER_TEMPERATURE = temperature (default: 0.1)
  *     DREAMGRAPH_LLM_NORMALIZER_MAX_TOKENS  = max response tokens (default: 2048)
  */
 
@@ -530,16 +530,20 @@ export function parseLlmConfig(): LlmConfig {
  * Parse per-component LLM settings.
  * Reads DREAMGRAPH_LLM_{COMPONENT}_MODEL / TEMPERATURE / MAX_TOKENS,
  * falling back to provider-specific defaults from the base LlmConfig.
+ * The `defaultTemperature` override allows the normalizer to default to
+ * low temperature (0.1) for consistent, deterministic validation even
+ * when no env var is set.
  */
 function parseComponentConfig(
   component: "DREAMER" | "NORMALIZER",
   base: LlmConfig,
+  defaultTemperature?: number,
 ): { model: string; temperature: number; maxTokens: number } {
   const prefix = `DREAMGRAPH_LLM_${component}`;
   const model = process.env[`${prefix}_MODEL`] ?? base.model;
   const temperature = process.env[`${prefix}_TEMPERATURE`]
     ? parseFloat(process.env[`${prefix}_TEMPERATURE`]!)
-    : base.temperature;
+    : (defaultTemperature ?? base.temperature);
   const maxTokens = process.env[`${prefix}_MAX_TOKENS`]
     ? parseInt(process.env[`${prefix}_MAX_TOKENS`]!, 10)
     : base.maxTokens;
@@ -563,12 +567,17 @@ export function getDreamerLlmConfig(): { model: string; temperature: number; max
   return _dreamerConfig;
 }
 
-/** Get normalizer-specific LLM settings (model, temperature, maxTokens) */
+/**
+ * Get normalizer-specific LLM settings (model, temperature, maxTokens).
+ * Normalizer defaults to temperature 0.1 (low) for consistent, deterministic
+ * validation judgments. This is intentionally different from the dreamer's
+ * creative 0.7-0.9 temperature — the normalizer is a strict critic.
+ */
 export function getNormalizerLlmConfig(): { model: string; temperature: number; maxTokens: number } {
   if (!_normalizerConfig) {
-    _normalizerConfig = parseComponentConfig("NORMALIZER", getLlmConfig());
+    _normalizerConfig = parseComponentConfig("NORMALIZER", getLlmConfig(), 0.1);
     const base = getLlmConfig();
-    if (_normalizerConfig.model !== base.model || _normalizerConfig.temperature !== base.temperature) {
+    if (_normalizerConfig.model !== base.model || _normalizerConfig.temperature !== 0.1) {
       logger.info(
         `LLM normalizer config: model=${_normalizerConfig.model}, temp=${_normalizerConfig.temperature}, maxTokens=${_normalizerConfig.maxTokens}`
       );
@@ -611,6 +620,12 @@ let _config: LlmConfig | null = null;
 export function initLlmProvider(cfg?: LlmConfig): LlmProvider {
   const c = cfg ?? parseLlmConfig();
   _config = c;
+
+  // Clear per-component caches so they re-parse from the new base config
+  // on next access. Without this, a provider change (e.g., ollama→openai)
+  // via dashboard would leave stale model/temp values in memory.
+  _dreamerConfig = null;
+  _normalizerConfig = null;
 
   switch (c.provider) {
     case "ollama":

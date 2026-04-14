@@ -1,5 +1,5 @@
 /**
- * DreamGraph v6.1 "La Catedral" — Daemon Utilities.
+ * DreamGraph v7.0 "El Alarife" — Daemon Utilities.
  *
  * Shared utilities for dg start / stop / restart / status commands.
  * Implements ADR-003 (server.json metadata), ADR-004 (port collision),

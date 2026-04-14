@@ -204,7 +204,7 @@ export interface ToolError {
 export type ToolResponse<T = unknown> = ToolSuccess<T> | ToolError;
 
 // ---------------------------------------------------------------------------
-// Operational Layer — API Surface (v6.2)
+// Operational Layer — API Surface (v7.0)
 // ---------------------------------------------------------------------------
 
 /** How an operational artifact was produced */
@@ -482,7 +482,7 @@ export {
 } from "../cognitive/types.js";
 
 // ---------------------------------------------------------------------------
-// v6.0 — Discipline Execution System  (ADR-001 through ADR-005)
+// v7.0 — Discipline Execution System  (ADR-001 through ADR-005)
 // ---------------------------------------------------------------------------
 
 export type {

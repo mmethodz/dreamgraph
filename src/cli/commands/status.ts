@@ -2,7 +2,8 @@
  * `dg status` — Show instance cognitive state overview.
  *
  * Usage:
- *   dg status [--instance <uuid|name>]
+ *   dg status <uuid|name>
+ *   dg status [--instance <uuid|name>]   (backward-compatible)
  */
 
 import { resolve } from "node:path";
@@ -35,24 +36,26 @@ export async function cmdStatus(
 dg status — Show instance cognitive state
 
 Usage:
-  dg status [options]
+  dg status <uuid|name>
+  dg status --instance <uuid|name>    (backward-compatible)
 
 Options:
-  --instance <uuid|name>    Target instance (default: DREAMGRAPH_INSTANCE_UUID env)
+  --instance <uuid|name>    Target instance (also accepted as positional arg)
   --master-dir <path>       Override master directory
   --json                    Output structured JSON (for scripting)
 `);
     return;
   }
 
+  // Positional arg takes precedence, then --instance flag, then env var
   const query =
-    typeof flags.instance === "string"
-      ? flags.instance
-      : process.env.DREAMGRAPH_INSTANCE_UUID;
+    _positional[0] ??
+    (typeof flags.instance === "string" ? flags.instance : undefined) ??
+    process.env.DREAMGRAPH_INSTANCE_UUID;
 
   if (!query) {
     console.error(
-      "No instance specified. Use --instance <uuid|name> or set DREAMGRAPH_INSTANCE_UUID.",
+      "No instance specified. Usage: dg status <uuid|name>  (or --instance <uuid|name>)",
     );
     process.exit(1);
   }

@@ -66,7 +66,7 @@ graph TB
 
     subgraph "MCP Protocol Layer"
         Server["MCP Server<br/>STDIO / Streamable HTTP"]
-        Tools["67 Tools"]
+        Tools["68 Tools"]
         Resources["26 Resources"]
     end
 
@@ -245,12 +245,15 @@ src/
 ├── cli/                     # CLI instance manager — `dg` binary (v6.0 La Catedral)
 │   ├── dg.ts                # Entry point — arg tokenizer + command router
 │   ├── utils/
-│   │   └── daemon.ts        # Shared daemon utilities (PID, ports, health, locks, logs)
+│   │   ├── daemon.ts        # Shared daemon utilities (PID, ports, health, locks, logs)
+│   │   └── mcp-call.ts      # MCP tool call helper for CLI → daemon communication
 │   └── commands/
 │       ├── init.ts          # dg init — create new instance
 │       ├── attach.ts        # dg attach / dg detach — project binding
 │       ├── instances.ts     # dg instances list / switch
 │       ├── status.ts        # dg status — cognitive state overview + daemon info
+│       ├── scan.ts          # dg scan — trigger project scan on running daemon
+│       ├── schedule.ts      # dg schedule — manage dream schedules on running daemon
 │       ├── lifecycle-ops.ts # dg archive / dg destroy
 │       ├── export.ts        # dg export — snapshot / docs / archetypes
 │       ├── fork.ts          # dg fork — copy instance with new UUID
@@ -280,16 +283,19 @@ src/
 ├── api/
 │   └── routes.ts            # REST API endpoints for extension / HTTP clients (§8.1)
 ├── resources/
-│   └── register.ts          # 6 system:// MCP resources
+│   └── register.ts          # 7 MCP resources (6 system:// + ops://metrics)
 ├── types/
 │   └── index.ts             # Re-exports
 └── utils/
+    ├── atomic-write.ts      # Atomic file writes with temp-file + fsync + rename
     ├── cache.ts             # In-memory JSON cache + pluggable dataDir resolver
     ├── engine-env.ts        # Per-instance engine.env loader (KEY=VALUE parser)
     ├── errors.ts            # Error handling + response factories
     ├── logger.ts            # Stderr logger (protects STDIO stream)
+    ├── metrics.ts           # Runtime instrumentation counters
     ├── mutex.ts             # Async file mutex with instance-aware key resolver
-    └── paths.ts             # Lazy dataPath() utility for instance-aware paths
+    ├── paths.ts             # Lazy dataPath() utility for instance-aware paths
+    └── senses.ts            # Shared helpers for sense tools (repo resolution, path guards)
 scripts/
 ├── install.ps1              # Windows PowerShell global installer
 ├── install.sh               # Linux/macOS Bash global installer

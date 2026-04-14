@@ -15,6 +15,7 @@
 import fs from "node:fs/promises";
 import { dataPath } from "./paths.js";
 import { logger } from "./logger.js";
+import { atomicWriteFile } from "./atomic-write.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -203,10 +204,9 @@ export function getMetricsSnapshot(): MetricsSnapshot {
 export async function flushMetricsToDisk(): Promise<void> {
   try {
     const snapshot = getMetricsSnapshot();
-    await fs.writeFile(
+    await atomicWriteFile(
       dataPath("metrics_snapshot.json"),
       JSON.stringify(snapshot, null, 2),
-      "utf-8",
     );
     logger.debug("Metrics snapshot flushed to disk");
   } catch (err) {

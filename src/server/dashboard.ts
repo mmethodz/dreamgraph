@@ -931,7 +931,23 @@ async function renderConfig(savedSection?: string): Promise<string> {
     : '<span class="badge badge-red" style="margin-left:8px">not set</span>';
   const apiKeyPlaceholder = hasApiKey ? "(set \u2014 leave blank to keep)" : "sk-... or API key";
 
-  body += `<h2>LLM</h2>
+  body += `<h2>LLM</h2>`;
+
+  // LLM not-configured guidance banner
+  if (llmCfg.provider === "none" || !llmCfg.provider) {
+    body += `<div class="card" style="border-left:4px solid var(--accent);margin-bottom:16px;background:var(--card-bg)">
+      <strong style="color:var(--accent)">LLM Not Configured</strong>
+      <p style="color:var(--text-dim);margin:6px 0 0 0;font-size:0.9rem;line-height:1.5">
+        DreamGraph works without LLM using 8 structural heuristic strategies, but configuring a model
+        unlocks <strong>creative dreaming</strong> (novel edge discovery) and <strong>semantic validation</strong>
+        (LLM-assisted normalization). Select a provider below and save to get started.
+        For local inference, <strong>Ollama</strong> with a small model works well.
+        The normalizer uses low temperature (0.1) by default for precise, consistent validation.
+      </p>
+    </div>`;
+  }
+
+  body += `
   <div class="section-group">
 
     <!-- Provider -->
@@ -1163,6 +1179,7 @@ async function renderConfig(savedSection?: string): Promise<string> {
       btn.disabled = true;
       btn.textContent = 'Testing…';
       res_el.className = 'db-test-result';
+      res_el.textContent = '';
       res_el.style.display = 'none';
       try {
         const r = await fetch('/config/test-db', {
@@ -1175,9 +1192,11 @@ async function renderConfig(savedSection?: string): Promise<string> {
           ? '✓ ' + j.message + ' (' + j.latencyMs + 'ms)'
           : '✗ ' + j.message + (j.latencyMs ? ' (' + j.latencyMs + 'ms)' : '');
         res_el.className = 'db-test-result ' + (j.ok ? 'ok' : 'fail');
+        res_el.style.display = 'block';
       } catch(e) {
         res_el.textContent = '✗ Request failed: ' + e.message;
         res_el.className = 'db-test-result fail';
+        res_el.style.display = 'block';
       } finally {
         btn.disabled = false;
         btn.textContent = 'Test Connection';
@@ -1284,6 +1303,22 @@ async function renderConfig(savedSection?: string): Promise<string> {
         <button type="submit" class="btn btn-primary">Save Narrative</button>
       </div>
     </form>
+  </div>`;
+
+  // ---- Advanced Configuration Note ----
+  const scope2 = getActiveScope();
+  const envPath = scope2
+    ? `<code>${esc(scope2.configDir.replace(/\\/g, "/"))}/engine.env</code>`
+    : `<code>~/.dreamgraph/&lt;instance-uuid&gt;/config/engine.env</code>`;
+  body += `<h2>Advanced Tuning</h2>
+  <div class="card">
+    <p style="margin:0;color:var(--text-dim);font-size:0.9rem;line-height:1.6">
+      Promotion thresholds, decay rates, dream strategy budgets, normalizer batch sizes,
+      memory TTL, and other cognitive engine internals can be tuned via environment
+      variables in ${envPath}.<br>
+      Open the file to see all available <code>DG_*</code> keys with their defaults
+      (commented out). Changes take effect on server restart.
+    </p>
   </div>`;
 
   return shell("Config", body, "config");

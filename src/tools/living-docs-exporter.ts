@@ -15,7 +15,8 @@
  */
 
 import { z } from "zod";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, mkdir } from "node:fs/promises";
+import { atomicWriteFile } from "../utils/atomic-write.js";
 import { existsSync } from "node:fs";
 import { resolve, join, relative, isAbsolute } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -943,7 +944,7 @@ export function registerLivingDocsTools(server: McpServer): void {
             const dir = resolve(filePath, "..");
             await mkdir(dir, { recursive: true });
             const bytes = Buffer.byteLength(buf.content, "utf-8");
-            await writeFile(filePath, buf.content, "utf-8");
+            await atomicWriteFile(filePath, buf.content);
             created.push({
               path: relative(outDir, filePath).replace(/\\/g, "/"),
               section: buf.section,

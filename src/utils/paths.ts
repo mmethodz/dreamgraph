@@ -1,5 +1,5 @@
 /**
- * DreamGraph v6.0 "La Catedral" — Data path resolver.
+ * DreamGraph v7.0 "El Alarife" — Data path resolver.
  *
  * Provides a lazy-evaluated data directory that works in both legacy
  * (flat data/) and UUID-scoped instance modes.

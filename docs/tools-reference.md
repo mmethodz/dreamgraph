@@ -1,6 +1,6 @@
 # DreamGraph Tools Reference
 
-> Complete catalog of all 67 MCP tools (28 cognitive + 30 general + 9 discipline) and 26 MCP resources.
+> Complete catalog of all 68 MCP tools (28 cognitive + 31 general + 9 discipline) and 26 MCP resources.
 
 The DreamGraph Architect actively calls these tools during conversations to build, query, enrich, and maintain the knowledge graph. Any MCP-compatible client can also invoke them directly.
 
@@ -288,7 +288,7 @@ End an active lucid dream session — persist accepted edges and return to AWAKE
 
 ---
 
-## General Tools (30)
+## General Tools (31)
 
 Registered in [src/tools/register.ts](../src/tools/register.ts). These provide I/O, visualization, documentation, and operational knowledge capabilities.
 

@@ -1,5 +1,5 @@
 /**
- * DreamGraph v6.0 "La Catedral" — Instance Lifecycle Manager.
+ * DreamGraph v7.0 "El Alarife" — Instance Lifecycle Manager.
  *
  * Creates, loads, and manages DreamGraph instance directories.
  * Provides the bridge between legacy flat data/ mode and UUID-scoped mode.
@@ -16,7 +16,8 @@
  *   for existing deployments.
  */
 
-import { mkdir, writeFile, readFile, copyFile, readdir, rename } from "node:fs/promises";
+import { mkdir, readFile, copyFile, readdir } from "node:fs/promises";
+import { atomicWriteFile } from "../utils/atomic-write.js";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -243,10 +244,9 @@ export async function createInstance(
     total_tool_calls: 0,
   };
 
-  await writeFile(
+  await atomicWriteFile(
     resolve(instanceRoot, "instance.json"),
     JSON.stringify(instance, null, 2),
-    "utf-8",
   );
 
   // 3. Write config files
@@ -254,10 +254,9 @@ export async function createInstance(
     ...DEFAULT_POLICIES,
     profile: opts.policyProfile ?? "strict",
   };
-  await writeFile(
+  await atomicWriteFile(
     resolve(instanceRoot, "config", "policies.json"),
     JSON.stringify(policies, null, 2),
-    "utf-8",
   );
 
   const mcpConfig: InstanceMcpConfig = {
@@ -273,16 +272,14 @@ export async function createInstance(
     data_dir: "./data",
     repos: opts.repos ?? {},
   };
-  await writeFile(
+  await atomicWriteFile(
     resolve(instanceRoot, "config", "mcp.json"),
     JSON.stringify(mcpConfig, null, 2),
-    "utf-8",
   );
 
-  await writeFile(
+  await atomicWriteFile(
     resolve(instanceRoot, "config", "schema_version.json"),
     JSON.stringify({ schema_version: INSTANCE_SCHEMA_VERSION, migrated_at: now }, null, 2),
-    "utf-8",
   );
 
   // engine.env — per-instance LLM & secrets configuration
@@ -310,12 +307,73 @@ export async function createInstance(
     "# DREAMGRAPH_LLM_NORMALIZER_TEMPERATURE=0.1",
     "# DREAMGRAPH_LLM_NORMALIZER_MAX_TOKENS=4096",
     "",
+    "# ===================================================================",
+    "# ADVANCED TUNING — for experienced users only.",
+    "# These control cognitive engine internals. The defaults work well",
+    "# for most projects. Only change them if you know what you're doing.",
+    "# ===================================================================",
+    "",
+    "# --- Promotion & Retention Thresholds ---",
+    "# Minimum combined confidence for edge promotion to validated graph",
+    "# DG_PROMOTION_CONFIDENCE=0.62",
+    "# Minimum plausibility score for promotion",
+    "# DG_PROMOTION_PLAUSIBILITY=0.45",
+    "# Minimum evidence score for promotion",
+    "# DG_PROMOTION_EVIDENCE=0.4",
+    "# Minimum distinct evidence signals for promotion",
+    "# DG_PROMOTION_EVIDENCE_COUNT=2",
+    "# Minimum plausibility for retention as latent (below = rejected)",
+    "# DG_RETENTION_PLAUSIBILITY=0.35",
+    "# Maximum contradiction score before rejection",
+    "# DG_MAX_CONTRADICTION=0.3",
+    "",
+    "# --- Dream Decay ---",
+    "# Edge time-to-live in dream cycles (removed when TTL reaches 0)",
+    "# DG_DECAY_TTL=8",
+    "# Confidence reduction per cycle if not reinforced",
+    "# DG_DECAY_RATE=0.05",
+    "# Reinforcement memory TTL (cycles of inactivity before forgetting)",
+    "# DG_MEMORY_TTL_CYCLES=30",
+    "",
+    "# --- Tension System ---",
+    "# Max active (unresolved) tensions",
+    "# DG_MAX_ACTIVE_TENSIONS=200",
+    "# Default TTL for new tensions (cycles before auto-expire)",
+    "# DG_TENSION_TTL=30",
+    "# Urgency decay per cycle for non-recurring tensions",
+    "# DG_TENSION_URGENCY_DECAY=0.01",
+    "",
+    "# --- Adaptive Dream Strategy ---",
+    "# Consecutive 0-yield cycles before a strategy gets benched",
+    "# DG_BARREN_THRESHOLD=3",
+    "# Cycles between probe runs for benched strategies",
+    "# DG_PROBE_INTERVAL=6",
+    "# Strategy yield history length",
+    "# DG_STRATEGY_HISTORY=12",
+    "# LLM dream budget as fraction of total (0.0-1.0)",
+    "# DG_LLM_BUDGET=0.35",
+    "# PGO wave budget as fraction of total (0.0-1.0)",
+    "# DG_PGO_BUDGET=0.15",
+    "",
+    "# --- Normalizer Tuning ---",
+    "# Max edges per LLM semantic validation batch",
+    "# DG_NORMALIZER_BATCH_SIZE=20",
+    "# Minimum confidence for LLM semantic evaluation of latent edges",
+    "# DG_NORMALIZER_LLM_THRESHOLD=0.35",
+    "",
+    "# --- Database ---",
+    "# Max concurrent PostgreSQL connections",
+    "# DG_DB_MAX_CONNECTIONS=3",
+    "# Statement timeout (ms)",
+    "# DG_DB_STATEMENT_TIMEOUT=5000",
+    "# Operation timeout (ms) — hard cap on entire query_db_schema",
+    "# DG_DB_OPERATION_TIMEOUT=10000",
+    "",
   ].join("\n");
 
-  await writeFile(
+  await atomicWriteFile(
     resolve(instanceRoot, "config", "engine.env"),
     engineEnvContent,
-    "utf-8",
   );
 
   // 4. Write data stubs — copy from templates/default/ first, fall back to DATA_STUBS
@@ -346,7 +404,7 @@ export async function createInstance(
     for (const [filename, stub] of Object.entries(DATA_STUBS)) {
       const filePath = resolve(dataDir, filename);
       if (!existsSync(filePath)) {
-        await writeFile(filePath, JSON.stringify(stub, null, 2), "utf-8");
+        await atomicWriteFile(filePath, JSON.stringify(stub, null, 2));
       }
     }
     logger.debug("Data stubs written from in-code DATA_STUBS fallback");
@@ -402,10 +460,8 @@ export async function updateInstanceCounters(
     }
     instance.last_active_at = updates.last_active_at ?? new Date().toISOString();
 
-    // Atomic write: tmp file + rename to avoid partial-read races
-    const tmp = instancePath + ".tmp";
-    await writeFile(tmp, JSON.stringify(instance, null, 2), "utf-8");
-    await rename(tmp, instancePath);
+    // Atomic write via utility (includes fsync before rename)
+    await atomicWriteFile(instancePath, JSON.stringify(instance, null, 2));
   } catch (err) {
     logger.warn(`Failed to update instance counters: ${err instanceof Error ? err.message : err}`);
   }

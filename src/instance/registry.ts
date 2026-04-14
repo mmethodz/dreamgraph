@@ -1,5 +1,5 @@
 /**
- * DreamGraph v6.0 "La Catedral" — Master Registry.
+ * DreamGraph v7.0 "El Alarife" — Master Registry.
  *
  * Manages the global `instances.json` file that indexes all known
  * DreamGraph instances under the master directory (~/.dreamgraph/).
@@ -14,7 +14,8 @@
  *   listInstances()      — Get all entries, optionally filtered
  */
 
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, mkdir } from "node:fs/promises";
+import { atomicWriteFile } from "../utils/atomic-write.js";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import type {
@@ -106,7 +107,7 @@ export async function loadRegistry(
     schema_version: INSTANCE_SCHEMA_VERSION,
     instances: [],
   };
-  await writeFile(filePath, JSON.stringify(empty, null, 2), "utf-8");
+  await atomicWriteFile(filePath, JSON.stringify(empty, null, 2));
   logger.info(`Initialized empty master registry: ${filePath}`);
   return { registry: empty, masterDir: dir };
 }
@@ -122,7 +123,7 @@ export async function saveRegistry(
   const filePath = registryPath(dir);
 
   await withFileLock(REGISTRY_LOCK_KEY, async () => {
-    await writeFile(filePath, JSON.stringify(registry, null, 2), "utf-8");
+    await atomicWriteFile(filePath, JSON.stringify(registry, null, 2));
   });
 }
 
@@ -163,7 +164,7 @@ export async function registerInstance(
     }
 
     const filePath = registryPath(dir);
-    await writeFile(filePath, JSON.stringify(registry, null, 2), "utf-8");
+    await atomicWriteFile(filePath, JSON.stringify(registry, null, 2));
   });
 }
 
@@ -188,7 +189,7 @@ export async function deregisterInstance(
     }
 
     const filePath = registryPath(dir);
-    await writeFile(filePath, JSON.stringify(registry, null, 2), "utf-8");
+    await atomicWriteFile(filePath, JSON.stringify(registry, null, 2));
     logger.info(`Deregistered instance ${uuid}`);
     return true;
   });
@@ -215,7 +216,7 @@ export async function updateInstanceEntry(
     Object.assign(entry, updates);
 
     const filePath = registryPath(dir);
-    await writeFile(filePath, JSON.stringify(registry, null, 2), "utf-8");
+    await atomicWriteFile(filePath, JSON.stringify(registry, null, 2));
     logger.debug(`Updated registry entry for ${uuid}: ${JSON.stringify(updates)}`);
     return true;
   });

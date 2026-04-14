@@ -1,5 +1,5 @@
 /**
- * DreamGraph v6.0 "La Catedral" — Instance Scope.
+ * DreamGraph v7.0 "El Alarife" — Instance Scope.
  *
  * Enforces file-system isolation for a single DreamGraph instance.
  * Every file I/O operation should be validated through this class

@@ -21,6 +21,7 @@
  */
 
 import fs from "node:fs/promises";
+import { atomicWriteFile } from "../utils/atomic-write.js";
 import path from "node:path";
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -29,6 +30,7 @@ import { dataPath } from "../utils/paths.js";
 import { invalidateCache } from "../utils/cache.js";
 import { success, error, safeExecute } from "../utils/errors.js";
 import { logger } from "../utils/logger.js";
+import { getLlmConfig } from "../cognitive/llm.js";
 import type {
   Feature,
   Workflow,
@@ -574,7 +576,7 @@ interface InitGraphResult {
 
 async function writeSeedFile(filename: string, data: unknown): Promise<void> {
   const filePath = dataPath(filename);
-  await fs.writeFile(filePath, JSON.stringify(data, null, 2), "utf-8");
+  await atomicWriteFile(filePath, JSON.stringify(data, null, 2));
   invalidateCache(filename);
   logger.info(`init_graph: wrote ${filename} (${JSON.stringify(data).length} bytes)`);
 }
@@ -734,6 +736,23 @@ export function registerInitGraphTool(server: McpServer): void {
           `${allDataModel.length} data model entities with ${linkCount} cross-links. ` +
           `${Object.keys(index.entities).length} index entries written.`;
 
+        // Check LLM readiness and add guidance if not configured
+        let llmAdvice = "";
+        try {
+          const llmCfg = getLlmConfig();
+          if (llmCfg.provider === "none" || !llmCfg.provider) {
+            llmAdvice =
+              "\n\nNEXT STEP: Configure an LLM model to unlock full dreaming and semantic validation. " +
+              "Without LLM, DreamGraph uses structural heuristics only (8 strategies). " +
+              "With LLM, the dreamer generates creative connections and the normalizer validates them semantically. " +
+              "Configure via: (1) Dashboard /config page > LLM section, or " +
+              "(2) Edit engine.env in the instance config directory. " +
+              "Recommended: Set DREAMGRAPH_LLM_PROVIDER=ollama with a local model for autonomous dreaming, " +
+              "or DREAMGRAPH_LLM_PROVIDER=openai/anthropic with an API key. " +
+              "The normalizer uses low temperature (0.1) by default for consistent validation.";
+          }
+        } catch { /* LLM module not loaded yet — skip advice */ }
+
         logger.info(`init_graph: ${summary}`);
 
         return success<InitGraphResult>({
@@ -745,7 +764,7 @@ export function registerInitGraphTool(server: McpServer): void {
           index_entries: Object.keys(index.entities).length,
           cross_links_created: linkCount,
           files_written: writtenFiles,
-          message: summary,
+          message: summary + llmAdvice,
         });
       });
 

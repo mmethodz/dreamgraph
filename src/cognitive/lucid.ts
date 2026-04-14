@@ -16,7 +16,8 @@
  *   - All sessions are fully logged to data/lucid_log.json
  */
 
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
+import { atomicWriteFile } from "../utils/atomic-write.js";
 import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { loadJsonArray } from "../utils/cache.js";
@@ -355,7 +356,7 @@ async function appendSession(result: LucidResult): Promise<void> {
   log.metadata.total_sessions = log.sessions.length;
   log.metadata.last_session = result.timestamp;
   const p = dataPath(LUCID_LOG);
-  await writeFile(p, JSON.stringify(log, null, 2), "utf-8");
+  await atomicWriteFile(p, JSON.stringify(log, null, 2));
   logger.info(`Lucid session logged (total: ${log.metadata.total_sessions})`);
 }
 
@@ -401,7 +402,7 @@ async function persistAcceptedEdges(edges: ValidatedEdge[]): Promise<void> {
   file.metadata.total_validated = file.edges.length;
   file.metadata.last_validation = new Date().toISOString();
   const vPath = dataPath("validated_edges.json");
-  await writeFile(vPath, JSON.stringify(file, null, 2), "utf-8");
+  await atomicWriteFile(vPath, JSON.stringify(file, null, 2));
   logger.info(`${edges.length} lucid-accepted edges persisted to validated_edges.json`);
 }
 

@@ -1,5 +1,5 @@
 /**
- * DreamGraph v6.0 "La Catedral" — Instance module barrel.
+ * DreamGraph v7.0 "El Alarife" — Instance module barrel.
  *
  * Re-exports all instance architecture primitives.
  */

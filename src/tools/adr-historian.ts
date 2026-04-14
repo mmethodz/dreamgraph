@@ -13,7 +13,8 @@
  */
 
 import { z } from "zod";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
+import { atomicWriteFile } from "../utils/atomic-write.js";
 import { existsSync } from "node:fs";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { dataPath } from "../utils/paths.js";
@@ -65,7 +66,7 @@ async function loadADRLog(): Promise<ADRLogFile> {
 async function saveADRLog(data: ADRLogFile): Promise<void> {
   data.metadata.total_decisions = data.decisions.length;
   data.metadata.last_updated = new Date().toISOString();
-  await writeFile(adrPath(), JSON.stringify(data, null, 2), "utf-8");
+  await atomicWriteFile(adrPath(), JSON.stringify(data, null, 2));
   logger.debug("ADR log saved to disk");
 }
 

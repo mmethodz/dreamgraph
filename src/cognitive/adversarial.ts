@@ -23,7 +23,8 @@
  * It only generates threat reports.
  */
 
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
+import { atomicWriteFile } from "../utils/atomic-write.js";
 import { existsSync } from "node:fs";
 import { loadJsonArray } from "../utils/cache.js";
 import { dataPath } from "../utils/paths.js";
@@ -423,7 +424,7 @@ async function loadThreatLog(): Promise<ThreatLogFile> {
 
 async function saveThreatLog(data: ThreatLogFile): Promise<void> {
   data.metadata.total_threats = data.threats.length;
-  await writeFile(threatLogPath(), JSON.stringify(data, null, 2), "utf-8");
+  await atomicWriteFile(threatLogPath(), JSON.stringify(data, null, 2));
 }
 
 function emptyThreatLog(): ThreatLogFile {

@@ -143,7 +143,7 @@ export function createServer(): McpServer {
   registerCognitiveResources(server);
   registerCognitiveTools(server);
 
-  // v6.0 — Register discipline execution system (ADR-001)
+  // v7.0 — Register discipline execution system (ADR-001)
   registerDisciplineResource(server);
 
   // v5.2 — Start the dream scheduler

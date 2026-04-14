@@ -13,7 +13,8 @@
  */
 
 import { z } from "zod";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
+import { atomicWriteFile } from "../utils/atomic-write.js";
 import { existsSync } from "node:fs";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { dataPath } from "../utils/paths.js";
@@ -75,7 +76,7 @@ async function saveRegistry(data: UIRegistryFile): Promise<void> {
   const categories = new Set(data.elements.map((e) => e.category));
   data.metadata.total_categories = categories.size;
   data.metadata.last_updated = new Date().toISOString();
-  await writeFile(registryPath(), JSON.stringify(data, null, 2), "utf-8");
+  await atomicWriteFile(registryPath(), JSON.stringify(data, null, 2));
   logger.debug("UI registry saved to disk");
 }
 

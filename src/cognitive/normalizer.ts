@@ -39,6 +39,7 @@ import type { Feature, Workflow, DataModelEntity } from "../types/index.js";
 import type {
   DreamEdge,
   DreamNode,
+  DreamGraphFile,
   ValidationResult,
   ValidationEvidence,
   ValidatedEdge,
@@ -630,7 +631,7 @@ async function llmSemanticValidation(
   // This rescues edges that are semantically meaningful but lack keyword/domain overlap.
   const candidates = edges.filter(({ edge, result }) => {
     // Latent edges near threshold — existing behavior
-    if (result.status === "latent" && result.confidence >= 0.35) return true;
+    if (result.status === "latent" && result.confidence >= (Number(process.env.DG_NORMALIZER_LLM_THRESHOLD) || 0.35)) return true;
     // Low-signal rejections where both endpoints are grounded — the heuristic
     // couldn't find structural overlap, but the LLM may see semantic meaning
     if (
@@ -652,8 +653,9 @@ async function llmSemanticValidation(
 
   const llm = getLlmProvider();
 
-  // Batch up to 20 edges per call (low_signal rejections need coverage)
-  const batch = candidates.slice(0, 20);
+  // Batch up to N edges per call (low_signal rejections need coverage)
+  const batchSize = Number(process.env.DG_NORMALIZER_BATCH_SIZE) || 20;
+  const batch = candidates.slice(0, batchSize);
 
   // Build context: describe each edge and its endpoints
   const edgeDescriptions = batch.map(({ edge, result }) => {
@@ -1030,6 +1032,16 @@ export async function normalize(
     }
   }
 
+  // ---------- Multi-file promotion with rollback protection ----------
+  // The promotion sequence touches 3-5 files sequentially.  If any step
+  // fails, we downgrade the in-memory results from "validated" back to
+  // "latent" so the next normalization cycle can retry cleanly instead
+  // of leaving orphaned state across files.
+  // -------------------------------------------------------------------
+
+  // Snapshot dream graph BEFORE writes so we can rollback on failure
+  const dreamGraphSnapshot = JSON.stringify(dreamGraph);
+
   // Persist updated dream graph (with status/scores written back)
   await engine.saveDreamGraph(dreamGraph);
 
@@ -1038,16 +1050,44 @@ export async function normalize(
     await engine.appendValidationResults(newResults);
   }
 
-  if (promotedEdges.length > 0) {
-    await engine.promoteEdges(promotedEdges);
-  }
-
-  // ENTITY PROMOTION — validated nodes become fact entities
-  // Intent becomes factual when confidence is reached.
   let promotedNodeCount = 0;
-  if (promotableNodes.length > 0) {
-    const result = await engine.promoteNodesToFactGraph(promotableNodes);
-    promotedNodeCount = result.promoted;
+  try {
+    if (promotedEdges.length > 0) {
+      await engine.promoteEdges(promotedEdges);
+    }
+
+    // ENTITY PROMOTION — validated nodes become fact entities
+    // Intent becomes factual when confidence is reached.
+    if (promotableNodes.length > 0) {
+      const result = await engine.promoteNodesToFactGraph(promotableNodes);
+      promotedNodeCount = result.promoted;
+    }
+  } catch (promotionErr) {
+    // Rollback: restore dream graph to pre-promotion state and downgrade
+    // promoted edges back to latent so the next cycle can retry.
+    logger.error(
+      `Promotion failed mid-write \u2014 rolling back dream graph to pre-promotion state. ` +
+      `Error: ${promotionErr instanceof Error ? promotionErr.message : promotionErr}`
+    );
+    try {
+      const restored: DreamGraphFile = JSON.parse(dreamGraphSnapshot);
+      // Downgrade edges that were about to be promoted back to latent
+      for (const edge of restored.edges) {
+        if (promotedEdges.some(pe => pe.id === edge.id)) {
+          edge.status = "latent";
+        }
+      }
+      await engine.saveDreamGraph(restored);
+      logger.warn(`Rollback complete: ${promotedEdges.length} edges reverted to latent, dream graph restored`);
+    } catch (rollbackErr) {
+      logger.error(
+        `CRITICAL: Rollback also failed. Manual intervention may be required. ` +
+        `Error: ${rollbackErr instanceof Error ? rollbackErr.message : rollbackErr}`
+      );
+    }
+    // Zero out promotion counts since they were rolled back
+    promotedEdges.length = 0;
+    promotedNodeCount = 0;
   }
 
   const counts = {
