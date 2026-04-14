@@ -200,6 +200,69 @@ function extractRelevant(raw: string, maxLines = 60): string {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Issue 4: resolve instance UUID from ~/.dreamgraph/.instances.json  */
+/*  Matches on projectRoot === current workspace root.                 */
+/*  Falls back silently — never throws, never blocks execution.        */
+/* ------------------------------------------------------------------ */
+
+interface InstanceEntry {
+  uuid: string;
+  projectRoot?: string;
+  name?: string;
+}
+
+async function resolveInstanceEnv(wsRoot: string): Promise<Record<string, string>> {
+  try {
+    const home = process.env.HOME ?? process.env.USERPROFILE ?? '';
+    if (!home) return {};
+    const indexPath = path.join(home, '.dreamgraph', '.instances.json');
+    const raw = await fs.readFile(indexPath, 'utf-8');
+    const instances: InstanceEntry[] = JSON.parse(raw);
+    if (!Array.isArray(instances)) return {};
+    const match = instances.find(
+      (i) => i.projectRoot && path.normalize(i.projectRoot) === path.normalize(wsRoot),
+    );
+    if (match?.uuid) {
+      return { DREAMGRAPH_INSTANCE_UUID: match.uuid };
+    }
+  } catch {
+    // No .instances.json, parse error, or no match — silent fallback, continue without UUID
+  }
+  return {};
+}
+
+/* ------------------------------------------------------------------ */
+/*  Issue 3: build spawn args — bypass cmd.exe for PowerShell cmds    */
+/*  Prevents here-string / quoting mangling on Windows.               */
+/* ------------------------------------------------------------------ */
+
+interface SpawnArgs {
+  cmd: string;
+  args: string[];
+  opts: cp.SpawnOptions;
+}
+
+function buildSpawnArgs(command: string, cwd: string, extraEnv: Record<string, string>): SpawnArgs {
+  const isPwsh = /^(powershell|pwsh)\b/i.test(command.trim());
+
+  if (isPwsh && process.platform === 'win32') {
+    const bin = command.trim().split(/\s+/)[0];
+    const rest = command.trim().slice(bin.length).trim();
+    return {
+      cmd: bin,
+      args: ['-NoProfile', '-NonInteractive', '-Command', rest],
+      opts: { cwd, shell: false, windowsHide: true, env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1', ...extraEnv } }
+    };
+  }
+
+  return {
+    cmd: command,
+    args: [],
+    opts: { cwd, shell: true, windowsHide: true, env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1', ...extraEnv } }
+  };
+}
+
+/* ------------------------------------------------------------------ */
 /*  run_command (enhanced: OutputChannel, progress, keyword filter)    */
 /* ------------------------------------------------------------------ */
 
@@ -219,14 +282,15 @@ async function handleRunCommand(input: Record<string, unknown>): Promise<string>
   const out = getOutput();
   out.appendLine(`\n$ ${command}  [cwd: ${cwd}]`);
 
+  // --- Issue 4: auto-inject DREAMGRAPH_INSTANCE_UUID from ~/.dreamgraph/.instances.json ---
+  const instanceEnv = await resolveInstanceEnv(wsRoot);
+
+  // --- Issue 3: spawn PowerShell directly to avoid cmd.exe quoting mangling ---
+  const spawnArgs = buildSpawnArgs(command, cwd, instanceEnv);
+
   const start = Date.now();
   return new Promise<string>((resolve) => {
-    const proc = cp.spawn(command, {
-      cwd,
-      shell: true,
-      windowsHide: true,
-      env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
-    });
+    const proc = cp.spawn(spawnArgs.cmd, spawnArgs.args, spawnArgs.opts);
 
     let stdout = '';
     let stderr = '';
