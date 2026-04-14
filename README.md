@@ -1,5 +1,6 @@
 # DreamGraph v7.0 — El Alarife
 
+[![SafeSkill 71/100](https://img.shields.io/badge/SafeSkill-71%2F100_Passes%20with%20Notes-yellow)](https://safeskill.dev/scan/mmethodz-dreamgraph)
 **The autonomous cognitive layer for sovereign development.**
 
 DreamGraph is a model-agnostic, graph-grounded development agent. It replaces brute-force context dumping with architectural discipline — shipping the 2.4 kB of entity-specific knowledge that matters instead of the 800 kB of raw source that costs. Your project's logic stays persistent in the Graph regardless of which LLM you plug in.
