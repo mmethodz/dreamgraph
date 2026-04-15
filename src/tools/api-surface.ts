@@ -871,11 +871,13 @@ function countBraces(line: string): number {
 }
 
 function checkDecorator(lines: string[], methodLineIdx: number, decoratorName: string): boolean {
+  const escapedDecoratorName = decoratorName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const exactDecoratorPattern = new RegExp(`^@${escapedDecoratorName}(?:\\([^)]*\\))?$`);
+
   for (let d = methodLineIdx - 1; d >= 0; d--) {
     const trimmed = lines[d].trim();
     if (trimmed.startsWith("@")) {
-      const decoratorMatch = trimmed.match(/^@(\w+(?:\.\w+)*)/);
-      if (decoratorMatch?.[1] === decoratorName) return true;
+      if (exactDecoratorPattern.test(trimmed)) return true;
     } else if (trimmed !== "" && !trimmed.startsWith("#")) {
       break;
     }
@@ -887,11 +889,11 @@ function collectDecorators(lines: string[], lineIdx: number): string[] {
   const decorators: string[] = [];
   for (let d = lineIdx - 1; d >= 0; d--) {
     const decoratorLine = lines[d].trim();
-    const match = decoratorLine.match(/^@(\w+(?:\.\w+)*)$/);
+    const match = decoratorLine.match(/^@(\w+(?:\.\w+)*)(?:\([^)]*\))?$/);
     if (match) {
       decorators.unshift(match[1]);
     } else {
-      const csAttr = decoratorLine.match(/^\[(\w+)\]$/);
+      const csAttr = decoratorLine.match(/^\[(\w+)(?:\([^\]]*\))?\]$/);
       if (csAttr) {
         decorators.unshift(csAttr[1]);
       } else if (decoratorLine !== "" && !decoratorLine.startsWith("//")) {
@@ -928,13 +930,15 @@ function parseParams(raw: string, lang: string): ApiParam[] {
 }
 
 function parseOneParam(param: string, lang: string): ApiParam {
+  const stripInlineHtml = (value?: string): string | undefined => value?.replace(/<[^>]*>/g, "").trim() || undefined;
+
   if (lang === "python") {
     // name: type = default or name = default or just name
     const m = param.match(/^(\*{0,2}\w+)\s*(?::\s*([^=]+?))?(?:\s*=\s*(.+))?$/);
     if (m) {
       return {
         name: m[1],
-        type: m[2]?.trim(),
+        type: stripInlineHtml(m[2]),
         default_value: m[3]?.trim(),
       };
     }
@@ -944,7 +948,7 @@ function parseOneParam(param: string, lang: string): ApiParam {
     if (m) {
       return {
         name: m[1],
-        type: m[2]?.trim(),
+        type: stripInlineHtml(m[2]),
         default_value: m[3]?.trim(),
       };
     }
@@ -952,13 +956,16 @@ function parseOneParam(param: string, lang: string): ApiParam {
     // Strip C# parameter modifiers (loop handles chained: "this ref MyStruct s")
     let cleaned = param;
     let prev: string;
-    do { prev = cleaned; cleaned = cleaned.replace(/^(?:this|params|ref|out|in|scoped)\s+/, ""); } while (cleaned !== prev);
+    do {
+      prev = cleaned;
+      cleaned = cleaned.replace(/^(?:this|params|ref|out|in|scoped)\s+/, "");
+    } while (cleaned !== prev);
     // Type name = default
     const m = cleaned.match(/^([\w<>\[\]?,\s]+?)\s+(\w+)(?:\s*=\s*(.+))?$/);
     if (m) {
       return {
         name: m[2],
-        type: m[1].trim(),
+        type: stripInlineHtml(m[1]),
         default_value: m[3]?.trim(),
       };
     }
