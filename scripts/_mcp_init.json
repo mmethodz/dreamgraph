@@ -1,0 +1,20 @@
+{
+  "result": {
+    "protocolVersion": "2024-11-05",
+    "capabilities": {
+      "resources": {
+        "listChanged": true
+      },
+      "tools": {
+        "listChanged": true
+      }
+    },
+    "serverInfo": {
+      "name": "dreamgraph",
+      "version": "7.0.0"
+    },
+    "instructions": "# DreamGraph MCP Server v7.0.0\n\nYou are connected to a DreamGraph cognitive knowledge-graph server.\nUse these tools to understand, enrich, and reason about the project.\n\n## Available Repositories\n  - \"dreamgraph\" → C:\\Users\\Mika Jussila\\source\\repos\\dreamgraph\n\nUse these repo names as the `repo` parameter for read_source_code, list_directory, git_log, and git_blame.\n\n## Quick-Start Workflow\n1. **Discover** — Read `system://capabilities` or call `cognitive_status` to see current state.\n2. **Bootstrap** — If the knowledge graph is empty, configure LLM settings then call `scan_project` (or `init_graph`) to scan repos and populate seed data.\n3. **Read code** — Use `read_source_code` and `list_directory` with repo=\"dreamgraph\".\n4. **Git history** — Use `git_log` and `git_blame` with the same repo name.\n5. **Enrich** — Call `enrich_seed_data` with target=\"features\"|\"workflows\"|\"data_model\"|\"capabilities\".\n   Schema is lenient: `links` accepts strings, `steps` accepts strings, `source_files` accepts strings.\n6. **Dream** — Call `dream_cycle` to generate speculative edges and auto-normalize.\n7. **Inspect** — Use `query_resource`, `get_dream_insights`, `get_temporal_insights`.\n8. **Decide** — Use `record_architecture_decision` to capture design choices.\n\n## Key Tool Patterns\n\n### Code & Git (require `repo` parameter)\n- `read_source_code(repo, path)` — Read file contents. Path is relative to repo root.\n- `list_directory(repo, path?)` — List files/dirs. Omit path for repo root.\n- `git_log(repo, path?, maxCount?)` — Commit history.\n- `git_blame(repo, path)` — Per-line authorship.\n\n### Knowledge Graph Enrichment\n- `enrich_seed_data(target, entries, mode?)` — Upsert entities into the fact graph.\n  Each entry needs `id` and `name` at minimum. All nested arrays (links, steps,\n  source_files, key_fields, relationships) accept plain strings that auto-coerce to objects.\n- `init_graph(repos?, force?)` — One-time bootstrap from source code scanning.\n\n### Cognitive Dreaming\n- `dream_cycle(strategy?, max_dreams?)` — Run the dream engine.\n- `nightmare_cycle(strategy?)` — Adversarial security scan.\n- `normalize_dreams(threshold?)` — Manual normalization pass.\n- `cognitive_status()` — Engine state, cycle counts, graph stats.\n\n### Query & Inspect\n- `query_resource(uri)` — Read any resource: `system://features`, `system://workflows`,\n  `system://data-model`, `system://overview`, `dream://graph`, `dream://tensions`, etc.\n- `get_dream_insights()`, `get_temporal_insights()`, `get_causal_insights()`\n- `search_data_model(entity)`, `get_workflow(name)`\n\n### Architecture Decisions\n- `record_architecture_decision(...)` — Capture a design decision with rationale.\n- `query_architecture_decisions(entity_id?, tag?, status?)`\n- `deprecate_architecture_decision(adr_id, new_status, reason)`\n\n### Web\n- `fetch_web_page(url, selector?, maxLength?)` — Fetch and extract web content.\n\n## Resources (read via query_resource or direct resource read)\nSystem: system://overview, system://features, system://workflows, system://data-model, system://capabilities, system://index\nCognitive: dream://graph, dream://candidates, dream://validated, dream://status, dream://tensions, dream://history, dream://adrs, dream://ui-registry, dream://threats, dream://archetypes, dream://metacognition, dream://events, dream://story, dream://schedules, dream://schedule-history\nDiscipline: discipline://manifest\n"
+  },
+  "jsonrpc": "2.0",
+  "id": 1
+}

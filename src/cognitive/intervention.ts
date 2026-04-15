@@ -35,6 +35,53 @@ import type {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
+function normalizeText(value: unknown): string {
+  if (typeof value === "string") {
+    return value.toLowerCase();
+  }
+
+  if (value == null) {
+    return "";
+  }
+
+  try {
+    return JSON.stringify(value).toLowerCase();
+  } catch {
+    return String(value).toLowerCase();
+  }
+}
+
+function normalizeAdrEntry(entry: unknown): { id: string; title: string; status: string; decision: string } {
+  if (!entry || typeof entry !== "object") {
+    return {
+      id: "unknown",
+      title: "Unknown ADR",
+      status: "unknown",
+      decision: "",
+    };
+  }
+
+  const candidate = entry as Record<string, unknown>;
+
+  return {
+    id: typeof candidate.id === "string" ? candidate.id : "unknown",
+    title: typeof candidate.title === "string" ? candidate.title : "Unknown ADR",
+    status: typeof candidate.status === "string" ? candidate.status : "unknown",
+    decision:
+      typeof candidate.decision === "string"
+        ? candidate.decision
+        : candidate.decision == null
+          ? ""
+          : (() => {
+              try {
+                return JSON.stringify(candidate.decision);
+              } catch {
+                return String(candidate.decision);
+              }
+            })(),
+  };
+}
+
 /**
  * Load ADR log to check for conflicts.
  */
@@ -44,7 +91,13 @@ async function loadAdrLog(): Promise<Array<{ id: string; title: string; status: 
     if (!existsSync(p)) return [];
     const raw = await readFile(p, "utf-8");
     const data = JSON.parse(raw);
-    return data?.decisions ?? data?.adrs ?? data?.entries ?? [];
+    const entries = data?.decisions ?? data?.adrs ?? data?.entries ?? [];
+
+    if (!Array.isArray(entries)) {
+      return [];
+    }
+
+    return entries.map((entry: unknown) => normalizeAdrEntry(entry));
   } catch {
     return [];
   }
@@ -256,26 +309,23 @@ function findAdrConflicts(
   const conflicts: string[] = [];
 
   for (const adr of adrs) {
-    if (adr.status !== "accepted" && adr.status !== "active") continue;
+    const titleLower = normalizeText(adr.title);
+    const decisionLower = normalizeText(adr.decision);
 
     for (const step of steps) {
-      for (const file of step.files) {
-        const fileLower = file.file_path.toLowerCase();
-        const titleLower = adr.title.toLowerCase();
-        const decisionLower = (adr.decision ?? "").toLowerCase();
+      const descLower = normalizeText(step.description);
+      const touchesSchema = descLower.includes("schema") || descLower.includes("migration");
+      const touchesApi = descLower.includes("api") || descLower.includes("endpoint");
+      const touchesUi = descLower.includes("ui") || descLower.includes("component");
 
-        const keywords = fileLower.split("/").pop()?.split("_") ?? [];
-        const matches = keywords.some(
-          (kw: string) =>
-            kw.length > 3 &&
-            (titleLower.includes(kw) || decisionLower.includes(kw))
-        );
-
-        if (matches) {
-          conflicts.push(
-            `ADR ${adr.id}: "${adr.title}" may be affected by changes to ${file.file_path}`
-          );
-        }
+      if (touchesSchema && (titleLower.includes("schema") || decisionLower.includes("schema"))) {
+        conflicts.push(`Potential schema conflict with ${adr.id}: ${adr.title}`);
+      }
+      if (touchesApi && (titleLower.includes("api") || decisionLower.includes("api"))) {
+        conflicts.push(`Potential API conflict with ${adr.id}: ${adr.title}`);
+      }
+      if (touchesUi && (titleLower.includes("ui") || decisionLower.includes("ui"))) {
+        conflicts.push(`Potential UI conflict with ${adr.id}: ${adr.title}`);
       }
     }
   }
@@ -361,6 +411,11 @@ export async function generateRemediationPlans(
     engine.loadTensions(),
     loadAdrLog(),
   ]);
+
+  logger.info(
+    `Remediation planner loaded ${adrs.length} ADRs; sample decision types: ` +
+    `${adrs.slice(0, 3).map((adr) => typeof adr.decision).join(", ") || "none"}`
+  );
 
   const allUnresolved = tensionFile.signals.filter((t) => !t.resolved);
   const candidates = allUnresolved

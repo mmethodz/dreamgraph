@@ -1,0 +1,136 @@
+12:  *   GET  /schedules  — Schedule management (view, pause/resume, run now, delete)
+13:  *   POST /schedules  — Schedule actions (toggle, run, delete)
+15:  *   POST /config     — Apply configuration changes at runtime
+28:   getSchedules, getScheduleHistory, getSchedulerConfig, updateSchedulerConfig,
+29:   createSchedule, updateSchedule, deleteSchedule, runScheduleNow,
+30: } from "../cognitive/scheduler.js";
+37: import type { DreamSchedule, ScheduleExecution, ScheduleAction, ScheduleTriggerType } from "../types/index.js";
+122:       <a href="/schedules" class="${activeTab === "schedules" ? "active" : ""}">Schedules</a>
+242:   .btn {
+246:   .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+247:   .btn-primary:hover { background: #4090e0; }
+268:   .btn-secondary { background: var(--surface); border-color: var(--border); color: var(--text); }
+269:   .btn-secondary:hover { background: var(--border); }
+270:   .btn:disabled { opacity: .5; cursor: wait; }
+301:         <p>Cognitive state, dream cycles, graph stats, tensions, active schedules, LLM provider health.</p>
+303:       <a class="index-card" href="/schedules">
+304:         <h3>📅 Schedules</h3>
+305:         <p>Dream schedules — view, pause/resume, run now, create, delete. Real-time execution history.</p>
+309:         <p>Active configuration with live editing — LLM (dreamer + normalizer), scheduler, events, narrative.</p>
+489:   // ---- Schedules (link to dedicated page) ----
+490:   body += `<h2>Schedules</h2>
+491:   <p><a href="/schedules">View and manage schedules →</a></p>`;
+542: /*  Route: GET /schedules                                             */
+545: const SCHEDULE_ACTIONS: ScheduleAction[] = [
+551: const TRIGGER_TYPES: ScheduleTriggerType[] = [
+570: async function renderSchedules(toast?: string): Promise<string> {
+571:   const schedules = await safeAsync(() => getSchedules(), []);
+572:   const recentExecs = await safeAsync(() => getScheduleHistory(undefined, 20), []);
+573:   const schedCfg = getSchedulerConfig();
+575:   let body = `<h1>Schedules</h1>`;
+582:   // Scheduler status card
+583:   const activeCount = schedules.filter(s => s.enabled && s.status === "active").length;
+584:   const errorCount = schedules.filter(s => s.status === "error").length;
+587:       <div class="card-title">Total Schedules</div>
+588:       <div class="card-value">${schedules.length}</div>
+592:       <div class="card-title">Scheduler</div>
+603:   // ---- Active Schedules Table ----
+604:   body += `<h2>Active Schedules</h2>`;
+605:   if (schedules.length === 0) {
+606:     body += `<p class="empty">No schedules configured. Create one below.</p>`;
+613:       ${schedules.map(s => {
+635:             <form method="POST" action="/schedules" style="display:inline">
+638:               <button type="submit" class="btn" style="padding:2px 8px;font-size:11px">${s.enabled ? "⏸ Pause" : "▶ Resume"}</button>
+640:             <form method="POST" action="/schedules" style="display:inline">
+643:               <button type="submit" class="btn" style="padding:2px 8px;font-size:11px">⚡ Run</button>
+645:             <form method="POST" action="/schedules" style="display:inline" onsubmit="return confirm('Delete schedule ${escAttr(s.name)}?')">
+646:               <input type="hidden" name="_action" value="delete">
+648:               <button type="submit" class="btn" style="padding:2px 8px;font-size:11px;color:var(--red)">✕</button>
+657:   // ---- Create New Schedule ----
+658:   body += `<h2>Create Schedule</h2>
+660:     <form method="POST" action="/schedules" class="config-form">
+669:           ${SCHEDULE_ACTIONS.map(a =>
+719:         <button type="submit" class="btn btn-primary">Create Schedule</button>
+729:     // Build a schedule-id → strategy lookup for the executions table
+731:     for (const s of schedules) {
+736:       <tr><th>Schedule</th><th>Action</th><th>Strategy</th><th>Triggered</th><th>Duration</th><th>Result</th><th>Summary</th></tr>
+738:         const strat = strategyMap.get(e.schedule_id) ?? "—";
+740:         <td>${esc(e.schedule_name)}</td>
+755:   return shell("Schedules", body, "schedules");
+759: /*  Route: POST /schedules                                            */
+762: async function handleSchedulePost(
+774:         const schedules = await getSchedules();
+775:         const sched = schedules.find(s => s.id === id);
+777:           await updateSchedule(id, { enabled: !sched.enabled });
+784:         const exec = await runScheduleNow(id);
+785:         toast = `${exec.schedule_name} executed (${exec.success ? "success" : "failed"}, ${fmtMs(exec.duration_ms)})`;
+788:       case "delete": {
+790:         const schedules = await getSchedules();
+791:         const sched = schedules.find(s => s.id === id);
+792:         const deleted = await deleteSchedule(id);
+793:         toast = deleted ? `Schedule "${sched?.name ?? id}" deleted` : `Schedule not found`;
+797:         const triggerType = (body.trigger_type ?? "interval") as ScheduleTriggerType;
+800:         const created = await createSchedule({
+802:           action: (body.action ?? "dream_cycle") as ScheduleAction,
+812:         toast = `Schedule "${created.name}" created`;
+816:         logger.warn(`Dashboard: Unknown schedule action "${action}"`);
+819:     logger.error(`Dashboard: Schedule action "${action}" failed:`, err);
+824:     Location: `/schedules${toast ? `?toast=${encodeURIComponent(toast)}` : ""}`,
+838:   const schedCfg = getSchedulerConfig();
+844:   // Success toast after POST
+857:     <button type="button" class="btn btn-secondary" id="btn-restart" style="white-space:nowrap">Restart Server</button>
+860:     document.getElementById('btn-restart').addEventListener('click', async function() {
+862:       const btn = this;
+863:       btn.disabled = true;
+864:       btn.textContent = 'Restarting…';
+866:         await fetch('/restart', { method: 'POST' });
+873:           const r = await fetch('/health');
+876:         if (attempts > 30) { clearInterval(poll); btn.textContent = 'Restart sent — refresh manually'; }
+956:       <form method="POST" action="/config" class="config-form">
+974:             <button type="button" class="api-key-toggle" onclick="var i=document.getElementById('apiKeyInput');if(i.type==='password'){i.type='text';this.textContent='Hide'}else{i.type='password';this.textContent='Show'}">Show</button>
+979:           <button type="submit" class="btn btn-primary">Save Provider</button>
+988:       <form method="POST" action="/config" class="config-form">
+1008:           <button type="submit" class="btn btn-primary">Save Dreamer</button>
+1017:       <form method="POST" action="/config" class="config-form">
+1037:           <button type="submit" class="btn btn-primary">Save Normalizer</button>
+1157:     <form method="POST" action="/config" class="config-form" id="db-form">
+1161:         <input name="connectionString" value="${escAttr(config.database.connectionString)}" placeholder="postgresql://user:pass@host:5432/dbname" style="max-width:480px">
+1168:         <button type="submit" class="btn btn-primary">Save</button>
+1169:         <button type="button" class="btn btn-secondary" id="btn-test-db">Test Connection</button>
+1175:     document.getElementById('btn-test-db').addEventListener('click', async function() {
+1176:       const btn = this;
+1179:       btn.disabled = true;
+1180:       btn.textContent = 'Testing…';
+1185:         const r = await fetch('/config/test-db', {
+1186:           method: 'POST',
+1201:         btn.disabled = false;
+1202:         btn.textContent = 'Test Connection';
+1207:   // ---- Scheduler (editable) ----
+1208:   body += `<h2>Scheduler</h2>
+1210:     <form method="POST" action="/config" class="config-form">
+1211:       <input type="hidden" name="_section" value="scheduler">
+1243:         <button type="submit" class="btn btn-primary">Save Scheduler</button>
+1251:     <form method="POST" action="/config" class="config-form">
+1271:         <button type="submit" class="btn btn-primary">Save Events</button>
+1279:     <form method="POST" action="/config" class="config-form">
+1303:         <button type="submit" class="btn btn-primary">Save Narrative</button>
+1328: /*  Route: POST /config                                               */
+1331: async function handleConfigPost(
+1390:       case "scheduler": {
+1391:         updateSchedulerConfig({
+1399:         logger.info("Dashboard: Scheduler config updated via web UI");
+1445: /*  Route: POST /config/test-db                                       */
+1448: async function handleTestDbPost(
+1479: /*  Route: POST /restart                                              */
+1482: async function handleRestartPost(res: ServerResponse): Promise<void> {
+1861:   // POST handlers — apply changes, then redirect
+1862:   if (req.method === "POST" && pathname === "/config") {
+1863:     await handleConfigPost(req, res);
+1866:   if (req.method === "POST" && pathname === "/config/test-db") {
+1867:     await handleTestDbPost(req, res);
+1870:   if (req.method === "POST" && pathname === "/schedules") {
+1871:     await handleSchedulePost(req, res);
+1874:   if (req.method === "POST" && pathname === "/restart") {
+1875:     await handleRestartPost(res);
+1891:       case "/schedules": {
+1894:         html = await renderSchedules(toast);
