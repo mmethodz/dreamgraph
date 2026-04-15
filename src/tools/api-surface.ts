@@ -930,7 +930,16 @@ function parseParams(raw: string, lang: string): ApiParam[] {
 }
 
 function parseOneParam(param: string, lang: string): ApiParam {
-  const stripInlineHtml = (value?: string): string | undefined => value?.replace(/<[^>]*>/g, "").trim() || undefined;
+  const stripInlineHtml = (value?: string): string | undefined => {
+    if (!value) return undefined;
+    let result = value;
+    while (true) {
+      const next = result.replace(/<[^<>]*>/g, "");
+      if (next === result) break;
+      result = next;
+    }
+    return result.trim() || undefined;
+  };
 
   if (lang === "python") {
     // name: type = default or name = default or just name
@@ -971,7 +980,7 @@ function parseOneParam(param: string, lang: string): ApiParam {
     }
   }
 
-  return { name: param };
+  return { name: stripInlineHtml(param) ?? param };
 }
 
 function buildSignatureText(method: ApiMethod): string {
