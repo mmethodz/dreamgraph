@@ -1328,6 +1328,7 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       padding: 8px 12px;
       border-top: 1px solid var(--vscode-panel-border);
       background: var(--vscode-editor-background);
+      align-items: flex-end;
     }
     #prompt {
       flex: 1;
@@ -1339,6 +1340,12 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       font-family: var(--vscode-font-family);
       font-size: var(--vscode-font-size);
       outline: none;
+      resize: none;
+      overflow-y: auto;
+      min-height: 32px;
+      max-height: 200px;
+      line-height: 1.4;
+      field-sizing: content;
     }
     #prompt:focus {
       border-color: var(--vscode-focusBorder);
@@ -1390,7 +1397,7 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
 
   <div id="messages"></div>
   <form id="composer">
-    <input id="prompt" type="text" placeholder="Ask DreamGraph…" autocomplete="off" />
+    <textarea id="prompt" rows="1" placeholder="Ask DreamGraph…" autocomplete="off"></textarea>
     <button id="sendBtn" type="submit">Send</button>
     <button id="stopBtn" type="button" style="display:none;background:var(--vscode-errorForeground);color:#fff">Stop</button>
     <button id="clear" type="button">Clear</button>
@@ -1546,14 +1553,95 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       }
     });
 
-    form.addEventListener('submit', (event) => {
-      event.preventDefault();
+    /* ---- Auto-resize textarea ---- */
+    function autoResize() {
+      promptEl.style.height = 'auto';
+      promptEl.style.height = Math.min(promptEl.scrollHeight, 200) + 'px';
+    }
+
+    /* ---- Prompt history (arrow keys) ---- */
+    var promptHistory = [];
+    var historyIndex = -1;
+    var historyDraft = '';
+
+    function sendPrompt() {
       const text = promptEl.value.trim();
       if (!text) return;
+      // Push to history (dedup consecutive)
+      if (promptHistory.length === 0 || promptHistory[promptHistory.length - 1] !== text) {
+        promptHistory.push(text);
+      }
+      historyIndex = -1;
+      historyDraft = '';
       vscode.postMessage({ type: 'send', text });
       promptEl.value = '';
+      promptEl.style.height = 'auto';
       vscode.setState(Object.assign({}, vscode.getState() || {}, { draft: '' }));
       vscode.postMessage({ type: 'saveDraft', text: '' });
+    }
+
+    /* ---- Keyboard handling ---- */
+    promptEl.addEventListener('keydown', function(e) {
+      // Enter without Shift = send
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendPrompt();
+        return;
+      }
+      // Shift+Enter = newline (default textarea behavior, no action needed)
+
+      // ArrowUp at top of input = history back
+      if (e.key === 'ArrowUp') {
+        var cursorAtStart = promptEl.selectionStart === 0 && promptEl.selectionEnd === 0;
+        // Also treat as "at start" if no newlines before cursor
+        var textBeforeCursor = promptEl.value.substring(0, promptEl.selectionStart);
+        if (cursorAtStart || !textBeforeCursor.includes('\\n')) {
+          if (promptHistory.length > 0) {
+            if (historyIndex === -1) {
+              historyDraft = promptEl.value;
+              historyIndex = promptHistory.length - 1;
+            } else if (historyIndex > 0) {
+              historyIndex--;
+            } else {
+              return; // at oldest entry
+            }
+            e.preventDefault();
+            promptEl.value = promptHistory[historyIndex];
+            autoResize();
+            promptEl.setSelectionRange(0, 0);
+          }
+        }
+        return;
+      }
+
+      // ArrowDown at bottom of input = history forward
+      if (e.key === 'ArrowDown') {
+        if (historyIndex === -1) return; // not browsing history
+        var textAfterCursor = promptEl.value.substring(promptEl.selectionEnd);
+        var cursorAtEnd = promptEl.selectionEnd === promptEl.value.length;
+        if (cursorAtEnd || !textAfterCursor.includes('\\n')) {
+          if (historyIndex < promptHistory.length - 1) {
+            historyIndex++;
+            e.preventDefault();
+            promptEl.value = promptHistory[historyIndex];
+          } else {
+            // Back to draft
+            historyIndex = -1;
+            e.preventDefault();
+            promptEl.value = historyDraft;
+          }
+          autoResize();
+          var len = promptEl.value.length;
+          promptEl.setSelectionRange(len, len);
+        }
+        return;
+      }
+    });
+
+    /* ---- Form submit (button click fallback) ---- */
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      sendPrompt();
     });
 
     stopBtn.addEventListener('click', () => {
@@ -1569,10 +1657,12 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
     var savedState = vscode.getState();
     if (savedState && savedState.draft) {
       promptEl.value = savedState.draft;
+      autoResize();
     }
 
-    // Save draft on every input keystroke
+    // Save draft on every input keystroke + auto-resize
     promptEl.addEventListener('input', function() {
+      autoResize();
       var draft = promptEl.value;
       vscode.setState(Object.assign({}, vscode.getState() || {}, { draft: draft }));
       vscode.postMessage({ type: 'saveDraft', text: draft });
