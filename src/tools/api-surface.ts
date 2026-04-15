@@ -874,7 +874,8 @@ function checkDecorator(lines: string[], methodLineIdx: number, decoratorName: s
   for (let d = methodLineIdx - 1; d >= 0; d--) {
     const trimmed = lines[d].trim();
     if (trimmed.startsWith("@")) {
-      if (trimmed.includes(decoratorName)) return true;
+      const decoratorMatch = trimmed.match(/^@(\w+(?:\.\w+)*)/);
+      if (decoratorMatch?.[1] === decoratorName) return true;
     } else if (trimmed !== "" && !trimmed.startsWith("#")) {
       break;
     }
@@ -885,14 +886,15 @@ function checkDecorator(lines: string[], methodLineIdx: number, decoratorName: s
 function collectDecorators(lines: string[], lineIdx: number): string[] {
   const decorators: string[] = [];
   for (let d = lineIdx - 1; d >= 0; d--) {
-    const match = lines[d].match(/^\s*@(\w+(?:\.\w+)*)/);
+    const decoratorLine = lines[d].trim();
+    const match = decoratorLine.match(/^@(\w+(?:\.\w+)*)$/);
     if (match) {
       decorators.unshift(match[1]);
     } else {
-      const csAttr = lines[d].match(/^\s*\[(\w+)/);
+      const csAttr = decoratorLine.match(/^\[(\w+)\]$/);
       if (csAttr) {
         decorators.unshift(csAttr[1]);
-      } else if (lines[d].trim() !== "" && !lines[d].trim().startsWith("//")) {
+      } else if (decoratorLine !== "" && !decoratorLine.startsWith("//")) {
         break;
       }
     }
@@ -928,7 +930,7 @@ function parseParams(raw: string, lang: string): ApiParam[] {
 function parseOneParam(param: string, lang: string): ApiParam {
   if (lang === "python") {
     // name: type = default or name = default or just name
-    const m = param.match(/^(\*{0,2}\w+)\s*(?::\s*(.+?))?(?:\s*=\s*(.+))?$/);
+    const m = param.match(/^(\*{0,2}\w+)\s*(?::\s*([^=]+?))?(?:\s*=\s*(.+))?$/);
     if (m) {
       return {
         name: m[1],
@@ -938,7 +940,7 @@ function parseOneParam(param: string, lang: string): ApiParam {
     }
   } else if (lang === "typescript" || lang === "javascript") {
     // name: Type = default or name?: Type
-    const m = param.match(/^(\w+)\??\s*(?::\s*(.+?))?(?:\s*=\s*(.+))?$/);
+    const m = param.match(/^(\w+)\??\s*(?::\s*([^=]+?))?(?:\s*=\s*(.+))?$/);
     if (m) {
       return {
         name: m[1],

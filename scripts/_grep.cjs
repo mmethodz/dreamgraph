@@ -1,5 +1,5 @@
 const fs = require('fs');
 const file = process.argv[2];
-const pattern = new RegExp(process.argv[3], 'i');
+const needle = String(process.argv[3] ?? '');
 const lines = fs.readFileSync(file, 'utf8').split('\n');
-lines.forEach((l, i) => { if (pattern.test(l)) console.log((i+1) + ': ' + l); });
+lines.forEach((l, i) => { if (l.toLowerCase().includes(needle.toLowerCase())) console.log((i+1) + ': ' + l); });
