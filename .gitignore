@@ -24,6 +24,10 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+
+# Local strategy / campaign working docs
+.strategy/
+
 plans/DREAMGRAPH EVENTS AND HOOKS.txt
 plans/DG - THE DREAMGRAPH CLI.txt
 TDD_DISCIPLINARY_EXECUTION.md
