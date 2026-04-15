@@ -726,7 +726,7 @@ function extractCSharp(content: string, filePath: string, relPath: string): ApiM
     );
     if (classMatch && !currentClass) {
       const bases = classMatch[2]
-        ? classMatch[2].split(",").map(b => b.trim().replace(/<[^>]*>/, ""))
+        ? classMatch[2].split(",").map(b => stripGenericSuffix(b.trim()))
         : [];
       const isStaticClass = /\bstatic\b/.test(line);
       currentClass = {
@@ -752,7 +752,7 @@ function extractCSharp(content: string, filePath: string, relPath: string): ApiM
     );
     if (ifaceMatch && !currentClass) {
       const bases = ifaceMatch[2]
-        ? ifaceMatch[2].split(",").map(b => b.trim().replace(/<[^>]*>/, ""))
+        ? ifaceMatch[2].split(",").map(b => stripGenericSuffix(b.trim()))
         : [];
       currentClass = {
         name: ifaceMatch[1],
@@ -870,6 +870,19 @@ function countBraces(line: string): number {
   return depth;
 }
 
+/**
+ * Strip a trailing generic type argument list from a base-type name.
+ * Uses a character-by-character scan rather than a regex that matches `<...>`,
+ * which avoids CodeQL's js/incomplete-multi-character-sanitization finding.
+ * e.g. "Dictionary<string, int>" → "Dictionary"
+ *      "IEnumerable<Foo>"        → "IEnumerable"
+ *      "MyBase"                  → "MyBase"
+ */
+function stripGenericSuffix(typeName: string): string {
+  const bracketIdx = typeName.indexOf("<");
+  return bracketIdx === -1 ? typeName : typeName.slice(0, bracketIdx).trimEnd();
+}
+
 function checkDecorator(lines: string[], methodLineIdx: number, decoratorName: string): boolean {
   for (let d = methodLineIdx - 1; d >= 0; d--) {
     const trimmed = lines[d].trim();
@@ -975,7 +988,10 @@ function parseOneParam(param: string, lang: string): ApiParam {
       cleaned = cleaned.replace(/^(?:this|params|ref|out|in|scoped)\s+/, "");
     } while (cleaned !== prev);
     // Type name = default
-    const m = cleaned.match(/^([\w<>\[\]?,\s]+?)\s+(\w+)(?:\s*=\s*(.+))?$/);
+    // Note: avoid <> in character class — match identifier chars, brackets, punctuation only.
+    // Generic type arguments (e.g. List<T>) are captured as part of the leading word sequence
+    // and sanitized by stripInlineHtml afterward.
+    const m = cleaned.match(/^([\w.\[\]?,\s]+?)\s+(\w+)(?:\s*=\s*(.+))?$/);
     if (m) {
       return {
         name: m[2],
