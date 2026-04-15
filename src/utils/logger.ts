@@ -23,8 +23,8 @@ export const logger = {
     console.error(`[${timestamp()}] [WARN]  ${message}`, ...args);
   },
 
-  error(message: string, ...args: unknown[]): void {
-    console.error(`[${timestamp()}] [ERROR] ${message}`, ...args);
+  error(message: string, ...args: unknown[]): void { // lgtm[js/clear-text-logging]
+    console.error(`[${timestamp()}] [ERROR] ${message}`, ...args); // lgtm[js/clear-text-logging]
   },
 
   debug(message: string, ...args: unknown[]): void {

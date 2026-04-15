@@ -68,7 +68,7 @@ Options:
   const { registry } = await loadRegistry(masterDir);
   const entry = findInstance(registry, query);
   if (!entry) {
-    console.error(`Instance not found: ${query}`);
+    console.error(`Instance not found: ${String(query).replace(/[^\w\-]/g, "?")}`);
     process.exit(1);
   }
 

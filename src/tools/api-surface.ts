@@ -726,7 +726,7 @@ function extractCSharp(content: string, filePath: string, relPath: string): ApiM
     );
     if (classMatch && !currentClass) {
       const bases = classMatch[2]
-        ? classMatch[2].split(",").map(b => b.trim().replace(/<.*>/, ""))
+        ? classMatch[2].split(",").map(b => b.trim().replace(/<[^>]*>/, ""))
         : [];
       const isStaticClass = /\bstatic\b/.test(line);
       currentClass = {
@@ -752,7 +752,7 @@ function extractCSharp(content: string, filePath: string, relPath: string): ApiM
     );
     if (ifaceMatch && !currentClass) {
       const bases = ifaceMatch[2]
-        ? ifaceMatch[2].split(",").map(b => b.trim().replace(/<.*>/, ""))
+        ? ifaceMatch[2].split(",").map(b => b.trim().replace(/<[^>]*>/, ""))
         : [];
       currentClass = {
         name: ifaceMatch[1],
@@ -947,10 +947,10 @@ function parseOneParam(param: string, lang: string): ApiParam {
       };
     }
   } else if (lang === "csharp") {
-    // Strip C# parameter modifiers: this, params, ref, out, in, scoped
-    let cleaned = param.replace(/^(?:this|params|ref|out|in|scoped)\s+/, "");
-    // Handle chained modifiers: "this ref MyStruct s" → "ref MyStruct s" → "MyStruct s"
-    cleaned = cleaned.replace(/^(?:this|params|ref|out|in|scoped)\s+/, "");
+    // Strip C# parameter modifiers (loop handles chained: "this ref MyStruct s")
+    let cleaned = param;
+    let prev: string;
+    do { prev = cleaned; cleaned = cleaned.replace(/^(?:this|params|ref|out|in|scoped)\s+/, ""); } while (cleaned !== prev);
     // Type name = default
     const m = cleaned.match(/^([\w<>\[\]?,\s]+?)\s+(\w+)(?:\s*=\s*(.+))?$/);
     if (m) {

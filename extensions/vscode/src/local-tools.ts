@@ -243,11 +243,27 @@ interface SpawnArgs {
 }
 
 function buildSpawnArgs(command: string, cwd: string, extraEnv: Record<string, string>): SpawnArgs {
-  const isPwsh = /^(powershell|pwsh)\b/i.test(command.trim());
+  const trimmed = command.trim();
+  const isPwsh = /^(powershell|pwsh)\b/i.test(trimmed);
 
   if (isPwsh && process.platform === 'win32') {
-    const bin = command.trim().split(/\s+/)[0];
-    const rest = command.trim().slice(bin.length).trim();
+    const bin = trimmed.split(/\s+/)[0];
+    const rest = trimmed.slice(bin.length).trim();
+
+    // If the caller already supplied PowerShell flags (-File, -Command, -NoProfile, etc.)
+    // let them through as-is via shell:true — don't double-wrap.
+    const hasExplicitFlags = /^-(File|Command|NoProfile|NonInteractive|ExecutionPolicy|NoLogo|WindowStyle)\b/i.test(rest);
+    if (hasExplicitFlags) {
+      return {
+        cmd: command,
+        args: [],
+        opts: { cwd, shell: true, windowsHide: true, env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1', ...extraEnv } }
+      };
+    }
+
+    // Bare inline script — bypass cmd.exe wrapping by spawning pwsh directly
+    // and injecting the script body as -Command. This prevents here-string and
+    // quote mangling that occurs when cmd.exe wraps the command.
     return {
       cmd: bin,
       args: ['-NoProfile', '-NonInteractive', '-Command', rest],
