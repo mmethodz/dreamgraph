@@ -84,7 +84,11 @@ export const LOCAL_TOOL_DEFINITIONS = [
     description:
       '[Support tool — file creation] Create or overwrite a file. After creating a file, ' +
       'ALWAYS call enrich_seed_data (MCP) to register the new module/feature in the ' +
-      'knowledge graph. Parent directories are created automatically.',
+      'knowledge graph. Parent directories are created automatically. ' +
+      'IMPORTANT: content must be under 300 KB. For large files (plans, docs), write in ' +
+      'sections: create the file with the first section, then append remaining sections ' +
+      'using subsequent write_file calls. Do NOT generate the entire large file inline ' +
+      'in a single tool call — this causes output token exhaustion and silent hangs.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -525,16 +529,35 @@ function findEntityEnd(text: string, startOffset: number): number {
 /*  write_file                                                        */
 /* ------------------------------------------------------------------ */
 
+/** Maximum bytes allowed for a single write_file call.
+ *  Prevents the model from being asked to generate massive inline file content
+ *  which causes output token exhaustion and silent hangs. ~300 KB is generous
+ *  for any reasonable file; plans over this limit should be written in sections. */
+const MAX_WRITE_BYTES = 300_000;
+
 async function handleWriteFile(input: Record<string, unknown>): Promise<string> {
   const filePath = String(input.filePath ?? '');
   const content = String(input.content ?? '');
   if (!filePath) return fail('filePath is required');
 
+  const encoded = Buffer.from(content, 'utf-8');
+
+  if (encoded.length > MAX_WRITE_BYTES) {
+    return fail(
+      `write_file: content is ${encoded.length} bytes which exceeds the ${MAX_WRITE_BYTES}-byte limit. ` +
+      `Split the file into sections and write each section separately, or reduce the content size.`,
+    );
+  }
+
   const absPath = resolvePath(filePath);
+
+  // Create parent directories automatically
+  const dir = path.dirname(absPath);
+  await fs.mkdir(dir, { recursive: true });
+
   const uri = vscode.Uri.file(absPath);
 
   try {
-    const encoded = Buffer.from(content, 'utf-8');
     await vscode.workspace.fs.writeFile(uri, encoded);
     return ok({
       message: `Wrote ${path.basename(absPath)} (${content.split('\n').length} lines, ${encoded.length} bytes)`,
