@@ -28,6 +28,7 @@ Thumbs.db
 # Local strategy / campaign working docs
 .strategy/
 
+plans/
 plans/DREAMGRAPH EVENTS AND HOOKS.txt
 plans/DG - THE DREAMGRAPH CLI.txt
 TDD_DISCIPLINARY_EXECUTION.md

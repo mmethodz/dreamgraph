@@ -530,17 +530,44 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
   }
 
   private async _changeProvider(provider: ArchitectProvider): Promise<void> {
-    await vscode.workspace.getConfiguration('dreamgraph.architect').update('provider', provider, vscode.ConfigurationTarget.Global);
-    await this.architectLlm?.loadConfig();
+    // Update in-memory config immediately so _sendModelUpdate reads the new value.
+    if (this.architectLlm) {
+      const models = provider === 'anthropic' ? ANTHROPIC_MODELS : provider === 'openai' ? OPENAI_MODELS : [];
+      const defaultModel = models[0] ?? '';
+      const apiKey = (provider !== 'ollama')
+        ? (await this.architectLlm.getApiKey(provider) ?? '')
+        : '';
+      this.architectLlm.applyConfig({
+        provider,
+        model: defaultModel,
+        baseUrl: '',
+        apiKey,
+      });
+    }
     this._sendModelUpdate();
     await this._syncAttachments();
+    // Persist to settings in background (do NOT call loadConfig — it would race)
+    const cfg = vscode.workspace.getConfiguration('dreamgraph.architect');
+    const defaultModel = this.architectLlm?.currentConfig?.model ?? '';
+    void cfg.update('provider', provider, vscode.ConfigurationTarget.Global);
+    if (defaultModel) void cfg.update('model', defaultModel, vscode.ConfigurationTarget.Global);
   }
 
   private async _changeModel(model: string): Promise<void> {
-    await vscode.workspace.getConfiguration('dreamgraph.architect').update('model', model, vscode.ConfigurationTarget.Global);
-    await this.architectLlm?.loadConfig();
+    // Update in-memory config immediately so _sendModelUpdate reads the new value.
+    if (this.architectLlm) {
+      const prev = this.architectLlm.currentConfig;
+      this.architectLlm.applyConfig({
+        provider: prev?.provider ?? '' as ArchitectProvider,
+        model,
+        baseUrl: prev?.baseUrl ?? '',
+        apiKey: prev?.apiKey ?? '',
+      });
+    }
     this._sendModelUpdate();
     await this._syncAttachments();
+    // Persist to settings in background (do NOT call loadConfig — it would race)
+    void vscode.workspace.getConfiguration('dreamgraph.architect').update('model', model, vscode.ConfigurationTarget.Global);
   }
 
   private async runAgenticLoop(llmMessages: ArchitectMessage[], tools: ToolDefinition[]): Promise<string> {

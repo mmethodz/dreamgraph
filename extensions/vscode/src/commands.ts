@@ -661,9 +661,13 @@ export function openChatCommand(svc: CommandServices): void {
 export async function setArchitectApiKeyCommand(
   svc: CommandServices,
 ): Promise<void> {
-  // Step 1: Check or select provider
-  const cfg = vscode.workspace.getConfiguration("dreamgraph.architect");
-  let provider = cfg.get<string>("provider") ?? "";
+  // Step 1: Use in-memory provider (authoritative), fall back to settings
+  let provider = svc.architectLlm.provider ?? "";
+
+  if (!provider) {
+    const cfg = vscode.workspace.getConfiguration("dreamgraph.architect");
+    provider = cfg.get<string>("provider") ?? "";
+  }
 
   if (!provider) {
     const picked = await vscode.window.showQuickPick(
@@ -676,7 +680,8 @@ export async function setArchitectApiKeyCommand(
     );
     if (!picked) return;
     provider = picked.label;
-    await cfg.update("provider", provider, vscode.ConfigurationTarget.Global);
+    await vscode.workspace.getConfiguration("dreamgraph.architect")
+      .update("provider", provider, vscode.ConfigurationTarget.Global);
     await svc.architectLlm.loadConfig();
   }
 
@@ -703,9 +708,13 @@ export async function setArchitectApiKeyCommand(
 
   if (!key) return; // user cancelled
 
-  // Step 4: Store in SecretStorage
+  // Step 4: Store in SecretStorage and update in-memory config
   await svc.architectLlm.setApiKey(provider as ArchitectProvider, key.trim());
-  await svc.architectLlm.loadConfig();
+  // Refresh in-memory config with the new key (no settings round-trip needed)
+  const current = svc.architectLlm.currentConfig;
+  if (current) {
+    svc.architectLlm.applyConfig({ ...current, apiKey: key.trim() });
+  }
 
   vscode.window.showInformationMessage(
     `DreamGraph: ✓ API key stored for ${provider}.`,

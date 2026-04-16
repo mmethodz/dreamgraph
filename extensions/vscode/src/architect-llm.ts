@@ -73,6 +73,8 @@ export const ANTHROPIC_MODELS = [
 ];
 
 export const OPENAI_MODELS = [
+  "gpt-5",
+  "gpt-5.4",
   "gpt-4.1",
   "gpt-4.1-mini",
   "gpt-4.1-nano",
@@ -101,6 +103,14 @@ export class ArchitectLlm implements vscode.Disposable {
     return this._config ? { ...this._config } : null;
   }
 
+  /** Apply a config directly in memory (skips settings round-trip). */
+  applyConfig(config: ArchitectConfig): void {
+    this._config = {
+      ...config,
+      baseUrl: config.baseUrl || this._defaultBaseUrl(config.provider),
+    };
+  }
+
   getModelCapabilities(provider?: ArchitectProvider | null, model?: string | null): ArchitectModelCapabilities {
     const effectiveProvider = provider ?? this._config?.provider ?? null;
     const effectiveModel = (model ?? this._config?.model ?? "").toLowerCase();
@@ -114,6 +124,7 @@ export class ArchitectLlm implements vscode.Disposable {
         return { textAttachments: true, imageAttachments: effectiveModel.startsWith("claude") };
       case "openai": {
         const imageCapable =
+          effectiveModel.startsWith("gpt-5") ||
           effectiveModel.startsWith("gpt-4.1") ||
           effectiveModel.startsWith("gpt-4o") ||
           effectiveModel.startsWith("o4") ||

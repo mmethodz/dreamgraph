@@ -42,6 +42,10 @@ Zero-dependency browser UI at `http://localhost:<port>/` — cognitive status, s
 ### 6. Extension — the agent in your editor
 Native VS Code sidebar with Chat, Dashboard, and Files Changed panels. The Architect LLM reasons over the graph first, makes targeted edits with verification, and syncs the graph so knowledge and code never drift. **Change model and provider mid-flight without losing context** — the graph persists independently of any LLM session.
 
+<p align="center">
+  <img src="assets/3096636a-a20d-4312-9187-674029a5d0f3.png" alt="DreamGraph Architect — VS Code extension with Chat and Dashboard panels" width="720" />
+</p>
+
 ---
 
 ## Getting Started
