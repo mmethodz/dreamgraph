@@ -62,6 +62,7 @@ type ExtensionToWebviewMessage =
   | { type: 'addMessage'; message: ChatMessage }
   | { type: 'stream-start' }
   | { type: 'stream-chunk'; chunk: string }
+  | { type: 'stream-thinking'; active: boolean }
   | { type: 'stream-end'; done: boolean }
   | { type: 'state'; state: { messages: ChatMessage[] } }
   | { type: 'updateModels'; providers: string[]; models: string[]; current: { provider: string; model: string }; capabilities: ArchitectModelCapabilities }
@@ -101,6 +102,8 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
   private steeringQueue: string[] = [];
   private draftText = '';
   private attachments: PromptAttachment[] = [];
+  /** Messages buffered while the webview was hidden. Flushed on rehydrate. */
+  private _pendingMessages: ExtensionToWebviewMessage[] = [];
 
   private static readonly MAX_TEXT_ATTACHMENT_BYTES = 100_000;
   private static readonly MAX_IMAGE_ATTACHMENT_BYTES = 5 * 1024 * 1024;
@@ -495,8 +498,30 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
     await this.postMessage({ type: 'state', state: { messages: this.messages } });
   }
 
+  /**
+   * Post a message to the webview. If the webview is currently hidden or
+   * disposed, critical messages are buffered and replayed on the next
+   * rehydrateWebview() call to prevent silent loss of stream-end/error events.
+   */
   private async postMessage(message: ExtensionToWebviewMessage): Promise<void> {
-    await this.view?.webview.postMessage(message);
+    if (this.view?.webview) {
+      // Flush any buffered messages first so order is preserved
+      if (this._pendingMessages.length > 0) {
+        const pending = this._pendingMessages.splice(0);
+        for (const m of pending) {
+          try { await this.view.webview.postMessage(m); } catch { /* view may have gone */ }
+        }
+      }
+      await this.view.webview.postMessage(message);
+    } else {
+      // Buffer stream-end and error messages so they are not silently lost
+      // when the webview is hidden (e.g. user switched panel). Streaming
+      // chunks are intentionally dropped — they would be stale on reconnect.
+      const type = (message as { type: string }).type;
+      if (type === 'stream-end' || type === 'error' || type === 'addMessage') {
+        this._pendingMessages.push(message);
+      }
+    }
   }
 
   private async persistMessages(): Promise<void> {
@@ -572,6 +597,10 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
 
   private static readonly MAX_TOOL_ITERATIONS = 32;
   private static readonly MAX_RETRIES = 3;
+  /** Cap on accumulated streaming content to prevent context window overflow
+   *  when the agent runs many iterations. Content beyond this is still executed
+   *  but not accumulated into streamingContent (the webview already received it). */
+  private static readonly MAX_STREAMING_CONTENT_CHARS = 200_000;
 
   /** Call callWithTools with automatic retry on 429 rate-limit errors. */
   private async _callWithToolsRetry(
@@ -615,12 +644,23 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       // Throttle between iterations to avoid TPM rate limits on fast tool loops
       if (iteration > 0) await new Promise((r) => setTimeout(r, 2000));
 
+      // Show thinking indicator while waiting for the non-streaming API call
+      void this.postMessage({ type: 'stream-thinking', active: true });
+
       const response = await this._callWithToolsRetry(llmMessages, tools, rawMessages);
+
+      // Hide thinking indicator now that we have a response
+      void this.postMessage({ type: 'stream-thinking', active: false });
 
       // Stream any text content to the webview
       if (response.content) {
         fullContent += response.content;
-        this.streamingContent += response.content;
+        // Guard: cap streamingContent to prevent unbounded memory growth across
+        // many tool iterations. The webview receives each chunk regardless — only
+        // the in-memory accumulator is capped.
+        if (this.streamingContent.length < ChatPanel.MAX_STREAMING_CONTENT_CHARS) {
+          this.streamingContent += response.content;
+        }
         void this.postMessage({ type: 'stream-chunk', chunk: response.content });
       }
 
@@ -644,7 +684,9 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
         // Show tool execution status
         const statusChunk = `\n\n⚡ Running \`${tc.name}\`…\n`;
         fullContent += statusChunk;
-        this.streamingContent += statusChunk;
+        if (this.streamingContent.length < ChatPanel.MAX_STREAMING_CONTENT_CHARS) {
+          this.streamingContent += statusChunk;
+        }
         void this.postMessage({ type: 'stream-chunk', chunk: statusChunk });
 
         let result: string;
@@ -770,6 +812,19 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       border-left: 3px solid var(--vscode-errorForeground);
       font-size: 12px;
       opacity: 0.9;
+    }
+
+    /* ── Thinking indicator ── */
+    #thinking-indicator {
+      padding: 8px 14px;
+      color: var(--vscode-descriptionForeground);
+      font-size: 12px;
+      font-style: italic;
+      animation: thinking-pulse 1.5s ease-in-out infinite;
+    }
+    @keyframes thinking-pulse {
+      0%, 100% { opacity: 0.4; }
+      50% { opacity: 1; }
     }
 
     /* ── Attachments bar ── */
@@ -932,6 +987,19 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       function render(messages) { messagesEl.innerHTML = ''; streamingEl = null; for (const message of messages) messagesEl.appendChild(createBubble(message.role, message.content)); scrollToBottom(); }
       function autoResize() { promptEl.style.height = 'auto'; promptEl.style.height = Math.min(promptEl.scrollHeight, 200) + 'px'; }
 
+      function showThinking() {
+        if (document.getElementById('thinking-indicator')) return;
+        const el = document.createElement('div');
+        el.id = 'thinking-indicator';
+        el.textContent = '💭 Thinking';
+        messagesEl.appendChild(el);
+        scrollToBottom();
+      }
+      function hideThinking() {
+        const el = document.getElementById('thinking-indicator');
+        if (el) el.remove();
+      }
+
       function renderAttachments(items) {
         attachmentState = items || [];
         attachmentsEl.innerHTML = '';
@@ -1031,7 +1099,8 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
           case 'state': if (message.state) render(message.state.messages || []); break;
           case 'addMessage': if (message.message) { messagesEl.appendChild(createBubble(message.message.role, message.message.content)); scrollToBottom(); } break;
           case 'stream-start': streamingEl = createBubble('assistant', ''); messagesEl.appendChild(streamingEl); scrollToBottom(); promptEl.placeholder = 'Steer the conversation…'; stopBtn.style.display = ''; break;
-          case 'stream-chunk': if (streamingEl && message.chunk) { streamingEl.textContent += message.chunk; scrollToBottom(); } break;
+          case 'stream-chunk': if (streamingEl && message.chunk) { hideThinking(); streamingEl.textContent += message.chunk; scrollToBottom(); } break;
+          case 'stream-thinking': message.active ? showThinking() : hideThinking(); break;
           case 'stream-end': streamingEl = null; promptEl.disabled = false; promptEl.placeholder = 'Ask DreamGraph…'; stopBtn.style.display = 'none'; promptEl.focus(); break;
           case 'updateModels': updateModels(message.providers, message.models, message.current, message.capabilities); break;
           case 'setAttachments': renderAttachments(message.attachments || []); break;
