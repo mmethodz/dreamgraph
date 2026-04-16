@@ -163,35 +163,35 @@ export class ArchitectLlm implements vscode.Disposable {
     return this._secretStorage.get(`dreamgraph.apiKey.${provider}`);
   }
 
-  async call(messages: ArchitectMessage[]): Promise<ArchitectResponse> {
+  async call(messages: ArchitectMessage[], signal?: AbortSignal): Promise<ArchitectResponse> {
     this._ensureConfigured();
     const config = this._config!;
     const start = Date.now();
 
     switch (config.provider) {
       case "anthropic":
-        return this._callAnthropic(config, messages, start);
+        return this._callAnthropic(config, messages, start, signal);
       case "openai":
-        return this._callOpenAI(config, messages, start);
+        return this._callOpenAI(config, messages, start, signal);
       case "ollama":
-        return this._callOllama(config, messages, start);
+        return this._callOllama(config, messages, start, signal);
       default:
         throw new Error(`Unknown Architect provider: ${config.provider}`);
     }
   }
 
-  async stream(messages: ArchitectMessage[], onChunk: StreamCallback): Promise<ArchitectResponse> {
+  async stream(messages: ArchitectMessage[], onChunk: StreamCallback, signal?: AbortSignal): Promise<ArchitectResponse> {
     this._ensureConfigured();
     const config = this._config!;
     const start = Date.now();
 
     switch (config.provider) {
       case "anthropic":
-        return this._streamAnthropic(config, messages, onChunk, start);
+        return this._streamAnthropic(config, messages, onChunk, start, signal);
       case "openai":
-        return this._streamOpenAI(config, messages, onChunk, start);
+        return this._streamOpenAI(config, messages, onChunk, start, signal);
       case "ollama":
-        return this._streamOllama(config, messages, onChunk, start);
+        return this._streamOllama(config, messages, onChunk, start, signal);
       default:
         throw new Error(`Unknown Architect provider: ${config.provider}`);
     }
@@ -201,6 +201,7 @@ export class ArchitectLlm implements vscode.Disposable {
     messages: ArchitectMessage[],
     tools: ToolDefinition[],
     rawMessages?: unknown[],
+    signal?: AbortSignal,
   ): Promise<ArchitectToolResponse> {
     this._ensureConfigured();
     const config = this._config!;
@@ -208,11 +209,11 @@ export class ArchitectLlm implements vscode.Disposable {
 
     switch (config.provider) {
       case "anthropic":
-        return this._callAnthropicWithTools(config, messages, tools, start, rawMessages);
+        return this._callAnthropicWithTools(config, messages, tools, start, rawMessages, signal);
       case "openai":
-        return this._callOpenAIWithTools(config, messages, tools, start, rawMessages);
+        return this._callOpenAIWithTools(config, messages, tools, start, rawMessages, signal);
       case "ollama": {
-        const resp = await this._callOllama(config, messages, start);
+        const resp = await this._callOllama(config, messages, start, signal);
         return { ...resp, toolCalls: [], stopReason: "end_turn" };
       }
       default:
@@ -330,6 +331,7 @@ export class ArchitectLlm implements vscode.Disposable {
     config: ArchitectConfig,
     messages: ArchitectMessage[],
     start: number,
+    signal?: AbortSignal,
   ): Promise<ArchitectResponse> {
     const { system, userMessages } = this._splitSystem(messages);
     const res = await fetch(`${config.baseUrl}/messages`, {
@@ -345,6 +347,7 @@ export class ArchitectLlm implements vscode.Disposable {
         ...(system ? { system } : {}),
         messages: userMessages.map((m) => ({ role: m.role, content: this._toAnthropicContent(m.content) })),
       }),
+      signal,
     });
 
     if (!res.ok) throw new Error(`Anthropic API error (${res.status}): ${await res.text()}`);
@@ -368,6 +371,7 @@ export class ArchitectLlm implements vscode.Disposable {
     tools: ToolDefinition[],
     start: number,
     rawMessages?: unknown[],
+    signal?: AbortSignal,
   ): Promise<ArchitectToolResponse> {
     const { system } = this._splitSystem(messages);
     const apiMessages = rawMessages
@@ -388,6 +392,7 @@ export class ArchitectLlm implements vscode.Disposable {
         messages: apiMessages,
         tools: tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.inputSchema })),
       }),
+      signal,
     });
 
     if (!res.ok) throw new Error(`Anthropic API error (${res.status}): ${await res.text()}`);
@@ -416,6 +421,7 @@ export class ArchitectLlm implements vscode.Disposable {
     tools: ToolDefinition[],
     start: number,
     rawMessages?: unknown[],
+    signal?: AbortSignal,
   ): Promise<ArchitectToolResponse> {
     const openaiTools = tools.map((t) => ({
       type: "function" as const,
@@ -443,6 +449,7 @@ export class ArchitectLlm implements vscode.Disposable {
         messages: apiMessages,
         tools: openaiTools,
       }),
+      signal,
     });
 
     if (!res.ok) throw new Error(`OpenAI API error (${res.status}): ${await res.text()}`);
@@ -475,6 +482,7 @@ export class ArchitectLlm implements vscode.Disposable {
     messages: ArchitectMessage[],
     onChunk: StreamCallback,
     start: number,
+    signal?: AbortSignal,
   ): Promise<ArchitectResponse> {
     const { system, userMessages } = this._splitSystem(messages);
     const res = await fetch(`${config.baseUrl}/messages`, {
@@ -491,6 +499,7 @@ export class ArchitectLlm implements vscode.Disposable {
         ...(system ? { system } : {}),
         messages: userMessages.map((m) => ({ role: m.role, content: this._toAnthropicContent(m.content) })),
       }),
+      signal,
     });
 
     if (!res.ok) throw new Error(`Anthropic API error (${res.status}): ${await res.text()}`);
@@ -501,6 +510,7 @@ export class ArchitectLlm implements vscode.Disposable {
     config: ArchitectConfig,
     messages: ArchitectMessage[],
     start: number,
+    signal?: AbortSignal,
   ): Promise<ArchitectResponse> {
     const res = await fetch(`${config.baseUrl}/chat/completions`, {
       method: "POST",
@@ -513,6 +523,7 @@ export class ArchitectLlm implements vscode.Disposable {
         max_completion_tokens: 16384,
         messages: messages.map((m) => ({ role: m.role, content: this._toOpenAIContent(m.content) })),
       }),
+      signal,
     });
 
     if (!res.ok) throw new Error(`OpenAI API error (${res.status}): ${await res.text()}`);
@@ -535,6 +546,7 @@ export class ArchitectLlm implements vscode.Disposable {
     messages: ArchitectMessage[],
     onChunk: StreamCallback,
     start: number,
+    signal?: AbortSignal,
   ): Promise<ArchitectResponse> {
     const res = await fetch(`${config.baseUrl}/chat/completions`, {
       method: "POST",
@@ -548,6 +560,7 @@ export class ArchitectLlm implements vscode.Disposable {
         stream: true,
         messages: messages.map((m) => ({ role: m.role, content: this._toOpenAIContent(m.content) })),
       }),
+      signal,
     });
 
     if (!res.ok) throw new Error(`OpenAI API error (${res.status}): ${await res.text()}`);
@@ -558,6 +571,7 @@ export class ArchitectLlm implements vscode.Disposable {
     config: ArchitectConfig,
     messages: ArchitectMessage[],
     start: number,
+    signal?: AbortSignal,
   ): Promise<ArchitectResponse> {
     const res = await fetch(`${config.baseUrl}/api/chat`, {
       method: "POST",
@@ -567,6 +581,7 @@ export class ArchitectLlm implements vscode.Disposable {
         messages: messages.map((m) => ({ role: m.role, content: this._toOllamaContent(m.content) })),
         stream: false,
       }),
+      signal,
     });
 
     if (!res.ok) throw new Error(`Ollama API error (${res.status}): ${await res.text()}`);
@@ -590,6 +605,7 @@ export class ArchitectLlm implements vscode.Disposable {
     messages: ArchitectMessage[],
     onChunk: StreamCallback,
     start: number,
+    signal?: AbortSignal,
   ): Promise<ArchitectResponse> {
     const res = await fetch(`${config.baseUrl}/api/chat`, {
       method: "POST",
@@ -599,6 +615,7 @@ export class ArchitectLlm implements vscode.Disposable {
         messages: messages.map((m) => ({ role: m.role, content: this._toOllamaContent(m.content) })),
         stream: true,
       }),
+      signal,
     });
 
     if (!res.ok) throw new Error(`Ollama API error (${res.status}): ${await res.text()}`);

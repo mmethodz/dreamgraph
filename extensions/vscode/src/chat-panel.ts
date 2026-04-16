@@ -11,7 +11,11 @@
 
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as fs from 'fs';
 import type { ChatMemory, PersistedMessage } from './chat-memory';
+import { getStyles } from './webview/styles.js';
+import { getRenderScript } from './webview/render-markdown.js';
+import { getEntityLinksScript } from './webview/entity-links.js';
 import type { GraphSignalProvider } from './graph-signal';
 import {
   ANTHROPIC_MODELS,
@@ -32,9 +36,38 @@ import { assemblePrompt, inferTask } from './prompts/index.js';
 type ChatRole = 'user' | 'assistant' | 'system';
 
 interface ChatMessage {
+  id?: string;
   role: ChatRole;
   content: string;
   timestamp: string;
+  fullContent?: string;
+  instanceId?: string;
+  implicitEntityNotice?: string;
+  pinned?: boolean;
+  sourceMessageId?: string;
+}
+
+interface MessageAction {
+  id: string;
+  label: string;
+  kind: 'primary' | 'secondary';
+  actionType: 'tool' | 'show_full';
+  toolName?: string;
+  toolArgs?: Record<string, unknown>;
+  destructive?: boolean;
+}
+
+interface HoverActionState {
+  copied?: boolean;
+  pinned?: boolean;
+}
+
+interface ActionExecutionRecord {
+  timestamp: string;
+  actionType: string;
+  sourceMessageId: string;
+  outcome: 'completed' | 'failed' | 'cancelled';
+  detail?: string;
 }
 
 interface PromptAttachment {
@@ -58,21 +91,54 @@ interface AttachmentPreview {
   note?: string;
 }
 
+interface EntityVerification {
+  status: 'verified' | 'latent' | 'unverified' | 'tension';
+  confidence: number;
+  lastValidated?: string;
+}
+
+interface ImplicitEntityDetectionResult {
+  names: string[];
+  truncated: boolean;
+}
+
+interface VerdictBanner {
+  level: 'verified' | 'partial' | 'speculative';
+  summary: string;
+}
+
+interface ToolTraceEntry {
+  tool: string;
+  argsSummary: string;
+  filesAffected: string[];
+  durationMs: number;
+  status: 'completed' | 'failed';
+}
+
 type ExtensionToWebviewMessage =
-  | { type: 'addMessage'; message: ChatMessage }
+  | { type: 'addMessage'; message: ChatMessage; actions?: MessageAction[]; roleMeta?: { title: string; subtitle?: string }; contextFooter?: string }
+  | { type: 'messageActionState'; messageId: string; actionId: string; status: 'loading' | 'completed' | 'failed'; error?: string }
   | { type: 'stream-start' }
   | { type: 'stream-chunk'; chunk: string }
   | { type: 'stream-thinking'; active: boolean }
   | { type: 'stream-end'; done: boolean }
+  | { type: 'tool-progress'; tool: string; message: string; progress?: number; total?: number }
   | { type: 'state'; state: { messages: ChatMessage[] } }
   | { type: 'updateModels'; providers: string[]; models: string[]; current: { provider: string; model: string }; capabilities: ArchitectModelCapabilities }
   | { type: 'setAttachments'; attachments: AttachmentPreview[] }
   | { type: 'error'; error: string }
-  | { type: 'restoreDraft'; text: string };
+  | { type: 'restoreDraft'; text: string }
+  | { type: 'entityStatus'; requestId: string; results: Record<string, EntityVerification> }
+  | { type: 'toolTrace'; calls: ToolTraceEntry[] }
+  | { type: 'verdict'; verdict: VerdictBanner };
 
 type WebviewToExtensionMessage =
   | { type: 'ready' }
   | { type: 'send'; text: string }
+  | { type: 'runMessageAction'; messageId: string; actionId: string }
+  | { type: 'retryMessage'; messageId: string }
+  | { type: 'copyMessage'; messageId: string }
+  | { type: 'pinMessage'; messageId: string }
   | { type: 'pickAttachments' }
   | { type: 'removeAttachment'; id: string }
   | { type: 'pasteImage'; dataBase64: string; mimeType: string }
@@ -81,7 +147,14 @@ type WebviewToExtensionMessage =
   | { type: 'changeProvider'; provider: string }
   | { type: 'changeModel'; model: string }
   | { type: 'setApiKey' }
-  | { type: 'saveDraft'; text: string };
+  | { type: 'saveDraft'; text: string }
+  // Slice 1
+  | { type: 'openExternalLink'; url: string }
+  | { type: 'copyToClipboard'; text: string }
+  // Slice 2
+  | { type: 'navigateEntity'; uri: string }
+  // Slice 4
+  | { type: 'verifyEntities'; requestId: string; names: string[] };
 
 export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable {
   public static readonly viewType = 'dreamgraph.chatView';
@@ -105,8 +178,40 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
   /** Messages buffered while the webview was hidden. Flushed on rehydrate. */
   private _pendingMessages: ExtensionToWebviewMessage[] = [];
 
+  /** Cached browser build of markdown-it. Loaded once at first getHtml() call. */
+  private _markdownItSource: string | null = null;
+  /** Cached browser build of DOMPurify. Loaded once at first getHtml() call. */
+  private _domPurifySource: string | null = null;
+  /** Cached URI to bundled webview runtime for Slice 3 Option C migration. */
+  private _webviewBundleUri: string | null = null;
+  private _lastToolTrace: ToolTraceEntry[] = [];
+  private _lastVerdict: VerdictBanner | null = null;
+  private _actionLog: ActionExecutionRecord[] = [];
+  private _actionStateByMessage = new Map<string, Set<string>>();
+  private _hoverActionStateByMessage = new Map<string, HoverActionState>();
+
+  private static readonly MAX_RENDERED_MESSAGE_CHARS = 100_000;
+  private static readonly MAX_ENTITY_LINKS_PER_MESSAGE = 100;
+  private static readonly ACTION_ALLOWLIST = new Set(['tool', 'show_full']);
+
   private static readonly MAX_TEXT_ATTACHMENT_BYTES = 100_000;
   private static readonly MAX_IMAGE_ATTACHMENT_BYTES = 5 * 1024 * 1024;
+
+  /** Hard timeout per LLM provider request (ms). Prevents infinite hangs. */
+  private static readonly REQUEST_TIMEOUT_MS = 90_000;
+
+  /** Per-tool timeout overrides (ms). Tools not listed use _default. */
+  private static readonly TOOL_TIMEOUT_MS: Record<string, number> = {
+    dream_cycle: 120_000,
+    nightmare_cycle: 120_000,
+    metacognitive_analysis: 120_000,
+    run_command: 60_000,
+    write_file: 30_000,
+    edit_file: 30_000,
+    read_source_code: 30_000,
+    read_local_file: 30_000,
+    _default: 60_000,
+  };
 
   private static readonly TEXT_EXTENSIONS = new Set([
     '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.json', '.md', '.txt', '.py', '.cs', '.java', '.go', '.rs', '.yml', '.yaml', '.xml', '.html', '.css', '.scss', '.sql', '.sh'
@@ -154,10 +259,10 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
   public get isVisible(): boolean { return this.view?.visible ?? false; }
 
   public addExternalMessage(role: ChatRole, content: string): void {
-    const msg: ChatMessage = { role, content, timestamp: new Date().toISOString() };
+    const msg: ChatMessage = { id: this._createMessageId(), role, content, timestamp: new Date().toISOString(), instanceId: this.currentInstanceId };
     this.messages.push(msg);
     void this.persistMessages();
-    void this.postMessage({ type: 'addMessage', message: msg });
+    void this.postMessage({ type: 'addMessage', message: msg, actions: this._buildMessageActions(msg), roleMeta: this._roleMetaFor(msg), contextFooter: this._contextFooterFor(msg) });
   }
 
   public open(): void { void vscode.commands.executeCommand('dreamgraph.chatView.focus'); }
@@ -232,6 +337,62 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
         case 'saveDraft':
           this.draftText = message.text ?? '';
           break;
+        case 'openExternalLink': {
+          const url = (message as { type: 'openExternalLink'; url: string }).url;
+          if (typeof url === 'string' && (url.startsWith('https://') || url.startsWith('http://'))) {
+            void vscode.env.openExternal(vscode.Uri.parse(url));
+          }
+          break;
+        }
+        case 'copyToClipboard': {
+          const text = (message as { type: 'copyToClipboard'; text: string }).text;
+          if (typeof text === 'string') {
+            void vscode.env.clipboard.writeText(text);
+          }
+          break;
+        }
+        case 'navigateEntity': {
+          // Slice 2 — entity URI navigation. Delegate to VS Code command if registered,
+          // or fall back to opening a graph query for the referenced entity.
+          const uri = (message as { type: 'navigateEntity'; uri: string }).uri;
+          if (typeof uri === 'string' && /^[a-z-]+:\/\//.test(uri)) {
+            const [scheme, rawName = ''] = uri.split('://');
+            const name = decodeURIComponent(rawName);
+            vscode.commands.executeCommand('dreamgraph.navigateEntity', uri).then(
+              undefined,
+              async () => {
+                const query = scheme === 'data-model'
+                  ? `Search data model for ${name}`
+                  : `Explain ${uri} in system context`;
+                await this.handleUserMessage(query);
+              },
+            );
+          }
+          break;
+        }
+        case 'verifyEntities': {
+          const { requestId, names } = message as { type: 'verifyEntities'; requestId: string; names: string[] };
+          const results = await this._verifyEntities(names);
+          await this.postMessage({ type: 'entityStatus', requestId, results });
+          break;
+        }
+        case 'runMessageAction': {
+          await this._runMessageAction(message.messageId, message.actionId);
+          break;
+        }
+        case 'retryMessage': {
+          const original = this.messages.find((m) => m.id === message.messageId && m.role === 'user');
+          if (original) await this.handleUserMessage(original.content);
+          break;
+        }
+        case 'copyMessage': {
+          await this._copyMessage(message.messageId);
+          break;
+        }
+        case 'pinMessage': {
+          await this._pinMessage(message.messageId);
+          break;
+        }
       }
     }, null, this.disposables);
 
@@ -251,24 +412,28 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
   private async handleUserMessage(text: string): Promise<void> {
     const attachmentSummary = this._attachmentSummaryForUserMessage();
     const userMessage: ChatMessage = {
+      id: this._createMessageId(),
       role: 'user',
       content: attachmentSummary ? `${text}\n\n${attachmentSummary}` : text,
       timestamp: new Date().toISOString(),
+      instanceId: this.currentInstanceId,
     };
 
     this.messages.push(userMessage);
     await this.persistMessages();
-    await this.postMessage({ type: 'addMessage', message: userMessage });
+    await this.postMessage({ type: 'addMessage', message: userMessage, actions: this._buildMessageActions(userMessage), roleMeta: this._roleMetaFor(userMessage), contextFooter: this._contextFooterFor(userMessage) });
 
     if (!this.architectLlm || !this.architectLlm.isConfigured) {
       const errMsg: ChatMessage = {
+        id: this._createMessageId(),
         role: 'system',
         content: 'Architect LLM is not configured. Select provider and model in the header dropdowns, then set your API key.',
         timestamp: new Date().toISOString(),
+        instanceId: this.currentInstanceId,
       };
       this.messages.push(errMsg);
       await this.persistMessages();
-      await this.postMessage({ type: 'addMessage', message: errMsg });
+      await this.postMessage({ type: 'addMessage', message: errMsg, actions: this._buildMessageActions(errMsg), roleMeta: this._roleMetaFor(errMsg), contextFooter: this._contextFooterFor(errMsg) });
       return;
     }
 
@@ -276,6 +441,8 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       this.streaming = true;
       this.streamingContent = '';
       this.steeringQueue = [];
+      this._lastToolTrace = [];
+      this._lastVerdict = null;
       this.abortController = new AbortController();
 
       const envelope = this.contextBuilder ? await this.contextBuilder.buildEnvelope(text) : null;
@@ -314,29 +481,49 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       if (tools.length > 0) {
         fullContent = await this.runAgenticLoop(llmMessages, tools);
       } else {
-        await this.architectLlm.stream(llmMessages, (chunk: string) => {
-          fullContent += chunk;
-          this.streamingContent += chunk;
-          void this.postMessage({ type: 'stream-chunk', chunk });
-        });
+        const req = this._createRequestSignal();
+        try {
+          await this.architectLlm.stream(llmMessages, (chunk: string) => {
+            const safeChunk = this._redactSecrets(chunk);
+            fullContent += safeChunk;
+            this.streamingContent += safeChunk;
+            void this.postMessage({ type: 'stream-chunk', chunk: safeChunk });
+          }, req.signal);
+        } finally {
+          req.dispose();
+        }
       }
 
-      const assistantMessage: ChatMessage = { role: 'assistant', content: fullContent, timestamp: new Date().toISOString() };
+      const redactedFullContent = this._redactSecrets(fullContent);
+      this._lastVerdict = this._deriveVerdict(redactedFullContent, this._lastToolTrace);
+      const finalContent = this._applyRenderLimits(redactedFullContent);
+      const implicitEntities = this._detectImplicitEntities(redactedFullContent);
+      const implicitEntityNotice = implicitEntities.names.length > 0
+        ? this._formatImplicitEntityNotice(implicitEntities)
+        : undefined;
+      const assistantMessage: ChatMessage = {
+        id: this._createMessageId(),
+        role: 'assistant',
+        content: finalContent.content,
+        fullContent: redactedFullContent,
+        implicitEntityNotice,
+        timestamp: new Date().toISOString(),
+        instanceId: this.currentInstanceId,
+      };
       this.messages.push(assistantMessage);
       await this.persistMessages();
-      await this.postMessage({ type: 'stream-end', done: true });
       this.attachments = [];
       await this._syncAttachments();
     } catch (err: unknown) {
       const errorText = err instanceof Error ? err.message : String(err);
-      const errMsg: ChatMessage = { role: 'system', content: `Error: ${errorText}`, timestamp: new Date().toISOString() };
+      const isAbort = err instanceof DOMException && err.name === 'AbortError';
+      const displayText = isAbort ? 'Generation stopped.' : `Error: ${errorText}`;
+      const errMsg: ChatMessage = { id: this._createMessageId(), role: 'system', content: displayText, timestamp: new Date().toISOString(), instanceId: this.currentInstanceId };
       this.messages.push(errMsg);
       await this.persistMessages();
-      await this.postMessage({ type: 'stream-end', done: true });
-      await this.postMessage({ type: 'addMessage', message: errMsg });
+      await this.postMessage({ type: 'addMessage', message: errMsg, actions: this._buildMessageActions(errMsg), roleMeta: this._roleMetaFor(errMsg), contextFooter: this._contextFooterFor(errMsg) });
     } finally {
-      this.streaming = false;
-      this.abortController = null;
+      this.resetStreamState();
     }
   }
 
@@ -488,6 +675,53 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
 
   private abortGeneration(): void { this.abortController?.abort(); }
 
+  /**
+   * Create a child AbortSignal that fires on EITHER user abort OR timeout.
+   * Returns a dispose function that MUST be called when the request completes
+   * to prevent timer leaks.
+   */
+  private _createRequestSignal(timeoutMs = ChatPanel.REQUEST_TIMEOUT_MS): { signal: AbortSignal; dispose: () => void } {
+    const child = new AbortController();
+    const timer = setTimeout(() => child.abort(new Error(`LLM request timed out after ${timeoutMs / 1000}s`)), timeoutMs);
+
+    const onParentAbort = () => {
+      clearTimeout(timer);
+      child.abort(this.abortController?.signal.reason ?? 'User stopped generation');
+    };
+
+    if (this.abortController?.signal.aborted) {
+      clearTimeout(timer);
+      child.abort(this.abortController.signal.reason);
+    } else {
+      this.abortController?.signal.addEventListener('abort', onParentAbort, { once: true });
+    }
+
+    return {
+      signal: child.signal,
+      dispose: () => {
+        clearTimeout(timer);
+        this.abortController?.signal.removeEventListener('abort', onParentAbort);
+      },
+    };
+  }
+
+  /**
+   * Reset ALL streaming-related state in one place.
+   * Sends cleanup messages to the webview so the UI never stays stuck.
+   */
+  private resetStreamState(): void {
+    this.streaming = false;
+    this.streamingContent = '';
+    this.steeringQueue = [];
+    this.abortController = null;
+    void this.postMessage({ type: 'stream-thinking', active: false });
+    if (this._lastVerdict) {
+      void this.postMessage({ type: 'verdict', verdict: this._lastVerdict });
+    }
+    void this.postMessage({ type: 'toolTrace', calls: this._lastToolTrace });
+    void this.postMessage({ type: 'stream-end', done: true });
+  }
+
   private async rehydrateWebview(): Promise<void> {
     await this.postState();
     if (this.draftText) await this.postMessage({ type: 'restoreDraft', text: this.draftText });
@@ -496,6 +730,185 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
 
   private async postState(): Promise<void> {
     await this.postMessage({ type: 'state', state: { messages: this.messages } });
+  }
+
+  public getActionLogForTest(): ActionExecutionRecord[] {
+    return this._actionLog;
+  }
+
+  private _createMessageId(): string {
+    return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+    private _roleMetaFor(message: ChatMessage): { title: string; subtitle?: string } {
+    if (message.role === 'assistant') {
+      return { title: 'DreamGraph Architect', subtitle: 'Graph-grounded assistant' };
+    }
+    if (message.role === 'user') {
+      return { title: 'You' };
+    }
+    return { title: 'System' };
+  }
+
+  private _contextFooterFor(message: ChatMessage): string {
+    const scope = message.instanceId ?? this.currentInstanceId;
+    if (message.role === 'assistant') {
+      return `Instance: ${scope} • Actions require explicit click • Trace reflects real tool execution`;
+    }
+    if (message.role === 'user') {
+      return `Instance: ${scope}`;
+    }
+    return `Instance: ${scope} • System message`;
+  }
+
+  private _applyRenderLimits(content: string): { content: string; truncated: boolean } {
+    if (content.length <= ChatPanel.MAX_RENDERED_MESSAGE_CHARS) {
+      return { content, truncated: false };
+    }
+    const clipped = content.slice(0, ChatPanel.MAX_RENDERED_MESSAGE_CHARS);
+    return {
+      content: `${clipped}\n\n[Response truncated]`,
+      truncated: true,
+    };
+  }
+
+  private _buildMessageActions(message: ChatMessage): MessageAction[] {
+    const actions: MessageAction[] = [];
+    if (message.role === 'assistant') {
+      if (message.content.includes('[Response truncated]')) {
+        actions.push({ id: 'show-full', label: 'Show full', kind: 'primary', actionType: 'show_full' });
+      }
+      if (this._lastToolTrace.length > 0) {
+        actions.push({
+          id: 'show-trace',
+          label: 'Show tool trace',
+          kind: 'secondary',
+          actionType: 'tool',
+          toolName: 'query_self_metrics',
+          toolArgs: { flush_to_disk: false },
+        });
+      }
+    }
+    return actions;
+  }
+
+  private _detectImplicitEntities(content: string): ImplicitEntityDetectionResult {
+    const explicitUris = new Set(Array.from(content.matchAll(/\b[a-z-]+:\/\/([A-Za-z0-9._/-]+)/g)).map((match) => match[1]));
+    const candidates = Array.from(content.matchAll(/\b(?:feature|workflow|ADR|tension|entity|data model)\s+([A-Z][A-Za-z0-9._-]{1,80})\b/g))
+      .map((match) => match[1])
+      .filter((name) => !explicitUris.has(name));
+    const deduped = Array.from(new Set(candidates));
+    return {
+      names: deduped.slice(0, ChatPanel.MAX_ENTITY_LINKS_PER_MESSAGE),
+      truncated: deduped.length > ChatPanel.MAX_ENTITY_LINKS_PER_MESSAGE,
+    };
+  }
+
+  private _formatImplicitEntityNotice(result: ImplicitEntityDetectionResult): string {
+    if (result.names.length === 0) {
+      return '';
+    }
+    const prefix = 'Implicit entity references detected: ';
+    const body = result.names.join(', ');
+    const suffix = result.truncated ? ' … [Entity link cap reached]' : '';
+    return `${prefix}${body}${suffix}`;
+  }
+
+  private async _copyMessage(messageId: string): Promise<void> {
+    const message = this.messages.find((entry) => entry.id === messageId);
+    if (!message) {
+      return;
+    }
+    await vscode.env.clipboard.writeText(message.fullContent ?? message.content);
+    this._hoverActionStateByMessage.set(messageId, {
+      ...(this._hoverActionStateByMessage.get(messageId) ?? {}),
+      copied: true,
+    });
+  }
+
+  private async _pinMessage(messageId: string): Promise<void> {
+    const message = this.messages.find((entry) => entry.id === messageId);
+    if (!message) {
+      return;
+    }
+    message.pinned = !message.pinned;
+    this._hoverActionStateByMessage.set(messageId, {
+      ...(this._hoverActionStateByMessage.get(messageId) ?? {}),
+      pinned: Boolean(message.pinned),
+    });
+    await this.persistMessages();
+    await this.postState();
+  }
+
+  private async _runMessageAction(messageId: string, actionId: string): Promise<void> {
+    const message = this.messages.find((m) => m.id === messageId);
+    const action = message ? this._buildMessageActions(message).find((a) => a.id === actionId) : undefined;
+    if (!message || !action || !ChatPanel.ACTION_ALLOWLIST.has(action.actionType)) {
+      void vscode.window.showErrorMessage('Action unavailable.');
+      this._actionLog.push({ timestamp: new Date().toISOString(), actionType: actionId, sourceMessageId: messageId, outcome: 'failed', detail: 'unavailable' });
+      return;
+    }
+
+    await this.postMessage({ type: 'messageActionState', messageId, actionId, status: 'loading' });
+
+    if (action.destructive) {
+      const choice = await vscode.window.showWarningMessage(
+        `Run destructive action "${action.label}"?`,
+        { modal: true },
+        'Run',
+      );
+      if (choice !== 'Run') {
+        this._actionLog.push({ timestamp: new Date().toISOString(), actionType: action.actionType, sourceMessageId: messageId, outcome: 'cancelled', detail: action.id });
+        await this.postMessage({ type: 'messageActionState', messageId, actionId, status: 'failed', error: 'Cancelled' });
+        return;
+      }
+    }
+
+    try {
+      if (action.actionType === 'show_full') {
+        if (!message.fullContent || message.fullContent === message.content) {
+          throw new Error('Full response is not available for this message.');
+        }
+        message.content = message.fullContent;
+        const implicitEntities = this._detectImplicitEntities(message.fullContent);
+        message.implicitEntityNotice = implicitEntities.names.length > 0
+          ? this._formatImplicitEntityNotice(implicitEntities)
+          : undefined;
+        await this.persistMessages();
+        await this.postState();
+        this._actionLog.push({ timestamp: new Date().toISOString(), actionType: action.actionType, sourceMessageId: messageId, outcome: 'completed', detail: action.id });
+        await this.postMessage({ type: 'messageActionState', messageId, actionId, status: 'completed' });
+        return;
+      }
+
+      if (action.actionType === 'tool') {
+        if (!action.toolName) {
+          throw new Error('Tool action is missing a tool name.');
+        }
+        const result = await this._executeMessageActionTool(action.toolName, action.toolArgs ?? {});
+        const resultText = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+        const toolMessage: ChatMessage = {
+          id: this._createMessageId(),
+          role: 'system',
+          content: `Action result (${action.label})\n\n${this._redactSecrets(resultText)}`,
+          timestamp: new Date().toISOString(),
+          instanceId: this.currentInstanceId,
+        };
+        this.messages.push(toolMessage);
+        await this.persistMessages();
+        await this.postMessage({ type: 'addMessage', message: toolMessage, actions: this._buildMessageActions(toolMessage), roleMeta: this._roleMetaFor(toolMessage), contextFooter: this._contextFooterFor(toolMessage) });
+        this._actionLog.push({ timestamp: new Date().toISOString(), actionType: action.actionType, sourceMessageId: messageId, outcome: 'completed', detail: action.toolName });
+        await this.postMessage({ type: 'messageActionState', messageId, actionId, status: 'completed' });
+        return;
+      }
+
+      throw new Error('Unsupported action type.');
+    } catch (error) {
+      const messageText = error instanceof Error ? error.message : String(error);
+      this._actionLog.push({ timestamp: new Date().toISOString(), actionType: action.actionType, sourceMessageId: messageId, outcome: 'failed', detail: messageText });
+      await this.postMessage({ type: 'messageActionState', messageId, actionId, status: 'failed', error: messageText });
+      void vscode.window.showErrorMessage(messageText);
+    }
   }
 
   /**
@@ -518,7 +931,7 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       // when the webview is hidden (e.g. user switched panel). Streaming
       // chunks are intentionally dropped — they would be stale on reconnect.
       const type = (message as { type: string }).type;
-      if (type === 'stream-end' || type === 'error' || type === 'addMessage') {
+      if (type === 'stream-end' || type === 'stream-thinking' || type === 'error' || type === 'addMessage') {
         this._pendingMessages.push(message);
       }
     }
@@ -532,7 +945,9 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
   private async restoreMessages(): Promise<void> {
     if (!this.memory) return;
     const saved = await this.memory.load(this.currentInstanceId);
-    this.messages.splice(0, this.messages.length, ...(saved as ChatMessage[]));
+    const scoped = (saved as ChatMessage[]).filter((message) => !message.instanceId || message.instanceId === this.currentInstanceId);
+    this.messages.splice(0, this.messages.length, ...scoped.map((message) => ({ ...message, instanceId: message.instanceId ?? this.currentInstanceId })));
+    this._hoverActionStateByMessage.clear();
     await this.postState();
   }
 
@@ -597,6 +1012,13 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
 
   private static readonly MAX_TOOL_ITERATIONS = 32;
   private static readonly MAX_RETRIES = 3;
+  private static readonly MAX_VERIFICATION_BATCH_SIZE = 50;
+  private static readonly VERIFICATION_TIMEOUT_MS = 5_000;
+  private static readonly SECRET_PATTERNS = [
+    /(?:api[_-]?key|secret|token|password|passwd|auth)\s*[:=]\s*\S+/gi,
+    /(?:sk-|pk-|ghp_|gho_|github_pat_)\S+/g,
+    /-----BEGIN (?:RSA |EC )?PRIVATE KEY-----[\s\S]*?-----END/g,
+  ];
   /** Cap on accumulated streaming content to prevent context window overflow
    *  when the agent runs many iterations. Content beyond this is still executed
    *  but not accumulated into streamingContent (the webview already received it). */
@@ -607,10 +1029,11 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
     llmMessages: ArchitectMessage[],
     tools: ToolDefinition[],
     rawMessages?: unknown[],
+    signal?: AbortSignal,
   ): ReturnType<ArchitectLlm['callWithTools']> {
     for (let attempt = 0; attempt <= ChatPanel.MAX_RETRIES; attempt++) {
       try {
-        return await this.architectLlm!.callWithTools(llmMessages, tools, rawMessages);
+        return await this.architectLlm!.callWithTools(llmMessages, tools, rawMessages, signal);
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         const is429 = msg.includes('429') || msg.toLowerCase().includes('rate_limit');
@@ -631,6 +1054,10 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
     throw new Error('Rate limit retries exhausted'); // unreachable but satisfies TS
   }
 
+  private static _toolTimeoutMs(toolName: string): number {
+    return ChatPanel.TOOL_TIMEOUT_MS[toolName] ?? ChatPanel.TOOL_TIMEOUT_MS._default;
+  }
+
   private async runAgenticLoop(llmMessages: ArchitectMessage[], tools: ToolDefinition[]): Promise<string> {
     if (!this.architectLlm) return '';
 
@@ -647,13 +1074,17 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       // Show thinking indicator while waiting for the non-streaming API call
       void this.postMessage({ type: 'stream-thinking', active: true });
 
+      // Create a per-iteration signal with hard timeout (P2) linked to user abort (P1)
+      const req = this._createRequestSignal();
       let response: Awaited<ReturnType<ArchitectLlm['callWithTools']>>;
       try {
-        response = await this._callWithToolsRetry(llmMessages, tools, rawMessages);
+        response = await this._callWithToolsRetry(llmMessages, tools, rawMessages, req.signal);
       } catch (err) {
         // Ensure thinking indicator is hidden before the error propagates
         void this.postMessage({ type: 'stream-thinking', active: false });
         throw err;
+      } finally {
+        req.dispose();
       }
 
       // Hide thinking indicator now that we have a response
@@ -661,14 +1092,15 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
 
       // Stream any text content to the webview
       if (response.content) {
-        fullContent += response.content;
+        const safeContent = this._redactSecrets(response.content);
+        fullContent += safeContent;
         // Guard: cap streamingContent to prevent unbounded memory growth across
         // many tool iterations. The webview receives each chunk regardless — only
         // the in-memory accumulator is capped.
         if (this.streamingContent.length < ChatPanel.MAX_STREAMING_CONTENT_CHARS) {
-          this.streamingContent += response.content;
+          this.streamingContent += safeContent;
         }
-        void this.postMessage({ type: 'stream-chunk', chunk: response.content });
+        void this.postMessage({ type: 'stream-chunk', chunk: safeContent });
       }
 
       // If no tool calls, we're done
@@ -688,33 +1120,70 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       // Execute each tool call and collect results
       const toolResultBlocks: unknown[] = [];
       for (const tc of response.toolCalls) {
-        // Show tool execution status
+        // Show tool execution status (P4)
         const statusChunk = `\n\n⚡ Running \`${tc.name}\`…\n`;
         fullContent += statusChunk;
         if (this.streamingContent.length < ChatPanel.MAX_STREAMING_CONTENT_CHARS) {
           this.streamingContent += statusChunk;
         }
         void this.postMessage({ type: 'stream-chunk', chunk: statusChunk });
+        void this.postMessage({ type: 'tool-progress', tool: tc.name, message: 'started' });
 
+        const toolTimeout = ChatPanel._toolTimeoutMs(tc.name);
+        const startedAt = Date.now();
         let result: string;
+        let status: 'completed' | 'failed' = 'completed';
         try {
           if (isLocalTool(tc.name)) {
-            const raw = await executeLocalTool(tc.name, tc.input);
+            // Wrap local tool with per-tool timeout (P5)
+            const raw = await Promise.race([
+              executeLocalTool(tc.name, tc.input),
+              new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error(`Local tool "${tc.name}" timed out after ${toolTimeout / 1000}s`)), toolTimeout),
+              ),
+            ]);
             result = typeof raw === 'string' ? raw : JSON.stringify(raw);
           } else if (this.mcpClient?.isConnected) {
-            const raw = await this.mcpClient.callTool(tc.name, tc.input);
+            // Pass per-tool timeout + progress callback (P4 + P5)
+            const raw = await this.mcpClient.callTool(
+              tc.name,
+              tc.input,
+              toolTimeout,
+              (message, progress, total) => {
+                void this.postMessage({ type: 'tool-progress', tool: tc.name, message, progress, total });
+              },
+            );
             result = typeof raw === 'string' ? raw : JSON.stringify(raw);
           } else {
             result = JSON.stringify({ error: `Tool "${tc.name}" is not available — MCP client is not connected.` });
+            status = 'failed';
           }
         } catch (err: unknown) {
+          status = 'failed';
           result = JSON.stringify({ error: err instanceof Error ? err.message : String(err) });
         }
+
+        this._lastToolTrace.push({
+          tool: tc.name,
+          argsSummary: this._summarizeToolArgs(tc.input),
+          filesAffected: this._extractFilesAffected(tc.input, result),
+          durationMs: Date.now() - startedAt,
+          status,
+        });
+
+        // Show tool completion (P4)
+        const doneChunk = `✓ \`${tc.name}\` done\n`;
+        fullContent += doneChunk;
+        if (this.streamingContent.length < ChatPanel.MAX_STREAMING_CONTENT_CHARS) {
+          this.streamingContent += doneChunk;
+        }
+        void this.postMessage({ type: 'stream-chunk', chunk: doneChunk });
+        void this.postMessage({ type: 'tool-progress', tool: tc.name, message: 'completed' });
 
         toolResultBlocks.push({
           type: 'tool_result',
           tool_use_id: tc.id,
-          content: result,
+          content: this._redactSecrets(result),
         });
       }
 
@@ -734,431 +1203,708 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
     return fullContent;
   }
 
-  private getHtml(_webview: vscode.Webview): string {
-    const nonce = String(Date.now());
+  /**
+   * Load markdown-it and DOMPurify browser builds from node_modules.
+   * Results are cached on the instance. Falls back gracefully if files
+   * are missing (e.g. corrupt .vsix or dev environment without npm install).
+   */
+  private _loadLibrarySources(): void {
+    if (
+      this._markdownItSource !== null &&
+      this._domPurifySource !== null
+    ) return;
+    const extPath = this.context.extensionPath;
+    const libs: Array<{ key: 'md' | 'dp'; relPath: string; name: string }> = [
+      { key: 'md', relPath: path.join('node_modules', 'markdown-it', 'dist', 'markdown-it.min.js'), name: 'markdown-it' },
+      { key: 'dp', relPath: path.join('node_modules', 'dompurify', 'dist', 'purify.min.js'), name: 'DOMPurify' },
+    ];
+    for (const lib of libs) {
+      try {
+        const fullPath = path.join(extPath, lib.relPath);
+        const src = fs.readFileSync(fullPath, 'utf-8');
+        if (lib.key === 'md') this._markdownItSource = src;
+        else this._domPurifySource = src;
+      } catch (err) {
+        console.error(`[DreamGraph] Failed to load ${lib.name} browser build — falling back to plaintext rendering. ${err instanceof Error ? err.message : String(err)}`);
+        if (lib.key === 'md') this._markdownItSource = '';
+        else this._domPurifySource = '';
+      }
+    }
+  }
+
+  private _getWebviewBundleUri(webview: vscode.Webview): string {
+    if (this._webviewBundleUri !== null) return this._webviewBundleUri;
+    try {
+      const bundlePath = vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.js');
+      this._webviewBundleUri = webview.asWebviewUri(bundlePath).toString();
+    } catch (err) {
+      console.error(`[DreamGraph] Failed to resolve webview bundle URI — falling back to inline scripts. ${err instanceof Error ? err.message : String(err)}`);
+      this._webviewBundleUri = '';
+    }
+    return this._webviewBundleUri;
+  }
+
+  private _redactSecrets(content: string): string {
+    return ChatPanel.SECRET_PATTERNS.reduce((text, pattern) =>
+      text.replace(pattern, (match) => {
+        const sepMatch = match.match(/[:=]\s*/);
+        if (sepMatch && typeof sepMatch.index === 'number') {
+          return match.slice(0, sepMatch.index + sepMatch[0].length) + '****';
+        }
+        return match.slice(0, 8) + '****';
+      }),
+      content,
+    );
+  }
+
+  private async _executeMessageActionTool(toolName: string, input: Record<string, unknown>): Promise<unknown> {
+    const startedAt = Date.now();
+    let status: 'completed' | 'failed' = 'completed';
+    try {
+      if (isLocalTool(toolName)) {
+        return await executeLocalTool(toolName, input);
+      }
+      if (!this.mcpClient?.isConnected) {
+        throw new Error(`Tool "${toolName}" is not available — MCP client is not connected.`);
+      }
+      return await this.mcpClient.callTool(toolName, input, ChatPanel._toolTimeoutMs(toolName));
+    } catch (error) {
+      status = 'failed';
+      throw error;
+    } finally {
+      this._lastToolTrace.push({
+        tool: toolName,
+        argsSummary: this._summarizeToolArgs(input),
+        filesAffected: this._extractFilesAffected(input, ''),
+        durationMs: Date.now() - startedAt,
+        status,
+      });
+    }
+  }
+
+  private _summarizeToolArgs(input: unknown): string {
+    if (!input || typeof input !== 'object') return 'no args';
+    const keys = Object.keys(input as Record<string, unknown>).slice(0, 4);
+    return keys.length > 0 ? keys.join(', ') : 'no args';
+  }
+
+  private _deriveVerdict(content: string, trace: ToolTraceEntry[]): VerdictBanner {
+    const normalized = content.toLowerCase();
+    const failedCount = trace.filter((t) => t.status === 'failed').length;
+    if (normalized.includes('verified:') || normalized.includes('confirmed:') || (trace.length > 0 && failedCount === 0)) {
+      return {
+        level: 'verified',
+        summary: failedCount === 0 && trace.length > 0
+          ? `Verified with ${trace.length} executed tool call${trace.length === 1 ? '' : 's'}.`
+          : 'Verified based on explicit evidence in the response.',
+      };
+    }
+    if (failedCount > 0 || normalized.includes('likely') || normalized.includes('partial')) {
+      return {
+        level: 'partial',
+        summary: failedCount > 0
+          ? `Partial confidence: ${failedCount} tool call${failedCount === 1 ? '' : 's'} failed during evidence gathering.`
+          : 'Partial confidence: the response includes uncertainty or incomplete evidence.',
+      };
+    }
+    return {
+      level: 'speculative',
+      summary: 'Speculative synthesis: no strong verification signals were detected.',
+    };
+  }
+
+  private _extractFilesAffected(input: unknown, result: string): string[] {
+    const found = new Set<string>();
+    const visit = (value: unknown): void => {
+      if (typeof value === 'string') {
+        if (/^[A-Za-z]:\\|^\.|^src\/|^extensions\//.test(value) || /\.(ts|tsx|js|jsx|json|md|css|html)$/i.test(value)) {
+          found.add(value);
+        }
+        return;
+      }
+      if (Array.isArray(value)) {
+        value.forEach(visit);
+        return;
+      }
+      if (value && typeof value === 'object') {
+        Object.values(value as Record<string, unknown>).forEach(visit);
+      }
+    };
+    visit(input);
+    if (found.size === 0) visit(result);
+    return Array.from(found).slice(0, 5);
+  }
+
+  private async _verifyEntities(names: string[]): Promise<Record<string, EntityVerification>> {
+    if (!this.mcpClient?.isConnected || !Array.isArray(names) || names.length === 0) {
+      return {};
+    }
+    const unique = Array.from(new Set(names.map((n) => String(n || '').trim()).filter(Boolean))).slice(0, 100);
+    const results: Record<string, EntityVerification> = {};
+    for (let i = 0; i < unique.length; i += ChatPanel.MAX_VERIFICATION_BATCH_SIZE) {
+      const batch = unique.slice(i, i + ChatPanel.MAX_VERIFICATION_BATCH_SIZE);
+      try {
+        const [featuresRaw, workflowsRaw, dataModelRaw, tensionsRaw, dreamsRaw] = await Promise.all([
+          this.mcpClient.callTool('query_resource', { uri: 'system://features' }, ChatPanel.VERIFICATION_TIMEOUT_MS),
+          this.mcpClient.callTool('query_resource', { uri: 'system://workflows' }, ChatPanel.VERIFICATION_TIMEOUT_MS),
+          this.mcpClient.callTool('query_resource', { uri: 'system://data-model' }, ChatPanel.VERIFICATION_TIMEOUT_MS),
+          this.mcpClient.callTool('query_resource', { uri: 'dream://tensions' }, ChatPanel.VERIFICATION_TIMEOUT_MS).catch(() => null),
+          this.mcpClient.callTool('query_dreams', { type: 'all', status: 'latent', min_confidence: 0.4 }, ChatPanel.VERIFICATION_TIMEOUT_MS).catch(() => null),
+        ]);
+
+        const indexes = [featuresRaw, workflowsRaw, dataModelRaw].map((payload) => JSON.stringify(payload).toLowerCase());
+        const tensionIndex = tensionsRaw ? JSON.stringify(tensionsRaw).toLowerCase() : '';
+        const dreamIndex = dreamsRaw ? JSON.stringify(dreamsRaw).toLowerCase() : '';
+
+        for (const name of batch) {
+          const key = name.toLowerCase();
+          if (tensionIndex && tensionIndex.includes(key)) {
+            results[name] = { status: 'tension', confidence: 0.85 };
+            continue;
+          }
+          if (indexes.some((index) => index.includes(key))) {
+            results[name] = { status: 'verified', confidence: 0.8 };
+            continue;
+          }
+          if (dreamIndex && dreamIndex.includes(key)) {
+            results[name] = { status: 'latent', confidence: 0.5 };
+            continue;
+          }
+          results[name] = { status: 'unverified', confidence: 0 };
+        }
+      } catch {
+        return {};
+      }
+    }
+    return results;
+  }
+
+  private getHtml(webview: vscode.Webview): string {
+    const nonce = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    this._loadLibrarySources();
+
+    const markdownItScript = this._markdownItSource
+      ? `<script nonce="${nonce}">${this._markdownItSource}</script>`
+      : '';
+    const domPurifyScript = this._domPurifySource
+      ? `<script nonce="${nonce}">${this._domPurifySource}</script>`
+      : '';
+    const renderScript = `<script nonce="${nonce}">${getRenderScript()}</script>`;
+    const entityLinkScript = `<script nonce="${nonce}">${getEntityLinksScript()}</script>`;
+    const webviewBundleScript = this._webviewBundleUri
+      ? `<script nonce="${nonce}" src="${this._webviewBundleUri}"></script>`
+      : '';
+
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: var(--vscode-font-family);
-      font-size: var(--vscode-font-size);
-      color: var(--vscode-foreground);
-      background: var(--vscode-sideBar-background, var(--vscode-editor-background));
-      display: flex;
-      flex-direction: column;
-      height: 100vh;
-      overflow: hidden;
-    }
-
-    /* ── Header / model selector ── */
-    .header {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 6px 10px;
-      border-bottom: 1px solid var(--vscode-panel-border);
-      background: var(--vscode-sideBarSectionHeader-background, transparent);
-      flex-shrink: 0;
-    }
-    .header select {
-      appearance: none;
-      -webkit-appearance: none;
-      background: var(--vscode-dropdown-background);
-      color: var(--vscode-dropdown-foreground);
-      border: 1px solid var(--vscode-dropdown-border);
-      border-radius: 4px;
-      padding: 3px 22px 3px 8px;
-      font-family: var(--vscode-font-family);
-      font-size: 12px;
-      cursor: pointer;
-      outline: none;
-      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23888'/%3E%3C/svg%3E");
-      background-repeat: no-repeat;
-      background-position: right 6px center;
-      background-size: 10px 6px;
-      min-width: 0;
-      max-width: 50%;
-      text-overflow: ellipsis;
-    }
-    .header select:hover { border-color: var(--vscode-focusBorder); }
-    .header select:focus { border-color: var(--vscode-focusBorder); }
-
-    /* ── Messages area ── */
-    #messages {
-      flex: 1;
-      overflow-y: auto;
-      padding: 12px 10px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-    .message {
-      padding: 8px 12px;
-      border-radius: 8px;
-      white-space: pre-wrap;
-      word-break: break-word;
-      line-height: 1.45;
-      font-size: var(--vscode-font-size);
-      max-width: 100%;
-    }
-    .message.user {
-      background: var(--vscode-textBlockQuote-background);
-      border-left: 3px solid var(--vscode-textLink-foreground);
-    }
-    .message.assistant {
-      background: var(--vscode-editorWidget-background);
-      border-left: 3px solid var(--vscode-charts-green, #89d185);
-    }
-    .message.system, .message.error-msg {
-      background: var(--vscode-inputValidation-warningBackground, var(--vscode-inputValidation-errorBackground));
-      border-left: 3px solid var(--vscode-errorForeground);
-      font-size: 12px;
-      opacity: 0.9;
-    }
-
-    /* ── Thinking indicator ── */
-    #thinking-indicator {
-      padding: 8px 14px;
-      color: var(--vscode-descriptionForeground);
-      font-size: 12px;
-      font-style: italic;
-      animation: thinking-pulse 1.5s ease-in-out infinite;
-    }
-    @keyframes thinking-pulse {
-      0%, 100% { opacity: 0.4; }
-      50% { opacity: 1; }
-    }
-
-    /* ── Attachments bar ── */
-    #attachments {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      padding: 0 10px;
-      flex-shrink: 0;
-    }
-    #attachments:empty { display: none; }
-    .attachment-chip {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      background: var(--vscode-badge-background);
-      color: var(--vscode-badge-foreground);
-      padding: 2px 8px 2px 6px;
-      border-radius: 999px;
-      font-size: 11px;
-      line-height: 1.4;
-    }
-    .attachment-chip .chip-icon { font-size: 13px; opacity: 0.7; }
-    .attachment-remove {
-      background: none;
-      border: none;
-      color: inherit;
-      cursor: pointer;
-      padding: 0 0 0 2px;
-      font-size: 14px;
-      line-height: 1;
-      opacity: 0.6;
-    }
-    .attachment-remove:hover { opacity: 1; }
-
-    /* ── Composer ── */
-    #composer {
-      display: flex;
-      align-items: flex-end;
-      gap: 4px;
-      padding: 8px 10px 10px;
-      border-top: 1px solid var(--vscode-panel-border);
-      background: var(--vscode-sideBar-background, var(--vscode-editor-background));
-      flex-shrink: 0;
-    }
-    #prompt {
-      flex: 1;
-      border: 1px solid var(--vscode-input-border);
-      background: var(--vscode-input-background);
-      color: var(--vscode-input-foreground);
-      border-radius: 6px;
-      padding: 7px 10px;
-      font-family: var(--vscode-font-family);
-      font-size: var(--vscode-font-size);
-      outline: none;
-      resize: none;
-      overflow-y: auto;
-      min-height: 34px;
-      max-height: 200px;
-      line-height: 1.4;
-    }
-    #prompt:focus { border-color: var(--vscode-focusBorder); }
-    #prompt::placeholder { color: var(--vscode-input-placeholderForeground); }
-
-    /* ── Buttons (shared) ── */
-    .icon-btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 32px;
-      height: 32px;
-      border: none;
-      border-radius: 6px;
-      background: transparent;
-      color: var(--vscode-icon-foreground, var(--vscode-foreground));
-      cursor: pointer;
-      flex-shrink: 0;
-      transition: background 0.1s;
-    }
-    .icon-btn:hover { background: var(--vscode-toolbar-hoverBackground, rgba(90,93,94,0.31)); }
-    .icon-btn:active { background: var(--vscode-toolbar-activeBackground, rgba(90,93,94,0.45)); }
-    .icon-btn:disabled { opacity: 0.35; cursor: default; pointer-events: none; }
-    .icon-btn svg { width: 18px; height: 18px; fill: currentColor; }
-    .icon-btn.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
-    .icon-btn.primary:hover { background: var(--vscode-button-hoverBackground); }
-    .icon-btn.danger { color: var(--vscode-errorForeground); }
-    .icon-btn.danger:hover { background: rgba(255,85,85,0.15); }
-
-    /* ── Paste preview ── */
-    .paste-preview {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 4px 8px;
-      margin: 0 10px 4px;
-      border: 1px dashed var(--vscode-panel-border);
-      border-radius: 6px;
-      font-size: 11px;
-      color: var(--vscode-descriptionForeground);
-    }
-    .paste-preview img {
-      max-height: 48px;
-      max-width: 80px;
-      border-radius: 4px;
-      object-fit: cover;
-    }
-  </style>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} https: data:; style-src 'unsafe-inline' ${webview.cspSource}; script-src 'nonce-${nonce}' ${webview.cspSource};">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>${getStyles()}</style>
 </head>
 <body>
   <div class="header">
-    <select id="providerSelect" title="Provider">
-      <option value="">Provider…</option>
-      <option value="anthropic">Anthropic</option>
-      <option value="openai">OpenAI</option>
-      <option value="ollama">Ollama</option>
-    </select>
-    <select id="modelSelect" title="Model">
-      <option value="">Model…</option>
-    </select>
+    <select id="provider-select" title="Provider"></select>
+    <select id="model-select" title="Model"></select>
+    <button id="set-api-key-btn" class="icon-btn" title="Set API key" aria-label="Set API key">🔑</button>
+    <button id="clear-btn" class="icon-btn" title="Clear conversation" aria-label="Clear conversation">🗑️</button>
   </div>
+
   <div id="messages"></div>
+  <div id="empty-state">
+    <div class="empty-logo">🌙</div>
+    <h2>DreamGraph Architect</h2>
+    <p>Ask about features, workflows, data models, ADRs, tensions, or request changes.</p>
+    <div class="example-prompts">
+      <button class="example-prompt-btn" data-example="Explain the active file in system context">Explain the active file</button>
+      <button class="example-prompt-btn" data-example="What architectural tensions exist?">Show tensions</button>
+      <button class="example-prompt-btn" data-example="Scan the project and enrich the graph">Scan project</button>
+    </div>
+  </div>
+  <div id="thinking-indicator" style="display:none">
+    <span class="thinking-dots"><span></span><span></span><span></span></span>
+    <span id="thinking-label">Dreaming…</span>
+    <div id="tool-progress-list"></div>
+  </div>
   <div id="attachments"></div>
-  <form id="composer">
-    <button id="attachBtn" class="icon-btn" type="button" title="Attach files or images">
-      <svg viewBox="0 0 24 24"><path d="M16.5 6v11.5a4 4 0 0 1-8 0V5a2.5 2.5 0 0 1 5 0v10.5a1 1 0 0 1-2 0V6h-1.5v9.5a2.5 2.5 0 0 0 5 0V5a4 4 0 0 0-8 0v12.5a5.5 5.5 0 0 0 11 0V6H16.5z"/></svg>
-    </button>
-    <textarea id="prompt" rows="1" placeholder="Ask DreamGraph…" autocomplete="off"></textarea>
-    <button id="sendBtn" class="icon-btn primary" type="submit" title="Send message">
-      <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
-    </button>
-    <button id="stopBtn" class="icon-btn danger" type="button" title="Stop generation" style="display:none">
-      <svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
-    </button>
-    <button id="clear" class="icon-btn" type="button" title="Clear conversation">
-      <svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
-    </button>
-  </form>
+  <div id="composer">
+    <button id="attach-btn" class="icon-btn" title="Attach files" aria-label="Attach files">📎</button>
+    <textarea id="prompt" rows="1" placeholder="Ask DreamGraph Architect…"></textarea>
+    <button id="send-btn" class="icon-btn primary" title="Send" aria-label="Send">➤</button>
+    <button id="stop-btn" class="icon-btn danger" title="Stop" aria-label="Stop" style="display:none">■</button>
+  </div>
+
+  ${markdownItScript}
+  ${domPurifyScript}
+  ${webviewBundleScript}
+  ${!this._webviewBundleUri ? renderScript : ''}
+  ${!this._webviewBundleUri ? entityLinkScript : ''}
   <script nonce="${nonce}">
-    (function() {
-      const vscode = acquireVsCodeApi();
-      const messagesEl = document.getElementById('messages');
-      const attachmentsEl = document.getElementById('attachments');
-      const form = document.getElementById('composer');
-      const promptEl = document.getElementById('prompt');
-      const attachBtn = document.getElementById('attachBtn');
-      const sendBtn = document.getElementById('sendBtn');
-      const stopBtn = document.getElementById('stopBtn');
-      const clearEl = document.getElementById('clear');
-      const providerSelect = document.getElementById('providerSelect');
-      const modelSelect = document.getElementById('modelSelect');
-      let streamingEl = null;
-      let promptHistory = [];
-      let historyIndex = -1;
-      let historyDraft = '';
-      let attachmentState = [];
-      let currentCapabilities = { textAttachments: false, imageAttachments: false };
+    const vscode = acquireVsCodeApi();
+    const messagesEl = document.getElementById('messages');
+    const emptyStateEl = document.getElementById('empty-state');
+    const promptEl = document.getElementById('prompt');
+    const sendBtn = document.getElementById('send-btn');
+    const stopBtn = document.getElementById('stop-btn');
+    const clearBtn = document.getElementById('clear-btn');
+    const attachBtn = document.getElementById('attach-btn');
+    const attachmentsEl = document.getElementById('attachments');
+    const providerSelect = document.getElementById('provider-select');
+    const modelSelect = document.getElementById('model-select');
+    const setApiKeyBtn = document.getElementById('set-api-key-btn');
+    const thinkingEl = document.getElementById('thinking-indicator');
+    const thinkingLabel = document.getElementById('thinking-label');
+    const toolProgressListEl = document.getElementById('tool-progress-list');
 
-      function scrollToBottom() { messagesEl.scrollTop = messagesEl.scrollHeight; }
-      function createBubble(role, content) { const div = document.createElement('div'); div.className = 'message ' + role; div.textContent = content; return div; }
-      function render(messages) { messagesEl.innerHTML = ''; streamingEl = null; for (const message of messages) messagesEl.appendChild(createBubble(message.role, message.content)); scrollToBottom(); }
-      function autoResize() { promptEl.style.height = 'auto'; promptEl.style.height = Math.min(promptEl.scrollHeight, 200) + 'px'; }
+    let draftSaveTimer = null;
+    let lastToolTrace = [];
+    let lastVerdict = null;
+    let streamingBubble = null;
+    let streamingMarkdownEl = null;
+    let streamingRaw = '';
+    let verifyTimer = null;
+    const pendingVerification = new Map();
+    const actionStates = new Map();
 
-      function showThinking() {
-        if (document.getElementById('thinking-indicator')) return;
-        const el = document.createElement('div');
-        el.id = 'thinking-indicator';
-        el.textContent = '💭 Thinking';
-        messagesEl.appendChild(el);
-        scrollToBottom();
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function setEmptyStateVisible(visible) {
+      emptyStateEl.style.display = visible ? 'flex' : 'none';
+      messagesEl.style.display = visible ? 'none' : 'flex';
+    }
+
+    function autoresize() {
+      promptEl.style.height = 'auto';
+      promptEl.style.height = Math.min(promptEl.scrollHeight, 200) + 'px';
+    }
+
+    function queueDraftSave() {
+      if (draftSaveTimer) clearTimeout(draftSaveTimer);
+      draftSaveTimer = setTimeout(() => {
+        vscode.postMessage({ type: 'saveDraft', text: promptEl.value });
+      }, 250);
+    }
+
+    function createRoleHeader(roleMeta, messageId) {
+      const header = document.createElement('div');
+      header.className = 'message-header';
+      const left = document.createElement('div');
+      const title = document.createElement('div');
+      title.className = 'message-role-title';
+      title.textContent = roleMeta?.title || 'Message';
+      left.appendChild(title);
+      if (roleMeta?.subtitle) {
+        const subtitle = document.createElement('div');
+        subtitle.className = 'message-role-subtitle';
+        subtitle.textContent = roleMeta.subtitle;
+        left.appendChild(subtitle);
       }
-      function hideThinking() {
-        const el = document.getElementById('thinking-indicator');
-        if (el) el.remove();
+      const hoverActions = document.createElement('div');
+      hoverActions.className = 'message-actions-hover';
+      [['Copy','copyMessage'],['Retry','retryMessage'],['Pin','pinMessage']].forEach(([label, type]) => {
+        const btn = document.createElement('button');
+        btn.className = 'message-mini-btn';
+        btn.textContent = label;
+        btn.addEventListener('click', () => vscode.postMessage({ type, messageId }));
+        hoverActions.appendChild(btn);
+      });
+      header.appendChild(left);
+      header.appendChild(hoverActions);
+      return header;
+    }
+
+    function renderVerdictBanner(verdict) {
+      if (!verdict) return null;
+      const banner = document.createElement('div');
+      banner.className = 'verdict-banner verdict-' + verdict.level;
+      const label = document.createElement('span');
+      label.className = 'verdict-label';
+      label.textContent = verdict.level;
+      const summary = document.createElement('span');
+      summary.textContent = verdict.summary;
+      banner.appendChild(label);
+      banner.appendChild(summary);
+      return banner;
+    }
+
+    function renderToolTrace(trace) {
+      if (!Array.isArray(trace) || trace.length === 0) return null;
+      const details = document.createElement('details');
+      details.className = 'tool-trace';
+      const summary = document.createElement('summary');
+      summary.textContent = 'Tool trace (' + trace.length + ')';
+      details.appendChild(summary);
+      const list = document.createElement('div');
+      list.className = 'tool-trace-list';
+      for (const entry of trace) {
+        const item = document.createElement('div');
+        item.className = 'tool-trace-item';
+        const head = document.createElement('div');
+        head.className = 'tool-trace-head';
+        head.innerHTML = '<span>' + escapeHtml(entry.tool || 'tool') + '</span><span>' + escapeHtml(entry.status || '') + '</span>';
+        const meta = document.createElement('div');
+        meta.className = 'tool-trace-meta';
+        meta.textContent = (entry.argsSummary || '') + (entry.filesAffected?.length ? ' • ' + entry.filesAffected.join(', ') : '') + (Number.isFinite(entry.durationMs) ? ' • ' + entry.durationMs + 'ms' : '');
+        item.appendChild(head);
+        item.appendChild(meta);
+        list.appendChild(item);
       }
+      details.appendChild(list);
+      return details;
+    }
 
-      function renderAttachments(items) {
-        attachmentState = items || [];
-        attachmentsEl.innerHTML = '';
-        for (const item of attachmentState) {
-          const chip = document.createElement('div');
-          chip.className = 'attachment-chip';
-          const icon = document.createElement('span');
-          icon.className = 'chip-icon';
-          icon.textContent = item.kind === 'image' ? '🖼' : '📄';
-          chip.appendChild(icon);
-          const label = document.createElement('span');
-          label.textContent = item.name + (item.note ? ' (' + item.note + ')' : '');
-          chip.appendChild(label);
-          const remove = document.createElement('button');
-          remove.type = 'button';
-          remove.className = 'attachment-remove';
-          remove.textContent = '×';
-          remove.title = 'Remove attachment';
-          remove.addEventListener('click', () => vscode.postMessage({ type: 'removeAttachment', id: item.id }));
-          chip.appendChild(remove);
-          attachmentsEl.appendChild(chip);
-        }
-      }
+    function renderProvenance(message, trace) {
+      const div = document.createElement('div');
+      div.className = 'message-provenance';
+      div.textContent = trace && trace.length > 0
+        ? 'Provenance: grounded in executed tools and rendered output.'
+        : 'Provenance: rendered output without executed tool trace.';
+      return div;
+    }
 
-      providerSelect.addEventListener('change', function() {
-        vscode.postMessage({ type: 'changeProvider', provider: this.value });
-      });
-      modelSelect.addEventListener('change', function() {
-        vscode.postMessage({ type: 'changeModel', model: this.value });
-      });
-      attachBtn.addEventListener('click', function() {
-        vscode.postMessage({ type: 'pickAttachments' });
-      });
+    function renderContextFooter(text) {
+      if (!text) return null;
+      const div = document.createElement('div');
+      div.className = 'message-context-footer';
+      div.textContent = text;
+      return div;
+    }
 
-      function updateModels(_providers, models, current, capabilities) {
-        currentCapabilities = capabilities || { textAttachments: false, imageAttachments: false };
-        if (current.provider) { providerSelect.value = current.provider; }
-        modelSelect.innerHTML = '';
-        if (models.length === 0) {
-          const opt = document.createElement('option'); opt.value = ''; opt.textContent = 'Model…'; modelSelect.appendChild(opt);
-        }
-        models.forEach(function(m) {
-          const opt = document.createElement('option'); opt.value = m; opt.textContent = m; modelSelect.appendChild(opt);
+    function renderImplicitEntityNotice(text) {
+      if (!text) return null;
+      const div = document.createElement('div');
+      div.className = 'implicit-entity-notice';
+      div.textContent = text;
+      return div;
+    }
+
+    function getActionState(messageId, actionId) {
+      return actionStates.get(messageId + ':' + actionId) || { status: 'idle', error: '' };
+    }
+
+    function renderMessageActions(message, actions) {
+      if (!Array.isArray(actions) || actions.length === 0) return null;
+      const wrap = document.createElement('div');
+      wrap.className = 'message-actions';
+      for (const action of actions) {
+        const state = getActionState(message.id, action.id);
+        const btn = document.createElement('button');
+        btn.className = 'message-action-btn ' + (action.kind === 'primary' ? 'primary' : 'secondary') + (state.status === 'loading' ? ' loading' : '');
+        btn.textContent = action.label;
+        btn.disabled = state.status === 'loading';
+        btn.addEventListener('click', () => {
+          if (state.status === 'loading') return;
+          vscode.postMessage({ type: 'runMessageAction', messageId: message.id, actionId: action.id });
         });
-        const customOpt = document.createElement('option');
-        customOpt.value = '__custom__';
-        customOpt.textContent = '+ Custom model…';
-        modelSelect.appendChild(customOpt);
-        if (current.model) {
-          let found = false;
-          for (let i = 0; i < modelSelect.options.length; i++) {
-            if (modelSelect.options[i].value === current.model) { found = true; break; }
-          }
-          if (!found && current.model) {
-            const extraOpt = document.createElement('option');
-            extraOpt.value = current.model;
-            extraOpt.textContent = current.model;
-            modelSelect.insertBefore(extraOpt, modelSelect.querySelector('[value="__custom__"]'));
-          }
-          modelSelect.value = current.model;
+        wrap.appendChild(btn);
+        if (state.status === 'failed' && state.error) {
+          const error = document.createElement('div');
+          error.className = 'message-action-error';
+          error.textContent = state.error;
+          wrap.appendChild(error);
         }
-        attachBtn.disabled = !(capabilities && (capabilities.textAttachments || capabilities.imageAttachments));
-        attachBtn.title = attachBtn.disabled ? 'Selected model does not support attachments' : 'Attach files or images (or paste from clipboard)';
       }
+      return wrap;
+    }
 
-      function showError(message) { const el = document.createElement('div'); el.className = 'message error-msg'; el.textContent = message; messagesEl.appendChild(el); scrollToBottom(); }
+    function scheduleVerification(container) {
+      if (!container || typeof window.linkifyEntities !== 'function') return;
+      if (verifyTimer) clearTimeout(verifyTimer);
+      verifyTimer = setTimeout(() => {
+        const names = Array.from(container.querySelectorAll('a.entity-link'))
+          .map((a) => a.getAttribute('data-entity-name') || a.textContent || '')
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .slice(0, 100);
+        if (names.length === 0) return;
+        const requestId = 'verify_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+        pendingVerification.set(requestId, container);
+        vscode.postMessage({ type: 'verifyEntities', requestId, names });
+      }, 80);
+    }
 
-      /* ── Clipboard paste handler for images ── */
-      promptEl.addEventListener('paste', function(e) {
-        const items = (e.clipboardData || {}).items;
-        if (!items) return;
-        for (let i = 0; i < items.length; i++) {
-          if (items[i].type.startsWith('image/')) {
-            e.preventDefault();
-            const file = items[i].getAsFile();
-            if (!file) return;
-            if (!currentCapabilities.imageAttachments) {
-              showError('Current model does not support image attachments.');
-              return;
-            }
-            const reader = new FileReader();
-            reader.onload = function() {
-              const dataUrl = reader.result;
-              const base64 = dataUrl.split(',')[1];
-              const mimeType = file.type || 'image/png';
-              vscode.postMessage({ type: 'pasteImage', dataBase64: base64, mimeType: mimeType });
-            };
-            reader.readAsDataURL(file);
-            return;
-          }
-        }
-      });
+    function applyEntityVerification(container, results) {
+      if (!container) return;
+      for (const link of container.querySelectorAll('a.entity-link')) {
+        const name = (link.getAttribute('data-entity-name') || link.textContent || '').trim();
+        const status = results?.[name]?.status || 'unverified';
+        link.classList.remove('entity-verified', 'entity-latent', 'entity-tension', 'entity-unverified');
+        link.classList.add('entity-' + status);
+      }
+    }
 
-      window.addEventListener('message', (event) => {
-        const message = event.data;
-        switch (message.type) {
-          case 'state': if (message.state) render(message.state.messages || []); break;
-          case 'addMessage': if (message.message) { messagesEl.appendChild(createBubble(message.message.role, message.message.content)); scrollToBottom(); } break;
-          case 'stream-start': streamingEl = createBubble('assistant', ''); messagesEl.appendChild(streamingEl); scrollToBottom(); promptEl.placeholder = 'Steer the conversation…'; stopBtn.style.display = ''; break;
-          case 'stream-chunk': if (streamingEl && message.chunk) { hideThinking(); streamingEl.textContent += message.chunk; scrollToBottom(); } break;
-          case 'stream-thinking': message.active ? showThinking() : hideThinking(); break;
-          case 'stream-end': streamingEl = null; hideThinking(); promptEl.disabled = false; promptEl.placeholder = 'Ask DreamGraph…'; stopBtn.style.display = 'none'; promptEl.focus(); break;
-          case 'updateModels': updateModels(message.providers, message.models, message.current, message.capabilities); break;
-          case 'setAttachments': renderAttachments(message.attachments || []); break;
-          case 'error': if (message.error) showError(message.error); break;
-          case 'restoreDraft': if (message.text) { promptEl.value = message.text; vscode.setState(Object.assign({}, vscode.getState() || {}, { draft: message.text })); autoResize(); } break;
-        }
-      });
+    function renderAssistantBody(message) {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'markdown-body';
+      const renderMarkdown = window.renderMarkdown || ((s) => escapeHtml(s));
+      const html = renderMarkdown(message.content || '');
+      wrapper.innerHTML = html;
+      if (typeof window.linkifyEntities === 'function') {
+        window.linkifyEntities(wrapper);
+      }
+      return wrapper;
+    }
 
-      function sendPrompt() {
+    function createMessageNode(message, actions, roleMeta, contextFooter) {
+      const bubble = document.createElement('div');
+      bubble.className = 'message ' + message.role;
+      bubble.dataset.messageId = message.id || '';
+      if (roleMeta) bubble.appendChild(createRoleHeader(roleMeta, message.id));
+
+      if (message.role === 'assistant') {
+        const body = renderAssistantBody(message);
+        bubble.appendChild(body);
+        const verdict = renderVerdictBanner(lastVerdict);
+        if (verdict) bubble.appendChild(verdict);
+        const implicit = renderImplicitEntityNotice(message.implicitEntityNotice);
+        if (implicit) bubble.appendChild(implicit);
+        const trace = renderToolTrace(lastToolTrace);
+        if (trace) bubble.appendChild(trace);
+        bubble.appendChild(renderProvenance(message, lastToolTrace));
+        const actionBlock = renderMessageActions(message, actions);
+        if (actionBlock) bubble.appendChild(actionBlock);
+        const footer = renderContextFooter(contextFooter);
+        if (footer) bubble.appendChild(footer);
+        scheduleVerification(body);
+      } else {
+        bubble.textContent = message.content || '';
+        const footer = renderContextFooter(contextFooter);
+        if (footer) bubble.appendChild(footer);
+      }
+      return bubble;
+    }
+
+    function addMessage(message, actions, roleMeta, contextFooter) {
+      setEmptyStateVisible(false);
+      const node = createMessageNode(message, actions, roleMeta, contextFooter);
+      messagesEl.appendChild(node);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    function rerenderMessageActions(messageId) {
+      const bubble = messagesEl.querySelector('.message[data-message-id="' + messageId + '"]');
+      if (!bubble) return;
+      const state = vscode.getState() || {};
+      const messages = state.messages || [];
+      const entry = messages.find((m) => m.message?.id === messageId);
+      if (!entry) return;
+      bubble.remove();
+      addMessage(entry.message, entry.actions, entry.roleMeta, entry.contextFooter);
+    }
+
+    function startStreaming() {
+      setEmptyStateVisible(false);
+      streamingRaw = '';
+      streamingBubble = document.createElement('div');
+      streamingBubble.className = 'message assistant';
+      streamingMarkdownEl = document.createElement('div');
+      streamingMarkdownEl.className = 'markdown-body';
+      streamingBubble.appendChild(streamingMarkdownEl);
+      messagesEl.appendChild(streamingBubble);
+      sendBtn.style.display = 'none';
+      stopBtn.style.display = 'inline-flex';
+      thinkingEl.style.display = 'flex';
+    }
+
+    function updateStreaming(chunk) {
+      if (!streamingBubble || !streamingMarkdownEl) return;
+      streamingRaw += chunk;
+      const renderMarkdown = window.renderMarkdown || ((s) => escapeHtml(s));
+      streamingMarkdownEl.innerHTML = renderMarkdown(streamingRaw);
+      if (typeof window.linkifyEntities === 'function') {
+        window.linkifyEntities(streamingMarkdownEl);
+      }
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    function endStreaming() {
+      streamingBubble = null;
+      streamingMarkdownEl = null;
+      streamingRaw = '';
+      sendBtn.style.display = 'inline-flex';
+      stopBtn.style.display = 'none';
+      thinkingEl.style.display = 'none';
+      toolProgressListEl.innerHTML = '';
+    }
+
+    function restoreState(payload) {
+      const entries = (payload?.messages || []).map((message) => ({
+        message,
+        actions: [],
+        roleMeta: message.role === 'assistant'
+          ? { title: 'DreamGraph Architect', subtitle: 'Graph-grounded assistant' }
+          : message.role === 'user'
+            ? { title: 'You' }
+            : { title: 'System' },
+        contextFooter: message.role === 'assistant'
+          ? 'Instance: ' + (message.instanceId || 'default') + ' • Actions require explicit click • Trace reflects real tool execution'
+          : message.role === 'user'
+            ? 'Instance: ' + (message.instanceId || 'default')
+            : 'Instance: ' + (message.instanceId || 'default') + ' • System message',
+      }));
+      vscode.setState({ ...(vscode.getState() || {}), messages: entries });
+      messagesEl.innerHTML = '';
+      if (entries.length === 0) {
+        setEmptyStateVisible(true);
+        return;
+      }
+      setEmptyStateVisible(false);
+      for (const entry of entries) {
+        addMessage(entry.message, entry.actions, entry.roleMeta, entry.contextFooter);
+      }
+    }
+
+    promptEl.addEventListener('input', () => {
+      autoresize();
+      queueDraftSave();
+    });
+    promptEl.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
         const text = promptEl.value.trim();
         if (!text) return;
-        if (promptHistory.length === 0 || promptHistory[promptHistory.length - 1] !== text) promptHistory.push(text);
-        historyIndex = -1; historyDraft = '';
         vscode.postMessage({ type: 'send', text });
-        promptEl.value = ''; promptEl.style.height = 'auto';
-        vscode.setState(Object.assign({}, vscode.getState() || {}, { draft: '' }));
-        vscode.postMessage({ type: 'saveDraft', text: '' });
+        promptEl.value = '';
+        autoresize();
+        queueDraftSave();
       }
-      promptEl.addEventListener('keydown', function(e) {
-        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendPrompt(); return; }
-        if (e.key === 'ArrowUp') {
-          var cursorAtStart = promptEl.selectionStart === 0 && promptEl.selectionEnd === 0;
-          var textBeforeCursor = promptEl.value.substring(0, promptEl.selectionStart);
-          if (cursorAtStart || !textBeforeCursor.includes('\\n')) {
-            if (promptHistory.length > 0) {
-              if (historyIndex === -1) { historyDraft = promptEl.value; historyIndex = promptHistory.length - 1; }
-              else if (historyIndex > 0) historyIndex--; else return;
-              e.preventDefault(); promptEl.value = promptHistory[historyIndex]; autoResize(); promptEl.setSelectionRange(0,0);
-            }
-          }
-          return;
-        }
-        if (e.key === 'ArrowDown') {
-          if (historyIndex === -1) return;
-          var textAfterCursor = promptEl.value.substring(promptEl.selectionEnd);
-          var cursorAtEnd = promptEl.selectionEnd === promptEl.value.length;
-          if (cursorAtEnd || !textAfterCursor.includes('\\n')) {
-            if (historyIndex < promptHistory.length - 1) { historyIndex++; e.preventDefault(); promptEl.value = promptHistory[historyIndex]; }
-            else { historyIndex = -1; e.preventDefault(); promptEl.value = historyDraft; }
-            autoResize(); var len = promptEl.value.length; promptEl.setSelectionRange(len, len);
-          }
-        }
+    });
+    sendBtn.addEventListener('click', () => {
+      const text = promptEl.value.trim();
+      if (!text) return;
+      vscode.postMessage({ type: 'send', text });
+      promptEl.value = '';
+      autoresize();
+      queueDraftSave();
+    });
+    stopBtn.addEventListener('click', () => vscode.postMessage({ type: 'stop' }));
+    clearBtn.addEventListener('click', () => vscode.postMessage({ type: 'clear' }));
+    attachBtn.addEventListener('click', () => vscode.postMessage({ type: 'pickAttachments' }));
+    providerSelect.addEventListener('change', () => vscode.postMessage({ type: 'changeProvider', provider: providerSelect.value }));
+    modelSelect.addEventListener('change', () => vscode.postMessage({ type: 'changeModel', model: modelSelect.value }));
+    setApiKeyBtn.addEventListener('click', () => vscode.postMessage({ type: 'setApiKey' }));
+    document.querySelectorAll('.example-prompt-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        promptEl.value = btn.getAttribute('data-example') || '';
+        autoresize();
+        promptEl.focus();
       });
-      form.addEventListener('submit', (event) => { event.preventDefault(); sendPrompt(); });
-      stopBtn.addEventListener('click', () => vscode.postMessage({ type: 'stop' }));
-      clearEl.addEventListener('click', () => vscode.postMessage({ type: 'clear' }));
-      var savedState = vscode.getState();
-      if (savedState && savedState.draft) { promptEl.value = savedState.draft; autoResize(); }
-      promptEl.addEventListener('input', function() { autoResize(); var draft = promptEl.value; vscode.setState(Object.assign({}, vscode.getState() || {}, { draft: draft })); vscode.postMessage({ type: 'saveDraft', text: draft }); });
-      vscode.postMessage({ type: 'ready' });
-    })();
+    });
+
+    window.addEventListener('message', (event) => {
+      const msg = event.data;
+      switch (msg.type) {
+        case 'state':
+          restoreState(msg.state);
+          break;
+        case 'restoreDraft':
+          promptEl.value = msg.text || '';
+          autoresize();
+          break;
+        case 'stream-start':
+          startStreaming();
+          break;
+        case 'stream-chunk':
+          updateStreaming(msg.chunk || '');
+          break;
+        case 'stream-thinking':
+          thinkingEl.style.display = msg.active ? 'flex' : 'none';
+          break;
+        case 'stream-end':
+          endStreaming();
+          break;
+        case 'tool-progress': {
+          const row = document.createElement('div');
+          row.className = 'tool-row';
+          row.innerHTML = '<span class="tool-name">' + escapeHtml(msg.tool || 'tool') + '</span><span>' + escapeHtml(msg.message || '') + '</span>';
+          toolProgressListEl.appendChild(row);
+          break;
+        }
+        case 'addMessage': {
+          const state = vscode.getState() || {};
+          const entries = [...(state.messages || []), {
+            message: msg.message,
+            actions: msg.actions || [],
+            roleMeta: msg.roleMeta,
+            contextFooter: msg.contextFooter,
+          }];
+          vscode.setState({ ...state, messages: entries });
+          addMessage(msg.message, msg.actions || [], msg.roleMeta, msg.contextFooter);
+          break;
+        }
+        case 'messageActionState': {
+          actionStates.set(msg.messageId + ':' + msg.actionId, { status: msg.status, error: msg.error || '' });
+          rerenderMessageActions(msg.messageId);
+          break;
+        }
+        case 'entityStatus': {
+          const container = pendingVerification.get(msg.requestId);
+          if (container) {
+            applyEntityVerification(container, msg.results || {});
+            pendingVerification.delete(msg.requestId);
+          }
+          break;
+        }
+        case 'toolTrace':
+          lastToolTrace = Array.isArray(msg.calls) ? msg.calls : [];
+          break;
+        case 'verdict':
+          lastVerdict = msg.verdict || null;
+          break;
+        case 'updateModels': {
+          providerSelect.innerHTML = '';
+          for (const p of msg.providers || []) {
+            const opt = document.createElement('option');
+            opt.value = p;
+            opt.textContent = p;
+            if (p === msg.current?.provider) opt.selected = true;
+            providerSelect.appendChild(opt);
+          }
+          modelSelect.innerHTML = '';
+          for (const m of msg.models || []) {
+            const opt = document.createElement('option');
+            opt.value = m;
+            opt.textContent = m;
+            if (m === msg.current?.model) opt.selected = true;
+            modelSelect.appendChild(opt);
+          }
+          const customOpt = document.createElement('option');
+          customOpt.value = '__custom__';
+          customOpt.textContent = '+ Custom model…';
+          modelSelect.appendChild(customOpt);
+          break;
+        }
+        case 'setAttachments': {
+          attachmentsEl.innerHTML = '';
+          for (const attachment of msg.attachments || []) {
+            const chip = document.createElement('div');
+            chip.className = 'attachment-chip';
+            chip.innerHTML = '<span class="chip-icon">' + (attachment.kind === 'image' ? '🖼️' : '📄') + '</span><span>' + escapeHtml(attachment.name) + '</span>';
+            const remove = document.createElement('button');
+            remove.className = 'attachment-remove';
+            remove.textContent = '×';
+            remove.addEventListener('click', () => vscode.postMessage({ type: 'removeAttachment', id: attachment.id }));
+            chip.appendChild(remove);
+            attachmentsEl.appendChild(chip);
+          }
+          break;
+        }
+        case 'error':
+          console.error(msg.error);
+          break;
+      }
+    });
+
+    autoresize();
+    vscode.postMessage({ type: 'ready' });
   </script>
 </body>
 </html>`;

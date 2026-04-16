@@ -218,18 +218,24 @@
     }
   },
   "scripts": {
-    "build": "tsc -p ./tsconfig.json",
+    "build": "npm run build:webview && tsc -p ./tsconfig.json",
+    "build:webview": "esbuild src/webview/index.ts --bundle --outfile=dist/webview.js --format=iife --platform=browser",
     "watch": "tsc -watch -p ./tsconfig.json",
     "package": "vsce package",
     "lint": "eslint src --ext ts"
   },
   "devDependencies": {
+    "@types/dompurify": "^3.0.5",
+    "@types/markdown-it": "^14.1.2",
     "@types/node": "^22.0.0",
     "@types/vscode": "^1.100.0",
     "@vscode/vsce": "^3.7.1",
+    "esbuild": "^0.25.3",
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.27.1"
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "dompurify": "^3.4.0",
+    "markdown-it": "^14.1.1"
   }
 }
