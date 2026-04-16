@@ -571,6 +571,36 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
   }
 
   private static readonly MAX_TOOL_ITERATIONS = 32;
+  private static readonly MAX_RETRIES = 3;
+
+  /** Call callWithTools with automatic retry on 429 rate-limit errors. */
+  private async _callWithToolsRetry(
+    llmMessages: ArchitectMessage[],
+    tools: ToolDefinition[],
+    rawMessages?: unknown[],
+  ): ReturnType<ArchitectLlm['callWithTools']> {
+    for (let attempt = 0; attempt <= ChatPanel.MAX_RETRIES; attempt++) {
+      try {
+        return await this.architectLlm!.callWithTools(llmMessages, tools, rawMessages);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        const is429 = msg.includes('429') || msg.toLowerCase().includes('rate_limit');
+        if (!is429 || attempt === ChatPanel.MAX_RETRIES) throw err;
+
+        // Parse "try again in X.XXXs" from the error, fallback to exponential backoff
+        const retryMatch = msg.match(/try again in ([\d.]+)s/i);
+        const waitSec = retryMatch ? parseFloat(retryMatch[1]) + 1 : (attempt + 1) * 8;
+        const waitMs = Math.min(waitSec * 1000, 60_000);
+
+        const note = `\n⏳ Rate limited — retrying in ${Math.ceil(waitSec)}s (attempt ${attempt + 1}/${ChatPanel.MAX_RETRIES})…\n`;
+        this.streamingContent += note;
+        void this.postMessage({ type: 'stream-chunk', chunk: note });
+
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+      }
+    }
+    throw new Error('Rate limit retries exhausted'); // unreachable but satisfies TS
+  }
 
   private async runAgenticLoop(llmMessages: ArchitectMessage[], tools: ToolDefinition[]): Promise<string> {
     if (!this.architectLlm) return '';
@@ -582,7 +612,10 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
     let rawMessages: unknown[] | undefined;
 
     for (let iteration = 0; iteration < ChatPanel.MAX_TOOL_ITERATIONS; iteration++) {
-      const response = await this.architectLlm.callWithTools(llmMessages, tools, rawMessages);
+      // Throttle between iterations to avoid TPM rate limits on fast tool loops
+      if (iteration > 0) await new Promise((r) => setTimeout(r, 2000));
+
+      const response = await this._callWithToolsRetry(llmMessages, tools, rawMessages);
 
       // Stream any text content to the webview
       if (response.content) {
