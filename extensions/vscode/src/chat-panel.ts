@@ -570,18 +570,85 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
     void vscode.workspace.getConfiguration('dreamgraph.architect').update('model', model, vscode.ConfigurationTarget.Global);
   }
 
+  private static readonly MAX_TOOL_ITERATIONS = 32;
+
   private async runAgenticLoop(llmMessages: ArchitectMessage[], tools: ToolDefinition[]): Promise<string> {
     if (!this.architectLlm) return '';
-    return this.runAgenticLoopPlaceholder(llmMessages, tools);
-  }
 
-  private async runAgenticLoopPlaceholder(llmMessages: ArchitectMessage[], _tools: ToolDefinition[]): Promise<string> {
     let fullContent = '';
-    await this.architectLlm!.stream(llmMessages, (chunk: string) => {
-      fullContent += chunk;
-      this.streamingContent += chunk;
-      void this.postMessage({ type: 'stream-chunk', chunk });
-    });
+    // rawMessages tracks the full conversation in Anthropic-native format
+    // (assistant messages with tool_use blocks, user messages with tool_result blocks).
+    // Both Anthropic and OpenAI providers accept this via callWithTools(…, rawMessages).
+    let rawMessages: unknown[] | undefined;
+
+    for (let iteration = 0; iteration < ChatPanel.MAX_TOOL_ITERATIONS; iteration++) {
+      const response = await this.architectLlm.callWithTools(llmMessages, tools, rawMessages);
+
+      // Stream any text content to the webview
+      if (response.content) {
+        fullContent += response.content;
+        this.streamingContent += response.content;
+        void this.postMessage({ type: 'stream-chunk', chunk: response.content });
+      }
+
+      // If no tool calls, we're done
+      if (response.stopReason !== 'tool_use' || response.toolCalls.length === 0) {
+        break;
+      }
+
+      // Build the assistant message with tool_use blocks (Anthropic format)
+      const assistantBlocks: unknown[] = [];
+      if (response.content) {
+        assistantBlocks.push({ type: 'text', text: response.content });
+      }
+      for (const tc of response.toolCalls) {
+        assistantBlocks.push({ type: 'tool_use', id: tc.id, name: tc.name, input: tc.input });
+      }
+
+      // Execute each tool call and collect results
+      const toolResultBlocks: unknown[] = [];
+      for (const tc of response.toolCalls) {
+        // Show tool execution status
+        const statusChunk = `\n\n⚡ Running \`${tc.name}\`…\n`;
+        fullContent += statusChunk;
+        this.streamingContent += statusChunk;
+        void this.postMessage({ type: 'stream-chunk', chunk: statusChunk });
+
+        let result: string;
+        try {
+          if (isLocalTool(tc.name)) {
+            const raw = await executeLocalTool(tc.name, tc.input);
+            result = typeof raw === 'string' ? raw : JSON.stringify(raw);
+          } else if (this.mcpClient?.isConnected) {
+            const raw = await this.mcpClient.callTool(tc.name, tc.input);
+            result = typeof raw === 'string' ? raw : JSON.stringify(raw);
+          } else {
+            result = JSON.stringify({ error: `Tool "${tc.name}" is not available — MCP client is not connected.` });
+          }
+        } catch (err: unknown) {
+          result = JSON.stringify({ error: err instanceof Error ? err.message : String(err) });
+        }
+
+        toolResultBlocks.push({
+          type: 'tool_result',
+          tool_use_id: tc.id,
+          content: result,
+        });
+      }
+
+      // Build rawMessages for the next iteration.
+      // First call: seed from the original llmMessages (non-system only).
+      if (!rawMessages) {
+        rawMessages = llmMessages
+          .filter((m) => m.role !== 'system')
+          .map((m) => ({ role: m.role, content: typeof m.content === 'string' ? m.content : m.content }));
+      }
+
+      // Append assistant turn (with tool_use blocks) and user turn (with tool_result blocks)
+      rawMessages.push({ role: 'assistant', content: assistantBlocks });
+      rawMessages.push({ role: 'user', content: toolResultBlocks });
+    }
+
     return fullContent;
   }
 
