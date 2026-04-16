@@ -297,7 +297,19 @@ export class ArchitectLlm implements vscode.Disposable {
         const toolResults = blocks.filter((b) => b.type === "tool_result");
         const nonToolBlocks = blocks.filter((b) => b.type !== "tool_result");
         if (nonToolBlocks.length > 0) {
-          out.push({ role: "user", content: nonToolBlocks });
+          const translated = nonToolBlocks.map((b) => {
+            if (b.type === "image") {
+              const src = b.source as Record<string, unknown> | undefined;
+              if (src && src.type === "base64") {
+                return {
+                  type: "image_url",
+                  image_url: { url: `data:${src.media_type};base64,${src.data}` },
+                };
+              }
+            }
+            return b;
+          });
+          out.push({ role: "user", content: translated });
         }
         for (const tr of toolResults) {
           out.push({

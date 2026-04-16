@@ -23,6 +23,7 @@ import {
   startSession,
   transitionPhase,
   getActiveSession,
+  recordToolCall,
   completeSession,
   listSessions,
   loadSession,
@@ -254,6 +255,45 @@ export function registerDisciplineTools(server: McpServer): void {
         protection_level: check.classification?.protection_level ?? "unknown",
         requires_plan_entry: check.requires_plan_entry,
         warnings: check.warnings,
+      });
+    },
+  );
+
+  // -----------------------------------------------------------------------
+  // discipline_record_tool_call
+  // -----------------------------------------------------------------------
+  server.tool(
+    "discipline_record_tool_call",
+    "Register a tool call in the active discipline session's audit trail. " +
+    "Use this immediately AFTER calling any truth/read tool during INGEST or AUDIT phases " +
+    "so the session tracker counts it toward mandatory tool requirements. " +
+    "Especially required for: read_local_file, query_api_surface, extract_api_surface " +
+    "which are local extension tools that bypass normal MCP tool tracking.",
+    {
+      tool_name: z.string()
+        .describe("Name of the tool that was called"),
+      result_summary: z.string()
+        .describe("Brief summary of what the tool returned (1-2 sentences)"),
+      duration_ms: z.number().optional()
+        .describe("Approximate duration in ms (optional)"),
+    },
+    async (params) => {
+      const session = getActiveSession();
+      if (!session) {
+        return errorContent("NO_SESSION", "No active discipline session.");
+      }
+      const result = await recordToolCall(
+        params.tool_name,
+        {},
+        params.result_summary,
+        params.duration_ms ?? 0,
+      );
+      return textContent({
+        success: true,
+        tool_call_count: session.tool_calls.length,
+        allowed: result.allowed,
+        reason: result.reason,
+        message: `Recorded ${params.tool_name} in session audit trail.`,
       });
     },
   );

@@ -647,7 +647,14 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       // Show thinking indicator while waiting for the non-streaming API call
       void this.postMessage({ type: 'stream-thinking', active: true });
 
-      const response = await this._callWithToolsRetry(llmMessages, tools, rawMessages);
+      let response: Awaited<ReturnType<ArchitectLlm['callWithTools']>>;
+      try {
+        response = await this._callWithToolsRetry(llmMessages, tools, rawMessages);
+      } catch (err) {
+        // Ensure thinking indicator is hidden before the error propagates
+        void this.postMessage({ type: 'stream-thinking', active: false });
+        throw err;
+      }
 
       // Hide thinking indicator now that we have a response
       void this.postMessage({ type: 'stream-thinking', active: false });
@@ -1101,7 +1108,7 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
           case 'stream-start': streamingEl = createBubble('assistant', ''); messagesEl.appendChild(streamingEl); scrollToBottom(); promptEl.placeholder = 'Steer the conversation…'; stopBtn.style.display = ''; break;
           case 'stream-chunk': if (streamingEl && message.chunk) { hideThinking(); streamingEl.textContent += message.chunk; scrollToBottom(); } break;
           case 'stream-thinking': message.active ? showThinking() : hideThinking(); break;
-          case 'stream-end': streamingEl = null; promptEl.disabled = false; promptEl.placeholder = 'Ask DreamGraph…'; stopBtn.style.display = 'none'; promptEl.focus(); break;
+          case 'stream-end': streamingEl = null; hideThinking(); promptEl.disabled = false; promptEl.placeholder = 'Ask DreamGraph…'; stopBtn.style.display = 'none'; promptEl.focus(); break;
           case 'updateModels': updateModels(message.providers, message.models, message.current, message.capabilities); break;
           case 'setAttachments': renderAttachments(message.attachments || []); break;
           case 'error': if (message.error) showError(message.error); break;

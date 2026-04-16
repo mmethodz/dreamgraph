@@ -109,6 +109,31 @@ export const TOOL_CLASSIFICATIONS: ToolClassification[] = [
     requires_plan_entry: false,
     requires_audit_trail: true,
   },
+  // Local extension tools — equivalent truth reads performed outside MCP transport
+  {
+    tool_name: "read_local_file",
+    tool_class: "truth",
+    protection_level: "public",
+    allowed_phases: TRUTH_PHASES,
+    requires_plan_entry: false,
+    requires_audit_trail: true,
+  },
+  {
+    tool_name: "query_api_surface",
+    tool_class: "truth",
+    protection_level: "public",
+    allowed_phases: TRUTH_PHASES,
+    requires_plan_entry: false,
+    requires_audit_trail: true,
+  },
+  {
+    tool_name: "extract_api_surface",
+    tool_class: "truth",
+    protection_level: "public",
+    allowed_phases: TRUTH_PHASES,
+    requires_plan_entry: false,
+    requires_audit_trail: true,
+  },
   {
     tool_name: "list_directory",
     tool_class: "truth",
@@ -569,9 +594,12 @@ export const PHASE_PERMISSIONS: PhasePermissions[] = [
 export const MANDATORY_TOOL_RULES: MandatoryToolRule[] = [
   {
     phase: "ingest",
-    required_tool: "read_source_code",
+    // read_local_file and query_api_surface are local-tool equivalents of read_source_code.
+    // They perform the same ground-truth read but via the VS Code extension host rather
+    // than the MCP transport. All three satisfy the ingest gate.
+    required_tool: "read_source_code|read_local_file|query_api_surface",
     min_calls: 1,
-    rationale: "Cannot audit without reading at least one source file",
+    rationale: "Cannot audit without reading at least one source file (read_source_code, read_local_file, or query_api_surface all satisfy this)",
   },
   {
     phase: "ingest",
@@ -582,10 +610,10 @@ export const MANDATORY_TOOL_RULES: MandatoryToolRule[] = [
   },
   {
     phase: "verify",
-    required_tool: "read_source_code",
+    required_tool: "read_source_code|read_local_file",
     min_calls: 1,
     rationale:
-      "Verification must re-read modified source to confirm changes",
+      "Verification must re-read modified source to confirm changes (read_source_code or read_local_file both satisfy this)",
   },
 ];
 
