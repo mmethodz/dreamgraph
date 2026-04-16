@@ -52,6 +52,11 @@
           "command": "dreamgraph.clearChangedFiles",
           "when": "view == dreamgraph.changedFiles",
           "group": "navigation"
+        },
+        {
+          "command": "dreamgraph.setArchitectApiKey",
+          "when": "view == dreamgraph.chatView",
+          "group": "navigation"
         }
       ],
       "view/item/context": [
@@ -113,7 +118,8 @@
       },
       {
         "command": "dreamgraph.setArchitectApiKey",
-        "title": "DreamGraph: Set Architect API Key"
+        "title": "DreamGraph: Set Architect API Key",
+        "icon": "$(key)"
       },
       {
         "command": "dreamgraph.showGraphSignal",

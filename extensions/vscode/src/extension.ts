@@ -62,7 +62,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // VS Code may move views out of their declared container on reinstall,
   // hiding the activity bar icon. Reset once per version to fix this.
   const versionKey = "dreamgraph.lastActivatedVersion";
-  const currentVersion = "7.0.0";
+  const currentVersion = "7.0.1";
   const lastVersion = context.globalState.get<string>(versionKey);
   if (lastVersion !== currentVersion) {
     void vscode.commands.executeCommand("workbench.action.resetViewLocations");
