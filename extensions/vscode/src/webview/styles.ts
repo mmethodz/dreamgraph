@@ -46,12 +46,13 @@ export function getStyles(): string {
       background-repeat: no-repeat;
       background-position: right 6px center;
       background-size: 10px 6px;
+      flex: 1 1 0;
       min-width: 0;
-      max-width: 50%;
       text-overflow: ellipsis;
     }
     .header select:hover { border-color: var(--vscode-focusBorder); }
     .header select:focus { border-color: var(--vscode-focusBorder); }
+    .header #set-api-key-btn { margin-left: auto; }
 
     /* ── Messages area ── */
     #messages {
