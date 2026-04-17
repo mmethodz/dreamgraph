@@ -18,6 +18,8 @@ It thinks in cycles: **dream → validate → learn → repeat** — and schedul
 |---|---|
 | [Architecture](architecture.md) | System architecture, Mermaid diagrams, source layout, data directory, config tables |
 | [Cognitive Engine](cognitive-engine.md) | State machine, 10 dream strategies, normalization, tensions, adversarial, temporal, metacognition, scheduling |
+| [Architect 5-Slice Implementation Story](architect-5-slice-implementation-story.md) | Detailed implementation story for cognitive output rendering slices 1–5 in the VS Code extension |
+| [LLM Setup](setup-llm.md) | Configure providers, API keys, and engine settings for DreamGraph instances |
 | [Tools Reference](tools-reference.md) | Complete 68-tool catalog with parameter tables and 26 resource URIs |
 | [Data Model](data-model.md) | All 21 data store schemas and relationship map |
 | [Workflows](workflows.md) | 15 step-by-step operational process flows |
