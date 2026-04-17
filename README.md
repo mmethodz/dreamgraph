@@ -80,12 +80,14 @@ This builds the server, installs the `dg` CLI globally, and **automatically inst
 ### Onboard a Project
 
 ```bash
-dg init my-project                        # Create a DreamGraph instance
+dg init my-project --template default     # Create an instance from the selected template (default: ~/.dreamgraph/templates/default)
 dg attach my-project /path/to/your/repo   # Bind to your project
 dg start my-project --http                # Start the daemon
 ```
 
-Configure your LLM — either edit `~/.dreamgraph/instances/<uuid>/config/engine.env` or open the web dashboard at `http://localhost:<port>/config`. Then scan:
+You can prepare your own named presets by copying `~/.dreamgraph/templates/default/` to another directory such as `~/.dreamgraph/templates/openai/`, then running `dg init --template openai`.
+
+Configure your LLM — either edit `~/.dreamgraph/<instance-uuid>/config/engine.env` or open the web dashboard at `http://localhost:<port>/config`. New instances now seed `config/engine.env` from `~/.dreamgraph/templates/<template>/config/engine.env` when available (default template: `default`), then fall back to the repository template, and finally to a built-in programmatic scaffold if no template file is available. Then scan:
 
 ```bash
 dg scan my-project                        # Scan, dream, discover ADRs, schedule follow-ups
@@ -109,15 +111,35 @@ You can change provider and model at any time — the graph-grounded context is 
 ### Configure LLM
 
 ```bash
-# Engine dreamer (daemon-side) — set in instance config
-# ~/.dreamgraph/instances/<uuid>/config/engine.env
-DG_LLM_PROVIDER=anthropic
-DG_LLM_API_KEY=****
+# Engine dreamer / normalizer (daemon-side) — set in instance config
+# ~/.dreamgraph/<instance-uuid>/config/engine.env
+DREAMGRAPH_LLM_PROVIDER=openai
+DREAMGRAPH_LLM_URL=https://api.openai.com/v1
+DREAMGRAPH_LLM_API_KEY=****
+DREAMGRAPH_LLM_DREAMER_MODEL=gpt-4o-mini
+DREAMGRAPH_LLM_DREAMER_TEMPERATURE=0.9
+DREAMGRAPH_LLM_DREAMER_MAX_TOKENS=10240
+DREAMGRAPH_LLM_NORMALIZER_MODEL=gpt-5.4-nano
+DREAMGRAPH_LLM_NORMALIZER_TEMPERATURE=0.1
+DREAMGRAPH_LLM_NORMALIZER_MAX_TOKENS=4096
 
 # Extension Architect (VS Code-side)
 # Settings → dreamgraph.architect.provider / model
 # API key → Ctrl+Shift+P → DreamGraph: Set Architect API Key
 ```
+
+Notes:
+
+- `engine.env` values are loaded per instance and override global environment variables.
+- `dg init` supports `--template <name>` and defaults to `default`.
+- Named templates resolve in this order: `~/.dreamgraph/templates/<template>` → repository `templates/<template>` → built-in scaffold.
+- New instances seed `config/engine.env` from the selected template's `config/engine.env` when it exists.
+- The install scripts copy the repository `templates/default/` tree into the global `~/.dreamgraph/templates/default/` directory. Existing templates are only overwritten when `-Force` / `--force` is used or the user explicitly confirms overwrite.
+- Users can create additional templates such as `openai` or `anthropic` by copying and renaming `~/.dreamgraph/templates/default/`, then running `dg init --template <name>`.
+- When introducing new engine env variables, update the default engine.env template so new instances expose them as commented-out examples.
+- The daemon supports separate Dreamer and Normalizer model settings.
+- `DREAMGRAPH_LLM_MODEL`, `DREAMGRAPH_LLM_TEMPERATURE`, and `DREAMGRAPH_LLM_MAX_TOKENS` can still be used as base defaults; Dreamer/Normalizer-specific values override them when present.
+- Full setup guidance: [docs/setup-llm.md](docs/setup-llm.md)
 
 ### Anthropic Architect models and Claude Opus 4.7
 
@@ -316,7 +338,6 @@ src/
 ├── cli/            # dg binary — instance management
 ├── server/         # MCP server, HTTP daemon, web dashboard
 ├── config/         # Environment-driven configuration
-├── api/            # REST API routes
 └── utils/          # Cache, logger, mutex, metrics, paths
 
 extensions/vscode/  # VS Code extension — Chat, Dashboard, Files Changed
@@ -330,13 +351,18 @@ docs/               # Architecture, cognitive engine, tools, data model, workflo
 
 | Variable | Purpose | Default |
 |---|---|---|
-| `DG_LLM_PROVIDER` | LLM provider: `openai`, `anthropic`, `ollama` | — |
-| `DG_LLM_API_KEY` | API key for the dreamer LLM | — |
-| `DG_LLM_MODEL` | Model name for dreaming | — |
-| `DG_LLM_BASE_URL` | Base URL override (required for Ollama) | — |
-| `DG_NORMALIZER_PROVIDER` | Separate LLM for normalization | Falls back to dreamer |
-| `DG_NORMALIZER_API_KEY` | API key for normalization | Falls back to dreamer |
-| `DG_NORMALIZER_MODEL` | Model for normalization | Falls back to dreamer |
+| `DREAMGRAPH_LLM_PROVIDER` | LLM provider: `openai`, `anthropic`, `ollama`, `sampling`, `none` | `ollama` |
+| `DREAMGRAPH_LLM_MODEL` | Base model name used unless Dreamer/Normalizer overrides are set | Provider-dependent |
+| `DREAMGRAPH_LLM_URL` | Base URL override (required for OpenAI-compatible / Ollama endpoints) | Provider-dependent |
+| `DREAMGRAPH_LLM_API_KEY` | API key for OpenAI / Anthropic providers | — |
+| `DREAMGRAPH_LLM_TEMPERATURE` | Base temperature used unless Dreamer/Normalizer overrides are set | `0.7` |
+| `DREAMGRAPH_LLM_MAX_TOKENS` | Base max response tokens used unless Dreamer/Normalizer overrides are set | `2048` |
+| `DREAMGRAPH_LLM_DREAMER_MODEL` | Model for creative dream cycle generation | Falls back to base model |
+| `DREAMGRAPH_LLM_DREAMER_TEMPERATURE` | Temperature for Dreamer | Falls back to base temperature |
+| `DREAMGRAPH_LLM_DREAMER_MAX_TOKENS` | Max tokens for Dreamer | Falls back to base max tokens |
+| `DREAMGRAPH_LLM_NORMALIZER_MODEL` | Model for normalization / truth-filter pass | Falls back to base model |
+| `DREAMGRAPH_LLM_NORMALIZER_TEMPERATURE` | Temperature for Normalizer | Falls back to base temperature |
+| `DREAMGRAPH_LLM_NORMALIZER_MAX_TOKENS` | Max tokens for Normalizer | Falls back to base max tokens |
 | `DREAMGRAPH_REPOS` | JSON map of repo paths for code tools | — |
 | `DREAMGRAPH_DB_URL` | PostgreSQL connection string | — |
 | `DREAMGRAPH_MASTER_DIR` | Master directory for all instances | `~/.dreamgraph` |
@@ -356,6 +382,7 @@ docs/               # Architecture, cognitive engine, tools, data model, workflo
 | [docs/workflows.md](docs/workflows.md) | Step-by-step operational process flows |
 | [docs/narrative.md](docs/narrative.md) | Auto-generated system chronicle |
 | [docs/anthropic-opus-4-7.md](docs/anthropic-opus-4-7.md) | Anthropic Architect configuration, Opus 4.7 migration notes, effort/thinking guidance |
+| [docs/setup-llm.md](docs/setup-llm.md) | Correct daemon vs extension LLM setup, engine.env examples, common configuration mistakes |
 
 ---
 

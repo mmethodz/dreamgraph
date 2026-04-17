@@ -174,11 +174,25 @@ try {
 # -- Templates -----------------------------------------------------
 $sourceTemplates = Join-Path $SourceDir "templates"
 if (Test-Path $sourceTemplates) {
-    if (-not (Test-Path $TemplateTarget)) {
+    $copyTemplates = $true
+    if (Test-Path $TemplateTarget) {
+        if ($Force) {
+            Remove-Item -Recurse -Force $TemplateTarget
+        } else {
+            Write-Warn "Existing global templates found at $TemplateTarget"
+            $templateConfirm = Read-Host "  Overwrite templates? [y/N]"
+            if ($templateConfirm -eq "y" -or $templateConfirm -eq "Y") {
+                Remove-Item -Recurse -Force $TemplateTarget
+            } else {
+                $copyTemplates = $false
+                Write-Host "  Keeping existing templates" -ForegroundColor DarkGray
+            }
+        }
+    }
+
+    if ($copyTemplates) {
         Copy-Item -Recurse -Force $sourceTemplates $TemplateTarget
         Write-Ok "Templates copied"
-    } else {
-        Write-Host "  Templates already exist, skipping" -ForegroundColor DarkGray
     }
 }
 

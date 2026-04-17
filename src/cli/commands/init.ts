@@ -22,6 +22,7 @@ export async function cmdInit(
 ): Promise<void> {
   if (flags.help) {
     console.log(`
+
 dg init — Create a new DreamGraph instance
 
 Usage:
@@ -35,6 +36,7 @@ Options:
   --transport <type>      Transport: stdio, http (default: stdio)
   --port <number>         HTTP port (only with --transport http, default: 8100)
   --host <address>        HTTP host/bind address (only with --transport http, default: 127.0.0.1)
+  --template <name>       Template directory name under ~/.dreamgraph/templates (default: default)
   --master-dir <path>     Override master directory (default: ~/.dreamgraph)
 `);
     return;
@@ -76,6 +78,7 @@ Options:
   }
 
   const host = typeof flags.host === "string" ? flags.host : undefined;
+  const template = typeof flags.template === "string" ? flags.template : "default";
 
   const transport: InstanceTransport = {
     type: transportType as "stdio" | "http",
@@ -98,6 +101,7 @@ Options:
     transport,
     projectRoot,
     masterDir,
+    template,
   });
 
   console.log(`
@@ -108,6 +112,7 @@ Options:
   Policy:      ${instance.policy_profile}
   Mode:        ${instance.mode}
   Transport:   ${instance.transport.type}${instance.transport.type === "http" ? ` (${instance.transport.host ?? "127.0.0.1"}:${instance.transport.port ?? 8100})` : ""}
+  Template:    ${template}
   Project:     ${instance.project_root ?? "(none)"}
   Root:        ${scope.instanceRoot}
 

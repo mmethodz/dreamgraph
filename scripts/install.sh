@@ -131,11 +131,25 @@ ok "Dependencies installed"
 
 # -- Templates -----------------------------------------------------
 if [[ -d "$SOURCE_DIR/templates" ]]; then
-    if [[ ! -d "$TEMPLATE_TARGET" ]]; then
+    COPY_TEMPLATES=true
+    if [[ -d "$TEMPLATE_TARGET" ]]; then
+        if [[ "$FORCE" == "true" ]]; then
+            rm -rf "$TEMPLATE_TARGET"
+        else
+            warn "Existing global templates found at $TEMPLATE_TARGET"
+            read -rp "  Overwrite templates? [y/N] " template_confirm
+            if [[ "$template_confirm" == "y" || "$template_confirm" == "Y" ]]; then
+                rm -rf "$TEMPLATE_TARGET"
+            else
+                COPY_TEMPLATES=false
+                echo "  Keeping existing templates"
+            fi
+        fi
+    fi
+
+    if [[ "$COPY_TEMPLATES" == "true" ]]; then
         cp -r "$SOURCE_DIR/templates" "$TEMPLATE_TARGET"
         ok "Templates copied"
-    else
-        echo "  Templates already exist, skipping"
     fi
 fi
 

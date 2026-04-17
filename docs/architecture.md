@@ -303,6 +303,7 @@ scripts/
 templates/
 └── default/                 # Instance initialization seed data
     ├── config/
+    │   ├── engine.env       # Default commented engine/env template for new instances
     │   └── policies.json    # Default discipline policies (strict/balanced/creative)
     └── *.json               # 19 empty data stubs for new instances
 tests/
@@ -368,18 +369,18 @@ The `engine.env` file overrides global environment variables with per-instance v
 | `DREAMGRAPH_REPOS` | `{}` | JSON object mapping repo names to local paths. In instance mode, repos from `mcp.json` are merged automatically and `project_root` is auto-registered as a fallback — this env var becomes optional. |
 | `DREAMGRAPH_SCHEDULER` | `{"enabled":true}` | JSON config for dream scheduler (v5.2): `enabled`, `tick_interval_ms`, `max_runs_per_hour`, `cooldown_ms`, `nightmare_cooldown_ms`, `error_streak_pause_limit` |
 | `DREAMGRAPH_LLM_PROVIDER` | `"ollama"` | LLM provider: `ollama`, `openai`, `anthropic`, `sampling`, `none` |
-| `DREAMGRAPH_LLM_MODEL` | `"qwen3:8b"` | Model name (provider-dependent default) |
+| `DREAMGRAPH_LLM_MODEL` | `"qwen3:8b"` | Base model name used unless Dreamer/Normalizer overrides are set |
 | `DREAMGRAPH_LLM_URL` | `http://localhost:11434` | API base URL |
-| `DREAMGRAPH_LLM_API_KEY` | — | API key for OpenAI-compatible providers |
-| `DREAMGRAPH_LLM_TEMPERATURE` | `0.7` | Creativity parameter (0.0–1.0). Recommended: `0.9` for cloud models with Structured Outputs |
-| `DREAMGRAPH_LLM_MAX_TOKENS` | `2048` | Max response tokens per dream cycle |
+| `DREAMGRAPH_LLM_API_KEY` | — | API key for OpenAI / Anthropic providers |
+| `DREAMGRAPH_LLM_TEMPERATURE` | `0.7` | Base creativity parameter (0.0–1.0). Recommended: `0.9` for cloud models with Structured Outputs |
+| `DREAMGRAPH_LLM_MAX_TOKENS` | `2048` | Base max response tokens |
 | `DREAMGRAPH_LLM_DREAMER_MODEL` | *(base model)* | Override model for Dreamer component |
 | `DREAMGRAPH_LLM_DREAMER_TEMPERATURE` | *(base temp)* | Override temperature for Dreamer |
 | `DREAMGRAPH_LLM_DREAMER_MAX_TOKENS` | *(base tokens)* | Override max tokens for Dreamer |
 | `DREAMGRAPH_LLM_NORMALIZER_MODEL` | *(base model)* | Override model for Normalizer component |
-| `DREAMGRAPH_LLM_NORMALIZER_TEMPERATURE` | *(base temp)* | Override temperature for Normalizer |
+| `DREAMGRAPH_LLM_NORMALIZER_TEMPERATURE` | `0.1 if unset` | Override temperature for Normalizer |
 | `DREAMGRAPH_LLM_NORMALIZER_MAX_TOKENS` | *(base tokens)* | Override max tokens for Normalizer |
 
-> **Per-instance override:** Each instance can have a `config/engine.env` file that overrides the global env vars above. This allows different instances to use different LLM providers and models.
+> **Per-instance override:** Each instance can have a `config/engine.env` file that overrides the global env vars above. `dg init --template <name>` seeds this file from the selected template using this resolution order: `~/.dreamgraph/templates/<name>/config/engine.env` → repository `templates/<name>/config/engine.env` → built-in programmatic scaffold. Users can create additional named templates by copying `~/.dreamgraph/templates/default/` and renaming it (for example `openai` or `anthropic`). This allows different instances to use different LLM providers and models.
 
 > **⚠️ Cost Warning:** Cloud LLM providers (`openai`, `anthropic`) incur API costs on every dream cycle. With scheduled dreaming at 60-second intervals, costs can reach $2–60+/day depending on the model. Use `DREAMGRAPH_SCHEDULER` `max_runs_per_hour` to cap frequency and monitor your billing dashboard. Use `ollama` for free local dreaming or `none` to disable LLM entirely.

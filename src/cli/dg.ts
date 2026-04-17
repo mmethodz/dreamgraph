@@ -6,7 +6,7 @@
  * Instance lifecycle management from the terminal.
  *
  * Usage:
- *   dg init [--name <name>] [--policy <strict|balanced|creative>] [--project <path>]
+ *   dg init [--name <name>] [--policy <strict|balanced|creative>] [--project <path>] [--template <name>]
  *   dg attach <project-root> [--instance <uuid>]
  *   dg detach [--instance <uuid>]
  *   dg instances [list] [--status <active|archived>]
