@@ -275,7 +275,7 @@ step "Creating command shims..."
 
 # Determine link target directory (prefer /usr/local/bin if writable, else first writable PATH dir, else ~/.local/bin)
 LINK_DIR=""
-if [[ -d "/usr/local/bin" ]] && [[ -w "/usr/local/bin" ]]; then
+if mkdir -p "/usr/local/bin" 2>/dev/null && [[ -w "/usr/local/bin" ]]; then
     LINK_DIR="/usr/local/bin"
 else
     while IFS=':' read -r path_entry; do
@@ -321,15 +321,39 @@ fi
 # Check if LINK_DIR is in PATH
 if ! echo "$PATH" | tr ':' '\n' | grep -qx "$LINK_DIR"; then
     warn "$LINK_DIR is not in your PATH"
-    # Detect shell and suggest appropriate rc file
+
     SHELL_NAME=$(basename "${SHELL:-bash}")
     case "$SHELL_NAME" in
-        zsh)  RC_FILE="~/.zshrc" ;;
-        fish) RC_FILE="~/.config/fish/config.fish" ;;
-        *)    RC_FILE="~/.bashrc" ;;
+        zsh)  RC_FILE="$HOME/.zshrc" ;;
+        fish) RC_FILE="$HOME/.config/fish/config.fish" ;;
+        *)    RC_FILE="$HOME/.bashrc" ;;
     esac
-    echo "  Add to your $RC_FILE:"
-    echo "    export PATH=\"$LINK_DIR:\$PATH\""
+
+    mkdir -p "$(dirname "$RC_FILE")"
+    if [[ ! -f "$RC_FILE" ]]; then
+        touch "$RC_FILE"
+    fi
+
+    PATH_LINE="export PATH=\"$LINK_DIR:\$PATH\""
+    FISH_PATH_LINE="fish_add_path \"$LINK_DIR\""
+
+    if [[ "$SHELL_NAME" == "fish" ]]; then
+        if ! grep -Fqx "$FISH_PATH_LINE" "$RC_FILE" 2>/dev/null; then
+            printf '\n# Added by DreamGraph installer\n%s\n' "$FISH_PATH_LINE" >> "$RC_FILE"
+            ok "Added $LINK_DIR to PATH in $RC_FILE"
+        else
+            ok "$RC_FILE already adds $LINK_DIR to PATH"
+        fi
+    else
+        if ! grep -Fqx "$PATH_LINE" "$RC_FILE" 2>/dev/null; then
+            printf '\n# Added by DreamGraph installer\n%s\n' "$PATH_LINE" >> "$RC_FILE"
+            ok "Added $LINK_DIR to PATH in $RC_FILE"
+        else
+            ok "$RC_FILE already adds $LINK_DIR to PATH"
+        fi
+    fi
+
+    warn "Restart your shell or run: export PATH=\"$LINK_DIR:\$PATH\""
 fi
 
 # -- Verify ---------------------------------------------------------
