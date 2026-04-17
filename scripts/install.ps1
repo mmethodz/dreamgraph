@@ -39,22 +39,31 @@ function Write-Step([string]$msg) { Write-Host "`n$msg" -ForegroundColor Cyan }
 function Write-Ok([string]$msg)   { Write-Host "  $msg (ok)" -ForegroundColor Green }
 function Write-Warn([string]$msg) { Write-Host "  WARNING: $msg" -ForegroundColor Yellow }
 function Ensure-RootBuildDependencies {
-    $tsPath = Join-Path $SourceDir "node_modules\typescript"
-    if (-not (Test-Path $tsPath)) {
-        Write-Host "  Installing build dependencies (root)..." -ForegroundColor Cyan
+    $requiredPaths = @(
+        (Join-Path $SourceDir "node_modules"),
+        (Join-Path $SourceDir "node_modules\typescript"),
+        (Join-Path $SourceDir "node_modules\@types\node"),
+        (Join-Path $SourceDir "node_modules\zod"),
+        (Join-Path $SourceDir "node_modules\@modelcontextprotocol")
+    )
+
+    $missing = $requiredPaths | Where-Object { -not (Test-Path $_) }
+    if ($missing.Count -gt 0) {
+        Write-Host "  Installing root npm dependencies (including devDependencies)..." -ForegroundColor Cyan
         Push-Location $SourceDir
         try {
             $prevPref = $ErrorActionPreference
             $ErrorActionPreference = "SilentlyContinue"
-            $npmOut = & npm install --include=dev 2>&1
+            $npmOut = & npm install --include=dev --loglevel=warn 2>&1
             $ErrorActionPreference = $prevPref
             if ($LASTEXITCODE -ne 0) {
                 $npmOut | ForEach-Object { Write-Host "    $_" -ForegroundColor Red }
                 Write-Error "Root npm install failed (exit code $LASTEXITCODE)"
                 exit 1
             }
-            $summary = ($npmOut | Where-Object { $_ -is [string] -and $_.Trim() }) | Select-Object -Last 1
-            if ($summary) { Write-Host "  $summary" -ForegroundColor DarkGray }
+            $npmOut | Where-Object { $_ -is [string] -and $_.Trim() } | ForEach-Object {
+                Write-Host "  $_" -ForegroundColor DarkGray
+            }
             Write-Ok "Root build dependencies installed"
         } finally {
             Pop-Location
