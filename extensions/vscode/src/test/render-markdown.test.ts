@@ -67,7 +67,7 @@ test('T-1.9: external links get rendered as <a href>', () => {
 
 test('T-1.8: raw script tag is escaped, not passed through', () => {
   const html = md.render('<script>alert("xss")</script>');
-  assert.doesNotMatch(html, /<script>/);
+  assert.doesNotMatch(html, /<script/i);
 });
 
 test('T-1.8b: javascript: URI in link is not rendered as active href', () => {
