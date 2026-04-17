@@ -53,6 +53,47 @@ ok()    { echo -e "  ${GREEN}$* [ok]${NC}"; }
 warn()  { echo -e "  ${YELLOW}[!] $*${NC}"; }
 fail()  { echo -e "${RED}Error: $*${NC}" >&2; exit 1; }
 
+ensure_root_build_dependencies() {
+    local needs_install=false
+
+    if [[ ! -d "$SOURCE_DIR/node_modules" ]]; then
+        needs_install=true
+    elif [[ ! -d "$SOURCE_DIR/node_modules/typescript" ]]; then
+        needs_install=true
+    elif [[ ! -d "$SOURCE_DIR/node_modules/@types/node" ]]; then
+        needs_install=true
+    elif [[ ! -d "$SOURCE_DIR/node_modules/zod" ]]; then
+        needs_install=true
+    elif [[ ! -d "$SOURCE_DIR/node_modules/@modelcontextprotocol" ]]; then
+        needs_install=true
+    fi
+
+    if [[ "$needs_install" == "true" ]]; then
+        echo -e "  ${CYAN}Installing root dependencies (including dev dependencies for build)...${NC}"
+        (cd "$SOURCE_DIR" && npm install --include=dev --loglevel=warn)
+        ok "Root dependencies installed"
+    fi
+}
+
+can_build_vscode_extension() {
+    if ! command -v code &>/dev/null; then
+        return 1
+    fi
+    if [[ ! -d "$SOURCE_DIR/extensions/vscode" ]]; then
+        return 1
+    fi
+    return 0
+}
+
+ensure_extension_build_dependencies() {
+    local ext_source="$SOURCE_DIR/extensions/vscode"
+    if [[ ! -d "$ext_source/node_modules/typescript" ]] || [[ ! -d "$ext_source/node_modules/esbuild" ]]; then
+        echo -e "  ${CYAN}Installing VS Code extension build dependencies...${NC}"
+        (cd "$ext_source" && npm install --loglevel=warn)
+        ok "VS Code extension build dependencies installed"
+    fi
+}
+
 # -- Prerequisites ---------------------------------------------------
 step "Checking prerequisites..."
 
@@ -89,7 +130,10 @@ fi
 
 # -- Build ----------------------------------------------------------
 step "Building DreamGraph..."
-(cd "$SOURCE_DIR" && npm run build)
+ensure_root_build_dependencies
+if ! (cd "$SOURCE_DIR" && npm run build); then
+    fail "Root build failed. Make sure npm dependencies installed correctly in $SOURCE_DIR (try: cd '$SOURCE_DIR' && npm install --include=dev)"
+fi
 ok "Build complete"
 
 SOURCE_DIST="$SOURCE_DIR/dist"
@@ -154,7 +198,7 @@ if [[ -d "$SOURCE_DIR/templates" ]]; then
 fi
 
 # -- VS Code Extension ----------------------------------------------
-if command -v code &>/dev/null; then
+if can_build_vscode_extension; then
     step "Installing VS Code extension..."
     EXT_SOURCE="$SOURCE_DIR/extensions/vscode"
     EXT_PKG="$EXT_SOURCE/package.json"
@@ -166,9 +210,9 @@ if command -v code &>/dev/null; then
         EXT_DEST="$HOME/.vscode/extensions/$EXT_ID"
 
         # Build the extension (install all deps including devDeps for vsce)
+        ensure_extension_build_dependencies
         (
             cd "$EXT_SOURCE"
-            npm install 2>/dev/null
             npm run build 2>&1
         )
         if [[ $? -ne 0 ]]; then
@@ -213,7 +257,7 @@ if command -v code &>/dev/null; then
         warn "Extension source not found at $EXT_SOURCE -- skipping"
     fi
 else
-    echo "  VS Code not found in PATH -- skipping extension install"
+    echo "  VS Code not found in PATH or extension source unavailable -- skipping extension build/install"
 fi
 
 # -- Version file ---------------------------------------------------

@@ -75,7 +75,7 @@ cd dreamgraph
 bash scripts/install.sh
 ```
 
-This builds the server, installs the `dg` CLI globally, and **automatically installs the VS Code extension** if VS Code is detected.
+This builds the server, installs the `dg` CLI globally, and **automatically installs the VS Code extension** if VS Code is detected. On a fresh machine, the installer also bootstraps required build dependencies such as the TypeScript compiler. If VS Code is not installed, DreamGraph still installs successfully for CLI, MCP server, and dashboard use.
 
 ### Onboard a Project
 
@@ -115,7 +115,7 @@ You can change provider and model at any time — the graph-grounded context is 
 # ~/.dreamgraph/<instance-uuid>/config/engine.env
 DREAMGRAPH_LLM_PROVIDER=openai
 DREAMGRAPH_LLM_URL=https://api.openai.com/v1
-DREAMGRAPH_LLM_API_KEY=****
+DREAMGRAPH_LLM_API_KEY=your-api-key-here
 DREAMGRAPH_LLM_DREAMER_MODEL=gpt-4o-mini
 DREAMGRAPH_LLM_DREAMER_TEMPERATURE=0.9
 DREAMGRAPH_LLM_DREAMER_MAX_TOKENS=10240

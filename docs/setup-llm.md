@@ -17,10 +17,7 @@ These values are loaded into `process.env` at startup and override global enviro
 ```bash
 DREAMGRAPH_LLM_PROVIDER=openai
 DREAMGRAPH_LLM_URL=https://api.openai.com/v1
-DREAMGRAPH_LLM_API_KEY=****
-DREAMGRAPH_LLM_MODEL=gpt-4o-mini
-DREAMGRAPH_LLM_TEMPERATURE=0.7
-DREAMGRAPH_LLM_MAX_TOKENS=2048
+DREAMGRAPH_LLM_API_KEY=your-api-key-here
 ```
 
 ### Dreamer / Normalizer split configuration
@@ -35,23 +32,50 @@ Example:
 ```bash
 DREAMGRAPH_LLM_PROVIDER=openai
 DREAMGRAPH_LLM_URL=https://api.openai.com/v1
-DREAMGRAPH_LLM_API_KEY=****
-
+DREAMGRAPH_LLM_API_KEY=your-api-key-here
 DREAMGRAPH_LLM_DREAMER_MODEL=gpt-4o-mini
 DREAMGRAPH_LLM_DREAMER_TEMPERATURE=0.9
 DREAMGRAPH_LLM_DREAMER_MAX_TOKENS=10240
-
 DREAMGRAPH_LLM_NORMALIZER_MODEL=gpt-5.4-nano
 DREAMGRAPH_LLM_NORMALIZER_TEMPERATURE=0.1
 DREAMGRAPH_LLM_NORMALIZER_MAX_TOKENS=4096
 ```
 
-Behavior:
+Notes:
 
 - `DREAMGRAPH_LLM_MODEL`, `DREAMGRAPH_LLM_TEMPERATURE`, and `DREAMGRAPH_LLM_MAX_TOKENS` act as base defaults.
 - `DREAMGRAPH_LLM_DREAMER_*` overrides apply only to the Dreamer.
 - `DREAMGRAPH_LLM_NORMALIZER_*` overrides apply only to the Normalizer.
 - If no Normalizer temperature is set, DreamGraph defaults it to `0.1`.
+
+### Instance templates
+
+New instances seed `config/engine.env` from the selected template when available:
+
+1. `~/.dreamgraph/templates/<template>/config/engine.env`
+2. repository `templates/<template>/config/engine.env`
+3. built-in fallback scaffold
+
+`dg init` defaults to `--template default`.
+
+You can create your own presets by copying:
+
+```text
+~/.dreamgraph/templates/default/
+```
+
+to something like:
+
+```text
+~/.dreamgraph/templates/openai/
+~/.dreamgraph/templates/anthropic/
+```
+
+and then running:
+
+```bash
+dg init my-project --template openai
+```
 
 ## 2. VS Code Architect configuration
 
@@ -70,7 +94,17 @@ Important:
 - VS Code Architect settings control the editor chat agent
 - they are related but separate configuration surfaces
 
-## 3. Anthropic / Opus 4.7 notes
+## 3. Installer behavior
+
+The install scripts bootstrap required build tooling automatically on fresh machines, including the TypeScript compiler via npm install when needed.
+
+VS Code is optional:
+
+- if VS Code is present in PATH, the installer builds and installs the extension
+- if VS Code is not present, the installer skips extension build/install
+- CLI, MCP server, and dashboard installation still succeed without VS Code
+
+## 4. Anthropic / Opus 4.7 notes
 
 If using Anthropic in the Architect, also see:
 
@@ -82,7 +116,7 @@ Key Anthropic extension settings:
 - `dreamgraph.architect.anthropic.adaptiveThinking`
 - `dreamgraph.architect.anthropic.showThinkingSummary`
 
-## 4. Common setup mistakes
+## 5. Common setup mistakes
 
 ### Wrong variable prefix
 
@@ -108,7 +142,7 @@ These are different:
 
 Some Architect UI changes may persist to VS Code user settings rather than workspace settings.
 
-## 5. Quick verification checklist
+## 6. Quick verification checklist
 
 - `engine.env` exists under the correct instance `config/` directory
 - variables use the `DREAMGRAPH_LLM_*` prefix

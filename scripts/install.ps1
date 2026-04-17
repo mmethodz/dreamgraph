@@ -38,6 +38,62 @@ $TemplateTarget = Join-Path $DGHome "templates"
 function Write-Step([string]$msg) { Write-Host "`n$msg" -ForegroundColor Cyan }
 function Write-Ok([string]$msg)   { Write-Host "  $msg (ok)" -ForegroundColor Green }
 function Write-Warn([string]$msg) { Write-Host "  WARNING: $msg" -ForegroundColor Yellow }
+function Ensure-RootBuildDependencies {
+    $tsPath = Join-Path $SourceDir "node_modules\typescript"
+    if (-not (Test-Path $tsPath)) {
+        Write-Host "  Installing build dependencies (root)..." -ForegroundColor Cyan
+        Push-Location $SourceDir
+        try {
+            $prevPref = $ErrorActionPreference
+            $ErrorActionPreference = "SilentlyContinue"
+            $npmOut = & npm install --include=dev 2>&1
+            $ErrorActionPreference = $prevPref
+            if ($LASTEXITCODE -ne 0) {
+                $npmOut | ForEach-Object { Write-Host "    $_" -ForegroundColor Red }
+                Write-Error "Root npm install failed (exit code $LASTEXITCODE)"
+                exit 1
+            }
+            $summary = ($npmOut | Where-Object { $_ -is [string] -and $_.Trim() }) | Select-Object -Last 1
+            if ($summary) { Write-Host "  $summary" -ForegroundColor DarkGray }
+            Write-Ok "Root build dependencies installed"
+        } finally {
+            Pop-Location
+        }
+    }
+}
+
+function Test-CanBuildVsCodeExtension {
+    $codeCmd = Get-Command code -ErrorAction SilentlyContinue
+    if (-not $codeCmd) { return $false }
+    $extSourceDir = Join-Path $SourceDir "extensions\vscode"
+    return (Test-Path $extSourceDir)
+}
+
+function Ensure-ExtensionBuildDependencies {
+    $extSourceDir = Join-Path $SourceDir "extensions\vscode"
+    $tsPath = Join-Path $extSourceDir "node_modules\typescript"
+    $esbuildPath = Join-Path $extSourceDir "node_modules\esbuild"
+    if ((-not (Test-Path $tsPath)) -or (-not (Test-Path $esbuildPath))) {
+        Write-Host "  Installing VS Code extension build dependencies..." -ForegroundColor Cyan
+        Push-Location $extSourceDir
+        try {
+            $prevPref = $ErrorActionPreference
+            $ErrorActionPreference = "SilentlyContinue"
+            $npmOut = & npm install 2>&1
+            $ErrorActionPreference = $prevPref
+            if ($LASTEXITCODE -ne 0) {
+                $npmOut | ForEach-Object { Write-Host "    $_" -ForegroundColor Red }
+                Write-Error "VS Code extension npm install failed (exit code $LASTEXITCODE)"
+                exit 1
+            }
+            $summary = ($npmOut | Where-Object { $_ -is [string] -and $_.Trim() }) | Select-Object -Last 1
+            if ($summary) { Write-Host "  $summary" -ForegroundColor DarkGray }
+            Write-Ok "VS Code extension build dependencies installed"
+        } finally {
+            Pop-Location
+        }
+    }
+}
 
 # -- Prerequisites ---------------------------------------------------
 Write-Step "Checking prerequisites..."
@@ -93,6 +149,7 @@ if ((Test-Path $DistTarget) -and -not $Force) {
 
 # -- Build ----------------------------------------------------------
 Write-Step "Building DreamGraph..."
+Ensure-RootBuildDependencies
 Push-Location $SourceDir
 try {
     $prevPref = $ErrorActionPreference
@@ -197,8 +254,7 @@ if (Test-Path $sourceTemplates) {
 }
 
 # -- VS Code Extension ----------------------------------------------
-$codeCmd = Get-Command code -ErrorAction SilentlyContinue
-if ($codeCmd) {
+if (Test-CanBuildVsCodeExtension) {
     Write-Step "Installing VS Code extension..."
     $ExtSourceDir = Join-Path $SourceDir "extensions\vscode"
     $ExtPkgJson  = Join-Path $ExtSourceDir "package.json"
@@ -207,12 +263,11 @@ if ($codeCmd) {
         $extId   = "$($extPkg.publisher).$($extPkg.name)-$($extPkg.version)"
         $ExtDest = Join-Path $env:USERPROFILE ".vscode\extensions\$extId"
 
+        Ensure-ExtensionBuildDependencies
         Push-Location $ExtSourceDir
         try {
-            # Install all dependencies (vsce is a devDependency)
             $prevPref = $ErrorActionPreference
             $ErrorActionPreference = "SilentlyContinue"
-            & npm install 2>&1 | Out-Null
             & npm run build 2>&1 | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
             $ErrorActionPreference = $prevPref
             if ($LASTEXITCODE -ne 0) {
@@ -274,7 +329,7 @@ if ($codeCmd) {
         Write-Warn "Extension source not found at $ExtSourceDir -- skipping"
     }
 } else {
-    Write-Host "  VS Code not found in PATH -- skipping extension install" -ForegroundColor DarkGray
+    Write-Host "  VS Code not found in PATH or extension source unavailable -- skipping extension build/install" -ForegroundColor DarkGray
 }
 
 # -- Version file ---------------------------------------------------
