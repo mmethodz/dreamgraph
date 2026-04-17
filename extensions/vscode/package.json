@@ -199,7 +199,7 @@
         },
         "dreamgraph.architect.model": {
           "type": "string",
-          "description": "Model name for the Architect (e.g., 'claude-opus-4-6-20250602')."
+          "description": "Model name for the Architect (e.g., 'claude-opus-4-6')."
         },
         "dreamgraph.architect.baseUrl": {
           "type": "string",
@@ -209,6 +209,28 @@
           "type": "number",
           "default": 16000,
           "description": "Maximum token budget for Architect context assembly."
+        },
+        "dreamgraph.architect.anthropic.effort": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "default": "high",
+          "description": "Anthropic effort level. Opus 4.7 defaults to xhigh when unset; Opus 4.6 uses high and clamps xhigh to high for compatibility."
+        },
+        "dreamgraph.architect.anthropic.adaptiveThinking": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Anthropic adaptive thinking for Claude Opus 4.7."
+        },
+        "dreamgraph.architect.anthropic.showThinkingSummary": {
+          "type": "boolean",
+          "default": true,
+          "description": "Opt in to summarized thinking visibility for Claude Opus 4.7 to avoid a long silent pause during reasoning."
         },
         "dreamgraph.platform": {
           "type": "string",

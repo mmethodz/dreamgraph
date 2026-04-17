@@ -8,6 +8,7 @@
 import * as vscode from "vscode";
 
 export type ArchitectProvider = "anthropic" | "openai" | "ollama";
+export type AnthropicEffort = "low" | "medium" | "high" | "xhigh" | "max";
 
 export interface ArchitectConfig {
   provider: ArchitectProvider;
@@ -20,9 +21,13 @@ export type ArchitectContentBlock =
   | { type: "text"; text: string }
   | { type: "image"; mimeType: string; dataBase64: string; fileName?: string };
 
+export type ArchitectTextBlock = { type: "text"; text: string };
+export type ArchitectImageBlock = { type: "image"; mimeType: string; dataBase64: string; fileName?: string };
+export type ArchitectContent = ArchitectTextBlock | ArchitectImageBlock;
+
 export interface ArchitectMessage {
   role: "system" | "user" | "assistant";
-  content: string | ArchitectContentBlock[];
+  content: string | ArchitectContent[];
 }
 
 export interface ArchitectModelCapabilities {
@@ -68,6 +73,7 @@ export type StreamCallback = (chunk: string) => void;
 
 export const ANTHROPIC_MODELS = [
   "claude-opus-4-6",
+  "claude-opus-4-7",
   "claude-sonnet-4-6",
   "claude-haiku-4-5",
 ];
@@ -136,6 +142,78 @@ export class ArchitectLlm implements vscode.Disposable {
       default:
         return { textAttachments: false, imageAttachments: false };
     }
+  }
+
+  private _getAnthropicEffort(model: string): AnthropicEffort {
+    const cfg = vscode.workspace.getConfiguration("dreamgraph.architect");
+    const configured = (cfg.get<string>("anthropic.effort") ?? "").trim().toLowerCase();
+    const normalized = configured === "xhigh" || configured === "max" || configured === "high" || configured === "medium" || configured === "low"
+      ? (configured as AnthropicEffort)
+      : undefined;
+
+    if (normalized) {
+      if (model.startsWith("claude-opus-4-6") && normalized === "xhigh") {
+        return "high";
+      }
+      return normalized;
+    }
+
+    return model.startsWith("claude-opus-4-7") ? "xhigh" : "high";
+  }
+
+  private _getAnthropicMaxTokens(model: string): number {
+    return model.startsWith("claude-opus-4-7") ? 65536 : 8192;
+  }
+
+  private _getAnthropicThinking(model: string): { type: "adaptive"; display?: "summarized" } | undefined {
+    if (!model.startsWith("claude-opus-4-7")) {
+      return undefined;
+    }
+
+    const cfg = vscode.workspace.getConfiguration("dreamgraph.architect");
+    const enabled = cfg.get<boolean>("anthropic.adaptiveThinking") ?? true;
+    if (!enabled) {
+      return undefined;
+    }
+
+    const summarized = cfg.get<boolean>("anthropic.showThinkingSummary") ?? true;
+    return summarized ? { type: "adaptive", display: "summarized" } : { type: "adaptive" };
+  }
+
+  private _buildAnthropicMessagesRequest(
+    config: ArchitectConfig,
+    messages: unknown[],
+    system?: string,
+    tools?: ToolDefinition[],
+    stream?: boolean,
+  ): Record<string, unknown> {
+    const body: Record<string, unknown> = {
+      model: config.model,
+      max_tokens: this._getAnthropicMaxTokens(config.model),
+      messages,
+    };
+
+    if (system) {
+      body.system = system;
+    }
+
+    if (stream) {
+      body.stream = true;
+    }
+
+    if (tools && tools.length > 0) {
+      body.tools = tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.inputSchema }));
+    }
+
+    if (config.model.startsWith("claude-opus-4-7")) {
+      body.output_config = { effort: this._getAnthropicEffort(config.model) };
+      const thinking = this._getAnthropicThinking(config.model);
+      if (thinking) {
+        body.thinking = thinking;
+      }
+    }
+
+    return body;
   }
 
   async loadConfig(): Promise<void> {
@@ -221,12 +299,12 @@ export class ArchitectLlm implements vscode.Disposable {
     }
   }
 
-  private _messageTextContent(content: string | ArchitectContentBlock[]): string {
+  private _messageTextContent(content: string | ArchitectContent[]): string {
     if (typeof content === "string") return content;
-    return content.filter((block) => block.type === "text").map((block) => block.text).join("\n\n");
+    return content.filter((block): block is ArchitectTextBlock => block.type === "text").map((block) => block.text).join("\n\n");
   }
 
-  private _toAnthropicContent(content: string | ArchitectContentBlock[]): unknown {
+  private _toAnthropicContent(content: string | ArchitectContent[]): unknown {
     if (typeof content === "string") return content;
     return content.map((block) => {
       if (block.type === "text") return { type: "text", text: block.text };
@@ -241,7 +319,7 @@ export class ArchitectLlm implements vscode.Disposable {
     });
   }
 
-  private _toOpenAIContent(content: string | ArchitectContentBlock[]): unknown {
+  private _toOpenAIContent(content: string | ArchitectContent[]): unknown {
     if (typeof content === "string") return content;
     return content.map((block) => {
       if (block.type === "text") return { type: "text", text: block.text };
@@ -252,7 +330,7 @@ export class ArchitectLlm implements vscode.Disposable {
     });
   }
 
-  private _toOllamaContent(content: string | ArchitectContentBlock[]): string {
+  private _toOllamaContent(content: string | ArchitectContent[]): string {
     return this._messageTextContent(content);
   }
 
@@ -334,6 +412,12 @@ export class ArchitectLlm implements vscode.Disposable {
     signal?: AbortSignal,
   ): Promise<ArchitectResponse> {
     const { system, userMessages } = this._splitSystem(messages);
+    const requestBody = this._buildAnthropicMessagesRequest(
+      config,
+      userMessages.map((m) => ({ role: m.role, content: this._toAnthropicContent(m.content) })),
+      system,
+    );
+
     const res = await fetch(`${config.baseUrl}/messages`, {
       method: "POST",
       headers: {
@@ -341,12 +425,7 @@ export class ArchitectLlm implements vscode.Disposable {
         "x-api-key": config.apiKey,
         "anthropic-version": "2023-06-01",
       },
-      body: JSON.stringify({
-        model: config.model,
-        max_tokens: 8192,
-        ...(system ? { system } : {}),
-        messages: userMessages.map((m) => ({ role: m.role, content: this._toAnthropicContent(m.content) })),
-      }),
+      body: JSON.stringify(requestBody),
       signal,
     });
 
@@ -378,6 +457,7 @@ export class ArchitectLlm implements vscode.Disposable {
       ? rawMessages
       : messages.filter((m) => m.role !== "system").map((m) => ({ role: m.role, content: this._toAnthropicContent(m.content) }));
 
+    const requestBody = this._buildAnthropicMessagesRequest(config, apiMessages, system, tools);
     const res = await fetch(`${config.baseUrl}/messages`, {
       method: "POST",
       headers: {
@@ -385,13 +465,7 @@ export class ArchitectLlm implements vscode.Disposable {
         "x-api-key": config.apiKey,
         "anthropic-version": "2023-06-01",
       },
-      body: JSON.stringify({
-        model: config.model,
-        max_tokens: 8192,
-        ...(system ? { system } : {}),
-        messages: apiMessages,
-        tools: tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.inputSchema })),
-      }),
+      body: JSON.stringify(requestBody),
       signal,
     });
 
@@ -485,6 +559,14 @@ export class ArchitectLlm implements vscode.Disposable {
     signal?: AbortSignal,
   ): Promise<ArchitectResponse> {
     const { system, userMessages } = this._splitSystem(messages);
+    const requestBody = this._buildAnthropicMessagesRequest(
+      config,
+      userMessages.map((m) => ({ role: m.role, content: this._toAnthropicContent(m.content) })),
+      system,
+      undefined,
+      true,
+    );
+
     const res = await fetch(`${config.baseUrl}/messages`, {
       method: "POST",
       headers: {
@@ -492,13 +574,7 @@ export class ArchitectLlm implements vscode.Disposable {
         "x-api-key": config.apiKey,
         "anthropic-version": "2023-06-01",
       },
-      body: JSON.stringify({
-        model: config.model,
-        max_tokens: 8192,
-        stream: true,
-        ...(system ? { system } : {}),
-        messages: userMessages.map((m) => ({ role: m.role, content: this._toAnthropicContent(m.content) })),
-      }),
+      body: JSON.stringify(requestBody),
       signal,
     });
 

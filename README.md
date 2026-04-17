@@ -112,13 +112,47 @@ You can change provider and model at any time — the graph-grounded context is 
 # Engine dreamer (daemon-side) — set in instance config
 # ~/.dreamgraph/instances/<uuid>/config/engine.env
 DG_LLM_PROVIDER=anthropic
-DG_LLM_API_KEY=sk-ant-...
-DG_LLM_MODEL=claude-sonnet-4-20250514
+DG_LLM_API_KEY=****
 
 # Extension Architect (VS Code-side)
 # Settings → dreamgraph.architect.provider / model
 # API key → Ctrl+Shift+P → DreamGraph: Set Architect API Key
 ```
+
+### Anthropic Architect models and Claude Opus 4.7
+
+The VS Code Architect supports Anthropic model selection directly from settings and the chat model picker.
+
+- Default Anthropic Architect model remains **`claude-opus-4-6`** for now.
+- **`claude-opus-4-7`** is available as a standard selectable model without using `Custom...`.
+- Anthropic-specific settings are available under:
+  - `dreamgraph.architect.anthropic.effort`
+  - `dreamgraph.architect.anthropic.adaptiveThinking`
+  - `dreamgraph.architect.anthropic.showThinkingSummary`
+
+Recommended starting point:
+
+- **Opus 4.6** → `high`
+- **Opus 4.7** → `xhigh` for coding and agentic work, per Anthropic guidance
+
+Current DreamGraph behavior:
+
+- Opus 4.6 remains the default selection in the dropdown.
+- Opus 4.7 is selectable and uses the newer Anthropic request shape.
+- If `xhigh` is configured while using Opus 4.6, DreamGraph clamps it to `high` for compatibility.
+- For Opus 4.7, DreamGraph can send adaptive thinking and optionally request summarized thinking visibility.
+
+Important Opus 4.7 migration notes:
+
+- Anthropic removed extended thinking budgets for Opus 4.7. Use `thinking: { type: "adaptive" }` instead of old `budget_tokens`-based thinking.
+- Anthropic removed non-default sampling controls on Opus 4.7. Avoid sending non-default `temperature`, `top_p`, or `top_k` values.
+- Thinking text is omitted by default on Opus 4.7 unless explicitly opted back in; use `dreamgraph.architect.anthropic.showThinkingSummary` if you want visible summarized reasoning progress.
+- Opus 4.7 supports higher-resolution images automatically and may use significantly more image tokens on vision-heavy workloads.
+- Opus 4.7 may use more text tokens than Opus 4.6, so re-check token budgets and output limits for long agentic traces.
+
+For migration details, see Anthropic's guide:
+
+- https://platform.claude.com/docs/en/about-claude/models/migration-guide#migrating-to-claude-opus-4-7
 
 ### Schedule Recurring Dreams
 
@@ -321,6 +355,7 @@ docs/               # Architecture, cognitive engine, tools, data model, workflo
 | [docs/data-model.md](docs/data-model.md) | All 21 data store schemas and relationship map |
 | [docs/workflows.md](docs/workflows.md) | Step-by-step operational process flows |
 | [docs/narrative.md](docs/narrative.md) | Auto-generated system chronicle |
+| [docs/anthropic-opus-4-7.md](docs/anthropic-opus-4-7.md) | Anthropic Architect configuration, Opus 4.7 migration notes, effort/thinking guidance |
 
 ---
 
@@ -347,4 +382,3 @@ DreamGraph is source-available under the DreamGraph License (BSL-based) — see 
 - Not allowed to offer as a competing service or platform
 
 Commercial licensing: mika.jussila@siteledger.io
-
