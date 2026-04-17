@@ -534,31 +534,53 @@ async function genArchitecture(
   return files;
 }
 
+function getUIElementStatus(el: any): "active" | "transitional" | "deprecated" {
+  return el?.status === "transitional" || el?.status === "deprecated"
+    ? el.status
+    : "active";
+}
+
 async function genUIRegistry(
   fmt: LivingDocsFormat
 ): Promise<FileBuffer[]> {
   const reg = await loadUIRegistry();
   const files: FileBuffer[] = [];
+  const nonDeprecated = reg.elements.filter((el) => getUIElementStatus(el) !== "deprecated");
+  const deprecated = reg.elements.filter((el) => getUIElementStatus(el) === "deprecated");
 
   let idx = frontmatter(fmt, "UI Registry", 5);
   idx += "# Semantic UI Element Catalog\n\n";
-  if (!reg.elements.length) {
+  if (!nonDeprecated.length && !deprecated.length) {
     idx += "*No UI elements registered yet.*\n";
   } else {
-    // Group by category
-    const byCategory = new Map<string, typeof reg.elements>();
-    for (const el of reg.elements) {
+    const byCategory = new Map<string, typeof nonDeprecated>();
+    for (const el of nonDeprecated) {
       const arr = byCategory.get(el.category) ?? [];
       arr.push(el);
       byCategory.set(el.category, arr);
     }
     for (const [cat, els] of byCategory) {
       idx += `## ${cat}\n\n`;
-      idx += "| ID | Name | Purpose | Platforms |\n";
-      idx += "|----|------|---------|-----------|\n";
+      idx += "| ID | Name | Status | Purpose | Platforms |\n";
+      idx += "|----|------|--------|---------|-----------|\n";
       for (const el of els) {
-        const plats = el.implementations.map((i) => i.platform).join(", ") || "-";
-        idx += `| [${el.id}](${slugify(el.id)}.md) | ${el.name} | ${el.purpose.substring(0, 60)}… | ${plats} |\n`;
+        const plats = el.implementations.map((i: any) => i.platform).join(", ") || "-";
+        idx += `| [${el.id}](${slugify(el.id)}.md) | ${el.name} | ${getUIElementStatus(el)} | ${el.purpose.substring(0, 60)}… | ${plats} |\n`;
+      }
+      idx += "\n";
+    }
+
+    if (deprecated.length) {
+      idx += "## Deprecated / Transitional Legacy Entries\n\n";
+      idx += warningCallout(
+        fmt,
+        "Deprecated UI entries are excluded from the main catalog but retained for backward compatibility and historical traceability. Prefer canonical `ui_*` entries and any declared `superseded_by` targets."
+      );
+      idx += "\n";
+      idx += "| ID | Name | Status | Superseded By | Reason |\n";
+      idx += "|----|------|--------|---------------|--------|\n";
+      for (const el of deprecated) {
+        idx += `| [${el.id}](${slugify(el.id)}.md) | ${el.name} | ${getUIElementStatus(el)} | ${el.superseded_by ?? "-"} | ${(el.deprecation_reason ?? "-").replace(/\|/g, "\\|")} |\n`;
       }
       idx += "\n";
     }
@@ -569,14 +591,27 @@ async function genUIRegistry(
     content: idx,
   });
 
-  // Individual element pages
   for (const el of reg.elements) {
+    const status = getUIElementStatus(el);
     let md = frontmatter(fmt, el.name);
     md += `# ${el.name}\n\n`;
     md += `> ${el.purpose}\n\n`;
     md += `**ID:** \`${el.id}\`  \n`;
     md += `**Category:** ${el.category}  \n`;
+    md += `**Status:** ${status}  \n`;
+    if (el.superseded_by) md += `**Superseded by:** ${el.superseded_by}  \n`;
+    if (el.deprecation_reason) md += `**Lifecycle note:** ${el.deprecation_reason}  \n`;
     md += "\n";
+
+    if (status !== "active") {
+      md += warningCallout(
+        fmt,
+        status === "deprecated"
+          ? "This entry is deprecated. Prefer the canonical replacement if one is listed."
+          : "This entry is transitional. It remains available for backward compatibility but should not be preferred for new work."
+      );
+      md += "\n";
+    }
 
     md += "## Data Contract\n\n";
     md += "### Inputs\n\n";
@@ -607,6 +642,38 @@ async function genUIRegistry(
       md += "## Interactions\n\n";
       for (const ia of el.interactions) {
         md += `- **${ia.action}** — ${ia.description}\n`;
+      }
+      md += "\n";
+    }
+
+    if (el.visual_semantics) {
+      md += "## Visual Semantics\n\n";
+      if (el.visual_semantics.visual_role) md += `- **Role:** ${el.visual_semantics.visual_role}\n`;
+      if (el.visual_semantics.emphasis) md += `- **Emphasis:** ${el.visual_semantics.emphasis}\n`;
+      if (el.visual_semantics.density) md += `- **Density:** ${el.visual_semantics.density}\n`;
+      if (el.visual_semantics.chrome) md += `- **Chrome:** ${el.visual_semantics.chrome}\n`;
+      if (Array.isArray(el.visual_semantics.state_styling) && el.visual_semantics.state_styling.length) {
+        md += "\n### State Styling\n\n";
+        for (const state of el.visual_semantics.state_styling) {
+          md += `- **${state.state}** — ${state.treatment}\n`;
+        }
+      }
+      md += "\n";
+    }
+
+    if (el.layout_semantics) {
+      md += "## Layout Semantics\n\n";
+      if (el.layout_semantics.pattern) md += `- **Pattern:** ${el.layout_semantics.pattern}\n`;
+      if (el.layout_semantics.alignment) md += `- **Alignment:** ${el.layout_semantics.alignment}\n`;
+      if (el.layout_semantics.sizing_behavior) md += `- **Sizing behavior:** ${el.layout_semantics.sizing_behavior}\n`;
+      if (Array.isArray(el.layout_semantics.responsive_behavior) && el.layout_semantics.responsive_behavior.length) {
+        md += `- **Responsive behavior:** ${el.layout_semantics.responsive_behavior.join(", ")}\n`;
+      }
+      if (Array.isArray(el.layout_semantics.hierarchy) && el.layout_semantics.hierarchy.length) {
+        md += "\n### Layout Hierarchy\n\n";
+        for (const region of el.layout_semantics.hierarchy) {
+          md += `- **${region.region}** — ${region.role}\n`;
+        }
       }
       md += "\n";
     }

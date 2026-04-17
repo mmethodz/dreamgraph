@@ -1,13 +1,13 @@
 /**
  * DreamGraph MCP Server — Semantic UI Registry tools.
  *
- * Three tools for managing platform-independent UI element definitions:
+ * Tools for managing platform-independent UI element definitions:
  *   register_ui_element — Register or update a semantic element
  *   query_ui_elements — Search by category, platform, purpose, or feature
  *   generate_ui_migration_plan — Gap analysis between source and target platforms
  *
  * The registry describes WHAT elements are (purpose, data contract,
- * interaction model), not HOW they look. No code generation.
+ * interaction model, abstract visual/layout intent), not HOW they look.
  *
  * Data file: data/ui_registry.json
  */
@@ -33,15 +33,9 @@ import type {
   ToolResponse,
 } from "../types/index.js";
 
-// ---------------------------------------------------------------------------
-// Path resolution
-// ---------------------------------------------------------------------------
-
 const registryPath = () => dataPath("ui_registry.json");
 
-// ---------------------------------------------------------------------------
-// File I/O
-// ---------------------------------------------------------------------------
+type ElementStatus = "active" | "transitional" | "deprecated";
 
 async function loadRegistry(): Promise<UIRegistryFile> {
   try {
@@ -49,18 +43,19 @@ async function loadRegistry(): Promise<UIRegistryFile> {
     const raw = await readFile(registryPath(), "utf-8");
     const parsed = JSON.parse(raw);
 
-    // Defensive: guarantee the expected shape regardless of what is on disk.
-    // If an agent wrote a flat array or a differently-keyed object we still
-    // recover gracefully instead of crashing in saveRegistry / find().
     const empty = emptyRegistry();
+    const rawElements = Array.isArray(parsed.elements) ? parsed.elements : [];
+    const elements = rawElements.map(normalizeElement);
+
     return {
       metadata: {
         ...empty.metadata,
         ...(parsed.metadata && typeof parsed.metadata === "object"
           ? parsed.metadata
           : {}),
+        schema_version: "1.2.0",
       },
-      elements: Array.isArray(parsed.elements) ? parsed.elements : [],
+      elements,
       ...(parsed._schema_notes &&
         typeof parsed._schema_notes === "object" && {
           _schema_notes: parsed._schema_notes,
@@ -76,6 +71,16 @@ async function saveRegistry(data: UIRegistryFile): Promise<void> {
   const categories = new Set(data.elements.map((e) => e.category));
   data.metadata.total_categories = categories.size;
   data.metadata.last_updated = new Date().toISOString();
+  data.metadata.schema_version = "1.2.0";
+  data._schema_notes = {
+    ...(data._schema_notes ?? {}),
+    visual_semantics:
+      "Abstract visual language: role, emphasis, density, chrome, and state-driven treatments. Never store CSS classes, Tailwind tokens, or pixel values here.",
+    layout_semantics:
+      "Abstract layout contract: pattern, alignment, sizing, responsive behavior, and hierarchy. Keep framework-agnostic and implementation-independent.",
+    lifecycle_fields:
+      "status, superseded_by, and deprecation_reason support non-destructive registry retirement. Omitted status means active for backward compatibility.",
+  };
   await atomicWriteFile(registryPath(), JSON.stringify(data, null, 2));
   logger.debug("UI registry saved to disk");
 }
@@ -84,19 +89,53 @@ function emptyRegistry(): UIRegistryFile {
   return {
     metadata: {
       description:
-        "Semantic UI Registry — platform-independent element definitions with purpose, data contract, and interaction model.",
-      schema_version: "1.0.0",
+        "Semantic UI Registry — platform-independent element definitions with purpose, data contract, interaction model, abstract visual/layout semantics, and backward-compatible lifecycle governance.",
+      schema_version: "1.2.0",
       total_elements: 0,
       total_categories: 0,
       last_updated: null,
     },
     elements: [],
+    _schema_notes: {
+      visual_semantics:
+        "Abstract visual language only. Use semantic roles and hierarchy, not raw styling implementation details.",
+      layout_semantics:
+        "Abstract layout/composition only. Use patterns and responsive intent, not exact grid props or pixel spacing.",
+      lifecycle_fields:
+        "Use status/superseded_by/deprecation_reason to mark transitional or deprecated entries without deleting history.",
+    },
   };
 }
 
-// ---------------------------------------------------------------------------
-// Complexity heuristic for migration planning
-// ---------------------------------------------------------------------------
+function normalizeElement(raw: any): SemanticElement {
+  const normalized: SemanticElement = {
+    ...raw,
+    implementations: Array.isArray(raw?.implementations) ? raw.implementations : [],
+    used_by: Array.isArray(raw?.used_by) ? raw.used_by : [],
+    tags: Array.isArray(raw?.tags) ? raw.tags : [],
+    interactions: Array.isArray(raw?.interactions) ? raw.interactions : [],
+    data_contract: {
+      inputs: Array.isArray(raw?.data_contract?.inputs) ? raw.data_contract.inputs : [],
+      outputs: Array.isArray(raw?.data_contract?.outputs) ? raw.data_contract.outputs : [],
+    },
+  };
+
+  if (
+    raw?.status === "active" ||
+    raw?.status === "transitional" ||
+    raw?.status === "deprecated"
+  ) {
+    normalized.status = raw.status;
+  }
+  if (typeof raw?.superseded_by === "string") normalized.superseded_by = raw.superseded_by;
+  if (typeof raw?.deprecation_reason === "string") normalized.deprecation_reason = raw.deprecation_reason;
+
+  return normalized;
+}
+
+function effectiveStatus(el: SemanticElement): ElementStatus {
+  return el.status ?? "active";
+}
 
 function estimateComplexity(
   el: SemanticElement
@@ -110,10 +149,6 @@ function estimateComplexity(
   if (inputCount + outputCount >= 2 || hasChildren) return "moderate";
   return "trivial";
 }
-
-// ---------------------------------------------------------------------------
-// Zod enum for categories (shared across tools)
-// ---------------------------------------------------------------------------
 
 const VALID_CATEGORIES = [
   "data_display",
@@ -129,18 +164,72 @@ const categorySchema = z.string().describe(
   "Category of UI element. Must be one of: " + VALID_CATEGORIES.join(", ") + "."
 );
 
-// ---------------------------------------------------------------------------
-// Tool Registration
-// ---------------------------------------------------------------------------
+const lifecycleStatusSchema = z
+  .enum(["active", "transitional", "deprecated"])
+  .optional()
+  .describe("Lifecycle status. Omit for active to preserve backward compatibility.");
+
+const visualSemanticsSchema = z
+  .object({
+    visual_role: z.string().optional().describe("Semantic visual role, e.g. shell, card, inspector, banner"),
+    emphasis: z
+      .enum(["primary", "secondary", "muted", "warning", "danger", "success", "info"])
+      .optional()
+      .describe("Abstract emphasis level"),
+    density: z
+      .enum(["compact", "comfortable", "spacious"])
+      .optional()
+      .describe("Abstract information density"),
+    chrome: z
+      .enum(["minimal", "embedded", "panel", "full_shell"])
+      .optional()
+      .describe("Abstract chrome/container level"),
+    state_styling: z
+      .array(
+        z.object({
+          state: z.string().describe("Named UI state"),
+          treatment: z.string().describe("Abstract visual treatment for that state"),
+        })
+      )
+      .optional()
+      .describe("State-driven styling semantics without raw CSS/framework details"),
+  })
+  .optional();
+
+const layoutSemanticsSchema = z
+  .object({
+    pattern: z
+      .enum(["stack", "split_view", "grid", "table", "toolbar", "flow", "inspector", "shell", "dialog"])
+      .optional()
+      .describe("Abstract layout pattern"),
+    alignment: z
+      .enum(["leading", "centered", "distributed"])
+      .optional()
+      .describe("Primary alignment model"),
+    sizing_behavior: z
+      .enum(["fixed", "fluid", "content_sized", "fill_parent"])
+      .optional()
+      .describe("Sizing behavior abstraction"),
+    responsive_behavior: z
+      .array(z.enum(["wrap", "collapse", "scroll", "paginate", "promote_to_dialog"]))
+      .optional()
+      .describe("Responsive adaptation behaviors"),
+    hierarchy: z
+      .array(
+        z.object({
+          region: z.string().describe("Named visual/layout region"),
+          role: z.enum(["primary", "secondary", "auxiliary"]).describe("Region hierarchy role"),
+        })
+      )
+      .optional()
+      .describe("Named layout hierarchy regions"),
+  })
+  .optional();
 
 export function registerUIRegistryTools(server: McpServer): void {
-  // =========================================================================
-  // register_ui_element
-  // =========================================================================
-
   server.tool(
     "register_ui_element",
-    "Register a semantic UI element with its purpose, data contract, and interaction model. Platform-independent: describes what the element IS, not how it looks. If the element already exists, implementations are merged and other fields are updated.",
+    "Register a semantic UI element with its purpose, data contract, interaction model, optional abstract visual/layout semantics, and optional lifecycle status for backward-compatible retirement. Platform-independent: describes what the element IS, not how it looks in CSS/framework props. If the element already exists, implementations are merged and other fields are updated.",
     {
       id: z
         .string()
@@ -208,8 +297,15 @@ export function registerUIRegistryTools(server: McpServer): void {
         .optional()
         .describe("Feature IDs that use this element"),
       tags: z.array(z.string()).optional().describe("Tags for searchability"),
-
-      // Optional enrichment (Category 1)
+      status: lifecycleStatusSchema,
+      superseded_by: z
+        .string()
+        .optional()
+        .describe("Canonical replacement ID when this entry is transitional or deprecated"),
+      deprecation_reason: z
+        .string()
+        .optional()
+        .describe("Reason this entry is transitional/deprecated"),
       state: z
         .record(z.string(), z.enum(["boolean", "string", "number"]))
         .optional()
@@ -241,8 +337,12 @@ export function registerUIRegistryTools(server: McpServer): void {
         .describe(
           'Capability-based abstraction, e.g. ["touch", "mouse", "keyboard", "voice"]'
         ),
-
-      // Derivable metadata (Category 2)
+      visual_semantics: visualSemanticsSchema.describe(
+        "Abstract visual semantics: role, emphasis, density, chrome, and state styling semantics"
+      ),
+      layout_semantics: layoutSemanticsSchema.describe(
+        "Abstract layout semantics: pattern, alignment, sizing, responsive behavior, and hierarchy"
+      ),
       is_async: z
         .boolean()
         .optional()
@@ -265,94 +365,107 @@ export function registerUIRegistryTools(server: McpServer): void {
         async (): Promise<ToolResponse<RegisterUIElementOutput>> =>
           withFileLock("ui_registry.json", async () => {
             const registry = await loadRegistry();
-          const existing = registry.elements.find((e) => e.id === params.id);
-          let merged = false;
+            const existing = registry.elements.find((e) => e.id === params.id);
+            let merged = false;
 
-          if (existing) {
-            // Merge: append implementations (no dup by platform), union used_by, overwrite rest
-            existing.name = params.name;
-            existing.purpose = params.purpose;
-            existing.category = params.category as SemanticElementCategory;
-            existing.data_contract = {
-              inputs: params.inputs,
-              outputs: params.outputs,
-            };
-            existing.interactions = params.interactions;
-            if (params.children) existing.children = params.children;
-            existing.tags = params.tags ?? existing.tags;
-
-            // Category 1 – optional enrichment (overwrite when supplied)
-            if (params.state !== undefined) existing.state = params.state;
-            if (params.flows !== undefined) existing.flows = params.flows;
-            if (params.error_states !== undefined)
-              existing.error_states = params.error_states;
-            if (params.rendering_capabilities !== undefined)
-              existing.rendering_capabilities = params.rendering_capabilities;
-
-            // Category 2 – derivable metadata (overwrite when supplied)
-            if (params.is_async !== undefined) existing.is_async = params.is_async;
-            if (params.default_action !== undefined)
-              existing.default_action = params.default_action;
-            if (params.visibility_conditions !== undefined)
-              existing.visibility_conditions = params.visibility_conditions;
-
-            // Merge implementations (no duplicate platforms)
-            const newImpls = params.implementations ?? [];
-            for (const impl of newImpls) {
-              const idx = existing.implementations.findIndex(
-                (i) => i.platform === impl.platform
-              );
-              if (idx >= 0) {
-                existing.implementations[idx] = impl;
-              } else {
-                existing.implementations.push(impl);
-              }
-            }
-
-            // Union used_by
-            const usedBySet = new Set([
-              ...existing.used_by,
-              ...(params.used_by ?? []),
-            ]);
-            existing.used_by = [...usedBySet];
-
-            merged = true;
-          } else {
-            // New element
-            const element: SemanticElement = {
-              id: params.id,
-              name: params.name,
-              purpose: params.purpose,
-              category: params.category as SemanticElementCategory,
-              data_contract: {
+            if (existing) {
+              existing.name = params.name;
+              existing.purpose = params.purpose;
+              existing.category = params.category as SemanticElementCategory;
+              existing.data_contract = {
                 inputs: params.inputs,
                 outputs: params.outputs,
-              },
-              interactions: params.interactions,
-              children: params.children,
-              implementations: params.implementations ?? [],
-              used_by: params.used_by ?? [],
-              tags: params.tags ?? [],
-              // Category 1 – optional enrichment
-              ...(params.state !== undefined && { state: params.state }),
-              ...(params.flows !== undefined && { flows: params.flows }),
-              ...(params.error_states !== undefined && {
-                error_states: params.error_states,
-              }),
-              ...(params.rendering_capabilities !== undefined && {
-                rendering_capabilities: params.rendering_capabilities,
-              }),
-              // Category 2 – derivable metadata
-              ...(params.is_async !== undefined && { is_async: params.is_async }),
-              ...(params.default_action !== undefined && {
-                default_action: params.default_action,
-              }),
-              ...(params.visibility_conditions !== undefined && {
-                visibility_conditions: params.visibility_conditions,
-              }),
-            };
-            registry.elements.push(element);
-          }
+              };
+              existing.interactions = params.interactions;
+              if (params.children !== undefined) existing.children = params.children;
+              existing.tags = params.tags ?? existing.tags;
+
+              if (params.status !== undefined) existing.status = params.status;
+              if (params.superseded_by !== undefined) existing.superseded_by = params.superseded_by;
+              if (params.deprecation_reason !== undefined) existing.deprecation_reason = params.deprecation_reason;
+
+              if (params.state !== undefined) existing.state = params.state;
+              if (params.flows !== undefined) existing.flows = params.flows;
+              if (params.error_states !== undefined)
+                existing.error_states = params.error_states;
+              if (params.rendering_capabilities !== undefined)
+                existing.rendering_capabilities = params.rendering_capabilities;
+              if (params.visual_semantics !== undefined)
+                existing.visual_semantics = params.visual_semantics;
+              if (params.layout_semantics !== undefined)
+                existing.layout_semantics = params.layout_semantics;
+
+              if (params.is_async !== undefined) existing.is_async = params.is_async;
+              if (params.default_action !== undefined)
+                existing.default_action = params.default_action;
+              if (params.visibility_conditions !== undefined)
+                existing.visibility_conditions = params.visibility_conditions;
+
+              const newImpls = params.implementations ?? [];
+              for (const impl of newImpls) {
+                const idx = existing.implementations.findIndex(
+                  (i) => i.platform === impl.platform
+                );
+                if (idx >= 0) {
+                  existing.implementations[idx] = impl;
+                } else {
+                  existing.implementations.push(impl);
+                }
+              }
+
+              const usedBySet = new Set([
+                ...existing.used_by,
+                ...(params.used_by ?? []),
+              ]);
+              existing.used_by = [...usedBySet];
+
+              merged = true;
+            } else {
+              const element: SemanticElement = {
+                id: params.id,
+                name: params.name,
+                purpose: params.purpose,
+                category: params.category as SemanticElementCategory,
+                data_contract: {
+                  inputs: params.inputs,
+                  outputs: params.outputs,
+                },
+                interactions: params.interactions,
+                children: params.children,
+                implementations: params.implementations ?? [],
+                used_by: params.used_by ?? [],
+                tags: params.tags ?? [],
+                ...(params.status !== undefined && { status: params.status }),
+                ...(params.superseded_by !== undefined && {
+                  superseded_by: params.superseded_by,
+                }),
+                ...(params.deprecation_reason !== undefined && {
+                  deprecation_reason: params.deprecation_reason,
+                }),
+                ...(params.state !== undefined && { state: params.state }),
+                ...(params.flows !== undefined && { flows: params.flows }),
+                ...(params.error_states !== undefined && {
+                  error_states: params.error_states,
+                }),
+                ...(params.rendering_capabilities !== undefined && {
+                  rendering_capabilities: params.rendering_capabilities,
+                }),
+                ...(params.visual_semantics !== undefined && {
+                  visual_semantics: params.visual_semantics,
+                }),
+                ...(params.layout_semantics !== undefined && {
+                  layout_semantics: params.layout_semantics,
+                }),
+                ...(params.is_async !== undefined && { is_async: params.is_async }),
+                ...(params.default_action !== undefined && {
+                  default_action: params.default_action,
+                }),
+                ...(params.visibility_conditions !== undefined && {
+                  visibility_conditions: params.visibility_conditions,
+                }),
+              };
+              registry.elements.push(element);
+            }
 
             await saveRegistry(registry);
 
@@ -377,10 +490,6 @@ export function registerUIRegistryTools(server: McpServer): void {
       };
     }
   );
-
-  // =========================================================================
-  // query_ui_elements
-  // =========================================================================
 
   server.tool(
     "query_ui_elements",
@@ -407,6 +516,14 @@ export function registerUIRegistryTools(server: McpServer): void {
         .describe(
           "Return elements that do NOT have an implementation for this platform — instant migration checklist"
         ),
+      status: z
+        .enum(["active", "transitional", "deprecated"])
+        .optional()
+        .describe("Filter by lifecycle status. Omitted means all statuses."),
+      exclude_deprecated: z
+        .boolean()
+        .optional()
+        .describe("When true, hide deprecated entries from results."),
     },
     async (params) => {
       logger.debug("query_ui_elements called");
@@ -451,7 +568,14 @@ export function registerUIRegistryTools(server: McpServer): void {
             );
           }
 
-          // Aggregate stats
+          if (params.status) {
+            filtered = filtered.filter((e) => effectiveStatus(e) === params.status);
+          }
+
+          if (params.exclude_deprecated === true) {
+            filtered = filtered.filter((e) => effectiveStatus(e) !== "deprecated");
+          }
+
           const categories: Record<string, number> = {};
           const platforms: Record<string, number> = {};
           for (const el of filtered) {
@@ -479,13 +603,9 @@ export function registerUIRegistryTools(server: McpServer): void {
     }
   );
 
-  // =========================================================================
-  // generate_ui_migration_plan
-  // =========================================================================
-
   server.tool(
     "generate_ui_migration_plan",
-    "Generate a platform migration plan. Lists all semantic elements from the source platform, checks which already exist on the target platform, and produces a gap analysis with data contract summaries and complexity estimates.",
+    "Generate a platform migration plan. Lists all semantic elements from the source platform, checks which already exist on the target platform, and produces a gap analysis with data contract summaries and complexity estimates. Deprecated entries are excluded by default.",
     {
       source_platform: z
         .string()
@@ -509,12 +629,12 @@ export function registerUIRegistryTools(server: McpServer): void {
           const src = params.source_platform.toLowerCase();
           const tgt = params.target_platform.toLowerCase();
 
-          // Filter to elements on source platform
-          let sourceElements = registry.elements.filter((e) =>
-            e.implementations.some((i) => i.platform.toLowerCase() === src)
+          let sourceElements = registry.elements.filter(
+            (e) =>
+              effectiveStatus(e) !== "deprecated" &&
+              e.implementations.some((i) => i.platform.toLowerCase() === src)
           );
 
-          // Optional scope by feature
           if (params.scope && params.scope.length > 0) {
             const scopeSet = new Set(
               params.scope.map((s) => s.toLowerCase())
@@ -524,8 +644,8 @@ export function registerUIRegistryTools(server: McpServer): void {
             );
           }
 
-          const alreadyPorted: MigrationPortedElement[] = [];
-          const migrationNeeded: MigrationGapElement[] = [];
+          const ported: MigrationPortedElement[] = [];
+          const gaps: MigrationGapElement[] = [];
 
           for (const el of sourceElements) {
             const srcImpl = el.implementations.find(
@@ -535,47 +655,38 @@ export function registerUIRegistryTools(server: McpServer): void {
               (i) => i.platform.toLowerCase() === tgt
             );
 
-            if (tgtImpl) {
-              alreadyPorted.push({
+            if (srcImpl && tgtImpl) {
+              ported.push({
                 element_id: el.id,
                 name: el.name,
-                source_component: srcImpl?.component ?? "unknown",
+                source_component: srcImpl.component,
                 target_component: tgtImpl.component,
               });
-            } else {
-              const inputSummary = el.data_contract.inputs
-                .map((i) => `${i.name}: ${i.type}`)
-                .join(", ");
-              const outputSummary = el.data_contract.outputs
-                .map((o) => `${o.name}: ${o.type} (${o.trigger})`)
-                .join(", ");
-
-              migrationNeeded.push({
+            } else if (srcImpl) {
+              gaps.push({
                 element_id: el.id,
                 name: el.name,
                 purpose: el.purpose,
                 category: el.category,
-                source_component: srcImpl?.component ?? "unknown",
-                data_contract_summary: `Inputs: [${inputSummary}] → Outputs: [${outputSummary}]`,
+                source_component: srcImpl.component,
+                data_contract_summary: `inputs: ${el.data_contract.inputs.map((i) => `${i.name}: ${i.type}`).join(", ") || "none"}; outputs: ${el.data_contract.outputs.map((o) => `${o.name}: ${o.type}`).join(", ") || "none"}; interactions: ${el.interactions.map((i) => i.action).join(", ") || "none"}`,
                 complexity_estimate: estimateComplexity(el),
               });
             }
           }
 
-          const total = sourceElements.length;
-          const ported = alreadyPorted.length;
-          const gap = migrationNeeded.length;
-
           return success({
             source_platform: params.source_platform,
             target_platform: params.target_platform,
-            already_ported: alreadyPorted,
-            migration_needed: migrationNeeded,
-            total_elements: total,
-            ported_count: ported,
-            gap_count: gap,
+            already_ported: ported,
+            migration_needed: gaps,
+            total_elements: sourceElements.length,
+            ported_count: ported.length,
+            gap_count: gaps.length,
             coverage_percent:
-              total > 0 ? Math.round((ported / total) * 100) : 100,
+              sourceElements.length === 0
+                ? 100
+                : Math.round((ported.length / sourceElements.length) * 100),
           });
         }
       );

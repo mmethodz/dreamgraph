@@ -882,6 +882,18 @@ export interface SemanticElement {
   used_by: string[];
   tags: string[];
 
+  /**
+   * Lifecycle status for registry governance.
+   * Omitted means active for backward compatibility with older entries.
+   */
+  status?: "active" | "transitional" | "deprecated";
+
+  /** Optional canonical replacement when this entry is transitional/deprecated. */
+  superseded_by?: string;
+
+  /** Human-readable reason for transitional/deprecated state. */
+  deprecation_reason?: string;
+
   // --- Optional enrichment (Category 1) ---
 
   /** Observable state flags that drive UI behavior and async flows. */
@@ -899,6 +911,36 @@ export interface SemanticElement {
 
   /** Capability-based abstraction beyond platform names. */
   rendering_capabilities?: string[];
+
+  /**
+   * Abstract visual language for the element.
+   * Intentionally semantic rather than implementation-specific.
+   */
+  visual_semantics?: {
+    visual_role?: string;
+    emphasis?: "primary" | "secondary" | "muted" | "warning" | "danger" | "success" | "info";
+    density?: "compact" | "comfortable" | "spacious";
+    chrome?: "minimal" | "embedded" | "panel" | "full_shell";
+    state_styling?: Array<{
+      state: string;
+      treatment: string;
+    }>;
+  };
+
+  /**
+   * Abstract layout/composition contract for the element.
+   * Describes structure and responsive behavior without framework-specific props.
+   */
+  layout_semantics?: {
+    pattern?: "stack" | "split_view" | "grid" | "table" | "toolbar" | "flow" | "inspector" | "shell" | "dialog";
+    alignment?: "leading" | "centered" | "distributed";
+    sizing_behavior?: "fixed" | "fluid" | "content_sized" | "fill_parent";
+    responsive_behavior?: Array<"wrap" | "collapse" | "scroll" | "paginate" | "promote_to_dialog">;
+    hierarchy?: Array<{
+      region: string;
+      role: "primary" | "secondary" | "auxiliary";
+    }>;
+  };
 
   // --- Derivable metadata (Category 2) ---
 
@@ -1051,6 +1093,40 @@ export interface RegisterUIElementInput {
   }>;
   used_by?: string[];
   tags?: string[];
+  status?: "active" | "transitional" | "deprecated";
+  superseded_by?: string;
+  deprecation_reason?: string;
+  state?: Record<string, "boolean" | "string" | "number">;
+  flows?: string[];
+  error_states?: Array<{
+    condition: string;
+    behavior: string;
+    severity?: "info" | "warning" | "error" | "fatal";
+  }>;
+  rendering_capabilities?: string[];
+  visual_semantics?: {
+    visual_role?: string;
+    emphasis?: "primary" | "secondary" | "muted" | "warning" | "danger" | "success" | "info";
+    density?: "compact" | "comfortable" | "spacious";
+    chrome?: "minimal" | "embedded" | "panel" | "full_shell";
+    state_styling?: Array<{
+      state: string;
+      treatment: string;
+    }>;
+  };
+  layout_semantics?: {
+    pattern?: "stack" | "split_view" | "grid" | "table" | "toolbar" | "flow" | "inspector" | "shell" | "dialog";
+    alignment?: "leading" | "centered" | "distributed";
+    sizing_behavior?: "fixed" | "fluid" | "content_sized" | "fill_parent";
+    responsive_behavior?: Array<"wrap" | "collapse" | "scroll" | "paginate" | "promote_to_dialog">;
+    hierarchy?: Array<{
+      region: string;
+      role: "primary" | "secondary" | "auxiliary";
+    }>;
+  };
+  is_async?: boolean;
+  default_action?: string;
+  visibility_conditions?: string[];
 }
 
 export interface RegisterUIElementOutput {
