@@ -273,10 +273,22 @@ node -e "
 # -- Symlinks / Shims ---------------------------------------------
 step "Creating command shims..."
 
-# Determine link target directory (prefer /usr/local/bin if writable)
-LINK_DIR="$HOME/.local/bin"
+# Determine link target directory (prefer /usr/local/bin if writable, else first writable PATH dir, else ~/.local/bin)
+LINK_DIR=""
 if [[ -d "/usr/local/bin" ]] && [[ -w "/usr/local/bin" ]]; then
     LINK_DIR="/usr/local/bin"
+else
+    while IFS=':' read -r path_entry; do
+        [[ -z "$path_entry" ]] && continue
+        [[ "$path_entry" == "$HOME/.local/bin" ]] && continue
+        if [[ -d "$path_entry" ]] && [[ -w "$path_entry" ]]; then
+            LINK_DIR="$path_entry"
+            break
+        fi
+    done <<< "$PATH"
+fi
+if [[ -z "$LINK_DIR" ]]; then
+    LINK_DIR="$HOME/.local/bin"
 fi
 mkdir -p "$LINK_DIR"
 
@@ -301,6 +313,10 @@ EOF
 chmod +x "$LINK_DIR/dreamgraph"
 
 ok "Shims created in $LINK_DIR"
+
+if [[ ! -x "$LINK_DIR/dg" ]] || [[ ! -x "$LINK_DIR/dreamgraph" ]]; then
+    fail "Failed to create executable command shims in $LINK_DIR"
+fi
 
 # Check if LINK_DIR is in PATH
 if ! echo "$PATH" | tr ':' '\n' | grep -qx "$LINK_DIR"; then
