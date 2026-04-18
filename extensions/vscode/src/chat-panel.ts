@@ -267,13 +267,9 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
 
   public open(): void { void vscode.commands.executeCommand('dreamgraph.chatView.focus'); }
 
-  public async resolveWebviewView(
-    webviewView: vscode.WebviewView,
-    _context: vscode.WebviewViewResolveContext,
-    _token: vscode.CancellationToken,
-  ): Promise<void> {
+  public async resolveWebviewView(webviewView: vscode.WebviewView): Promise<void> {
     this.view = webviewView;
-    webviewView.webview.options = { enableScripts: true };
+    webviewView.webview.options = { enableScripts: true, localResourceRoots: [this.context.extensionUri] };
     webviewView.webview.html = this.getHtml(webviewView.webview);
 
     webviewView.onDidDispose(() => {
@@ -284,7 +280,7 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       if (webviewView.visible) void this.rehydrateWebview();
     }, null, this.disposables);
 
-    webviewView.webview.onDidReceiveMessage(async (message: WebviewToExtensionMessage) => {
+    webviewView.webview.onDidReceiveMessage(async (message: WebviewToExtensionMessage | { type: 'openFile'; path: string }) => {
       switch (message.type) {
         case 'ready':
           await this.rehydrateWebview();
@@ -351,9 +347,22 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
           }
           break;
         }
+        case 'openFile': {
+          const filePath = (message as { type: 'openFile'; path: string }).path;
+          if (typeof filePath === 'string' && filePath.trim().length > 0) {
+            try {
+              const uri = vscode.Uri.file(path.isAbsolute(filePath)
+                ? filePath
+                : path.join(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? this.context.extensionPath, filePath));
+              const doc = await vscode.workspace.openTextDocument(uri);
+              await vscode.window.showTextDocument(doc, { preview: false });
+            } catch (error) {
+              void vscode.window.showErrorMessage(`Unable to open file: ${error instanceof Error ? error.message : String(error)}`);
+            }
+          }
+          break;
+        }
         case 'navigateEntity': {
-          // Slice 2 — entity URI navigation. Delegate to VS Code command if registered,
-          // or fall back to opening a graph query for the referenced entity.
           const uri = (message as { type: 'navigateEntity'; uri: string }).uri;
           if (typeof uri === 'string' && /^[a-z-]+:\/\//.test(uri)) {
             const [scheme, rawName = ''] = uri.split('://');
@@ -1552,7 +1561,28 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
         head.innerHTML = '<span>' + escapeHtml(entry.tool || 'tool') + '</span><span>' + escapeHtml(entry.status || '') + '</span>';
         const meta = document.createElement('div');
         meta.className = 'tool-trace-meta';
-        meta.textContent = (entry.argsSummary || '') + (entry.filesAffected?.length ? ' • ' + entry.filesAffected.join(', ') : '') + (Number.isFinite(entry.durationMs) ? ' • ' + entry.durationMs + 'ms' : '');
+        if (entry.argsSummary) {
+          const args = document.createElement('span');
+          args.textContent = entry.argsSummary;
+          meta.appendChild(args);
+        }
+        if (Array.isArray(entry.filesAffected) && entry.filesAffected.length > 0) {
+          for (const file of entry.filesAffected) {
+            const link = document.createElement('a');
+            link.href = '#';
+            link.className = 'tool-trace-file-link';
+            link.textContent = file;
+            link.addEventListener('click', (event) => {
+              event.preventDefault();
+              vscode.postMessage({ type: 'openFile', path: file });
+            });
+            meta.appendChild(document.createTextNode(meta.childNodes.length > 0 ? ' • ' : ''));
+            meta.appendChild(link);
+          }
+        }
+        if (Number.isFinite(entry.durationMs)) {
+          meta.appendChild(document.createTextNode((meta.childNodes.length > 0 ? ' • ' : '') + entry.durationMs + 'ms'));
+        }
         item.appendChild(head);
         item.appendChild(meta);
         list.appendChild(item);

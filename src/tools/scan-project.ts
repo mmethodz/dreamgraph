@@ -606,7 +606,7 @@ export async function runScanProject(opts: RunScanOptions = {}): Promise<ScanPro
 
   // ---- Progress helper ----
   let _step = 0;
-  const _totalSteps = 2 + targetList.length + 1; // scan + (per-target LLM) + index
+  const _totalSteps = 2 + targetList.length + 1;
   function progress(message: string): void {
     _step++;
     logger.info(`scan_project: ${message}`);
@@ -624,16 +624,37 @@ export async function runScanProject(opts: RunScanOptions = {}): Promise<ScanPro
     throw new Error(`Unknown repos: ${unknown.join(", ")}. Available: ${availableRepos.join(", ")}`);
   }
 
-  const maxDepth = depth === "shallow" ? 3 : 10;
+  const requestedMaxDepth = depth === "shallow" ? 3 : 10;
   const errors: string[] = [];
   let totalTokens = 0;
+  let partialModeUsed = false;
 
-  // Phase 1: Mechanical scan
+  // Phase 1: Mechanical scan with adaptive fallback
   progress("Phase 1 — scanning file system…");
   const scans: ProjectScan[] = [];
   for (const repoName of targetRepos) {
     const repoRoot = path.resolve(config.repos[repoName]);
-    const scan = await scanProject(repoName, repoRoot, maxDepth);
+    let scan: ProjectScan;
+    try {
+      scan = await scanProject(repoName, repoRoot, requestedMaxDepth);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push(`Primary scan failed for ${repoName}: ${msg}`);
+      progress(`Primary scan failed for ${repoName}; retrying with shallow structural scan…`);
+      scan = await scanProject(repoName, repoRoot, 2);
+      partialModeUsed = true;
+    }
+
+    const tooLargeForLlm = scan.files.length > 500 || scan.uiFiles.length > 120;
+    if (tooLargeForLlm && requestedMaxDepth > 2) {
+      partialModeUsed = true;
+      errors.push(
+        `Adaptive scan fallback for ${repoName}: large repo (${scan.files.length} source files, ${scan.uiFiles.length} UI files) — using bounded structural scan to avoid timeout.`
+      );
+      progress(`Large repo detected for ${repoName}; using bounded structural scan to avoid timeout…`);
+      scan = await scanProject(repoName, repoRoot, Math.min(2, requestedMaxDepth));
+    }
+
     scans.push(scan);
     logger.info(
       `scan_project: ${repoName} — ${scan.files.length} files, ${scan.uiFiles.length} UI files, ` +
@@ -654,12 +675,51 @@ export async function runScanProject(opts: RunScanOptions = {}): Promise<ScanPro
   const workflowResult = { inserted: 0, updated: 0, total: 0 };
   const dataModelResult = { inserted: 0, updated: 0, total: 0 };
 
+  const repoRequiresStructuralOnly = (scan: ProjectScan): boolean => (
+    partialModeUsed || scan.files.length > 300 || scan.uiFiles.length > 80
+  );
+
   if (llmAvailable) {
     logger.info(`scan_project: Phase 2 — LLM enrichment (model: ${dreamerConfig.model})`);
     progress(`Phase 2 — LLM enrichment (model: ${dreamerConfig.model})…`);
     const llm = getLlmProvider();
 
     for (const scan of scans) {
+      const forceStructuralForRepo = repoRequiresStructuralOnly(scan);
+      if (forceStructuralForRepo) {
+        errors.push(`LLM enrichment skipped for ${scan.repoName}: using bounded structural extraction to prevent timeout/user-visible failure.`);
+        if (targetList.includes("features")) {
+          const featureEntries = generateStructuralFeatures(scan);
+          const existing = stripTemplateStubs(await loadJsonArray<Record<string, unknown>>("features.json"));
+          const merged = mergeById(existing, featureEntries);
+          await writeSeed("features.json", merged.merged);
+          featureResult.inserted += merged.inserted;
+          featureResult.updated += merged.updated;
+          featureResult.total = merged.merged.length;
+        }
+
+        if (targetList.includes("workflows")) {
+          const workflowEntries = generateStructuralWorkflows(scan);
+          const existing = stripTemplateStubs(await loadJsonArray<Record<string, unknown>>("workflows.json"));
+          const merged = mergeById(existing, workflowEntries);
+          await writeSeed("workflows.json", merged.merged);
+          workflowResult.inserted += merged.inserted;
+          workflowResult.updated += merged.updated;
+          workflowResult.total = merged.merged.length;
+        }
+
+        if (targetList.includes("data_model")) {
+          const dmEntries = generateStructuralDataModel(scan);
+          const existing = stripTemplateStubs(await loadJsonArray<Record<string, unknown>>("data_model.json"));
+          const merged = mergeById(existing, dmEntries);
+          await writeSeed("data_model.json", merged.merged);
+          dataModelResult.inserted += merged.inserted;
+          dataModelResult.updated += merged.updated;
+          dataModelResult.total = merged.merged.length;
+        }
+        continue;
+      }
+
       const treeSummary = buildTreeSummary(scan);
       const fileListing = buildFileListing(scan.files, LLM_BATCH_SIZE * 2);
       const keyFileContents = await readKeyFiles(scan, 15);
@@ -678,7 +738,7 @@ export async function runScanProject(opts: RunScanOptions = {}): Promise<ScanPro
           const response = await llm.complete(messages, {
             model: dreamerConfig.model,
             temperature: 0.3,
-            maxTokens: dreamerConfig.maxTokens,
+            maxTokens: Math.min(dreamerConfig.maxTokens, 4000),
             jsonMode: true,
           });
 
@@ -687,8 +747,27 @@ export async function runScanProject(opts: RunScanOptions = {}): Promise<ScanPro
           const rawEntries = extractJsonArray(response.text);
           if (rawEntries.length === 0) {
             const preview = response.text.slice(0, 500).replace(/\n/g, "\\n");
-            errors.push(`LLM returned no parseable ${target} entries for ${scan.repoName}`);
+            errors.push(`LLM returned no parseable ${target} entries for ${scan.repoName}; falling back to structural extraction for this target.`);
             logger.warn(`scan_project: LLM returned no entries for ${target} (${scan.repoName}). Response preview: ${preview}`);
+
+            const structuralEntries = target === "features"
+              ? generateStructuralFeatures(scan)
+              : target === "workflows"
+                ? generateStructuralWorkflows(scan)
+                : generateStructuralDataModel(scan);
+            const filename = target === "features" ? "features.json"
+              : target === "workflows" ? "workflows.json"
+              : "data_model.json";
+            const existing = stripTemplateStubs(await loadJsonArray<Record<string, unknown>>(filename));
+            const merged = mergeById(existing, structuralEntries);
+            await writeSeed(filename, merged.merged);
+            const resultRef = target === "features" ? featureResult
+              : target === "workflows" ? workflowResult
+              : dataModelResult;
+            resultRef.inserted += merged.inserted;
+            resultRef.updated += merged.updated;
+            resultRef.total = merged.merged.length;
+            partialModeUsed = true;
             continue;
           }
 
@@ -720,8 +799,27 @@ export async function runScanProject(opts: RunScanOptions = {}): Promise<ScanPro
 
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
-          errors.push(`LLM enrichment failed for ${target} (${scan.repoName}): ${msg}`);
+          errors.push(`LLM enrichment failed for ${target} (${scan.repoName}): ${msg}. Structural fallback applied.`);
           logger.warn(`scan_project: LLM error for ${target}: ${msg}`);
+
+          const structuralEntries = target === "features"
+            ? generateStructuralFeatures(scan)
+            : target === "workflows"
+              ? generateStructuralWorkflows(scan)
+              : generateStructuralDataModel(scan);
+          const filename = target === "features" ? "features.json"
+            : target === "workflows" ? "workflows.json"
+            : "data_model.json";
+          const existing = stripTemplateStubs(await loadJsonArray<Record<string, unknown>>(filename));
+          const merged = mergeById(existing, structuralEntries);
+          await writeSeed(filename, merged.merged);
+          const resultRef = target === "features" ? featureResult
+            : target === "workflows" ? workflowResult
+            : dataModelResult;
+          resultRef.inserted += merged.inserted;
+          resultRef.updated += merged.updated;
+          resultRef.total = merged.merged.length;
+          partialModeUsed = true;
         }
       }
     }
@@ -763,16 +861,14 @@ export async function runScanProject(opts: RunScanOptions = {}): Promise<ScanPro
     }
   }
 
-  // Rebuild resource index
   progress("Rebuilding resource index…");
   const indexEntries = await rebuildIndex();
   logger.info(`scan_project: index rebuilt with ${indexEntries} entries`);
 
-  // Phase 3: Auto-dream — populate the graph from seed data
   let dreamCycleResult: ScanProjectResult["dream_cycle"] | undefined;
   const totalSeeds = featureResult.total + workflowResult.total + dataModelResult.total;
 
-  if (totalSeeds > 0 && llmAvailable) {
+  if (totalSeeds > 0 && llmAvailable && !partialModeUsed) {
     try {
       progress("Phase 3 — dreaming (building graph from seed data)…");
       logger.info("scan_project: Phase 3 — auto-dream cycle");
@@ -814,6 +910,8 @@ export async function runScanProject(opts: RunScanOptions = {}): Promise<ScanPro
       logger.warn(`scan_project: auto-dream error: ${msg}`);
       try { await engine.interrupt(); } catch { /* best effort */ }
     }
+  } else if (totalSeeds > 0 && partialModeUsed) {
+    errors.push("Adaptive partial scan mode was used — auto-dream skipped to prioritize fast, non-failing enrichment. Run dream_cycle manually after targeted enrichment if desired.");
   } else if (totalSeeds > 0) {
     errors.push(
       "Graph is empty — no LLM available for dream cycle. " +
@@ -821,18 +919,11 @@ export async function runScanProject(opts: RunScanOptions = {}): Promise<ScanPro
     );
   }
 
-  const dreamSummary = dreamCycleResult
-    ? ` Dream: ${dreamCycleResult.edges_created} edges, ${dreamCycleResult.nodes_created} nodes, ${dreamCycleResult.edges_promoted ?? 0} promoted.`
-    : "";
-
-  // Phase 4: ADR discovery — if this is a fresh instance, use LLM to find implicit ADRs
   let adrsRecorded = 0;
   const wasFresh = await isFreshInstance().catch(() => false);
-  // Fresh check may still return true at this point because features were
-  // written above – re-check by looking at actual populated seed counts.
   const hasRealSeeds = featureResult.total > 0 || workflowResult.total > 0 || dataModelResult.total > 0;
 
-  if (hasRealSeeds && llmAvailable) {
+  if (hasRealSeeds && llmAvailable && !partialModeUsed) {
     try {
       const repoName = Object.keys(config.repos)[0] ?? "project";
       progress("Phase 4 — discovering architecture decisions…");
@@ -849,7 +940,6 @@ export async function runScanProject(opts: RunScanOptions = {}): Promise<ScanPro
     }
   }
 
-  // Phase 5: Schedule follow-up dreams for fresh instances
   if (hasRealSeeds && dreamCycleResult) {
     try {
       progress("Phase 5 — scheduling follow-up dream cycles…");
@@ -862,7 +952,11 @@ export async function runScanProject(opts: RunScanOptions = {}): Promise<ScanPro
     }
   }
 
+  const dreamSummary = dreamCycleResult
+    ? ` Dream: ${dreamCycleResult.edges_created} edges, ${dreamCycleResult.nodes_created} nodes, ${dreamCycleResult.edges_promoted ?? 0} promoted.`
+    : "";
   const adrSummary = adrsRecorded > 0 ? ` ADRs: ${adrsRecorded} discovered.` : "";
+  const partialSummary = partialModeUsed ? " Adaptive partial scan mode avoided timeout and preserved partial enrichment." : "";
 
   const summary =
     `Scan complete: ${scans.length} repo(s), ${totalFiles} files. ` +
@@ -871,6 +965,7 @@ export async function runScanProject(opts: RunScanOptions = {}): Promise<ScanPro
     `Workflows: ${workflowResult.inserted} new / ${workflowResult.total} total. ` +
     `Data model: ${dataModelResult.inserted} new / ${dataModelResult.total} total. ` +
     `Index: ${indexEntries} entries.` +
+    partialSummary +
     dreamSummary +
     adrSummary +
     (errors.length > 0 ? ` ${errors.length} warning(s).` : "");
