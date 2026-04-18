@@ -34,88 +34,268 @@ export function writeEngineEnv(
   try {
     mkdirSync(dirname(envPath), { recursive: true });
 
-    const template: Array<{ key: string; defaultValue: string; description: string; secret?: boolean }> = [
+    const template: Array<{ key: string; defaultValue: string; description: string; section: string }> = [
       {
         key: "DREAMGRAPH_LLM_PROVIDER",
         defaultValue: "ollama",
-        description: "LLM provider used for DreamGraph cognitive operations.",
+        description: "Provider: ollama (local, default) | openai (API) | anthropic (Claude API) | sampling (MCP client) | none",
+        section: "LLM Provider",
       },
       {
         key: "DREAMGRAPH_LLM_URL",
         defaultValue: "http://localhost:11434",
-        description: "Base URL for the configured LLM provider endpoint.",
+        description: "API base URL",
+        section: "LLM Provider",
       },
       {
         key: "DREAMGRAPH_LLM_API_KEY",
         defaultValue: "",
-        description: "Optional API key for providers that require authentication. Leave blank to keep unset.",
-        secret: true,
+        description: "API key (for openai/anthropic providers)",
+        section: "LLM Provider",
+      },
+      {
+        key: "DREAMGRAPH_LLM_MODEL",
+        defaultValue: "qwen3:8b",
+        description: "Base model defaults — used unless Dreamer / Normalizer overrides are set",
+        section: "Base LLM Defaults",
+      },
+      {
+        key: "DREAMGRAPH_LLM_TEMPERATURE",
+        defaultValue: "0.7",
+        description: "Base temperature defaults — used unless Dreamer / Normalizer overrides are set",
+        section: "Base LLM Defaults",
+      },
+      {
+        key: "DREAMGRAPH_LLM_MAX_TOKENS",
+        defaultValue: "2048",
+        description: "Base max token defaults — used unless Dreamer / Normalizer overrides are set",
+        section: "Base LLM Defaults",
       },
       {
         key: "DREAMGRAPH_LLM_DREAMER_MODEL",
         defaultValue: "qwen3:8b",
-        description: "Model used for creative dream-cycle generation.",
+        description: "Dreamer — creative dream cycle generation",
+        section: "Dreamer",
       },
       {
         key: "DREAMGRAPH_LLM_DREAMER_TEMPERATURE",
         defaultValue: "0.9",
-        description: "Sampling temperature for dream generation.",
+        description: "Dreamer temperature",
+        section: "Dreamer",
       },
       {
         key: "DREAMGRAPH_LLM_DREAMER_MAX_TOKENS",
-        defaultValue: "4096",
-        description: "Maximum output tokens for the dreamer model.",
+        defaultValue: "10240",
+        description: "Dreamer max tokens",
+        section: "Dreamer",
       },
       {
         key: "DREAMGRAPH_LLM_NORMALIZER_MODEL",
         defaultValue: "qwen3:8b",
-        description: "Model used for validation and normalization passes.",
+        description: "Normalizer — validation / truth-filter pass",
+        section: "Normalizer",
       },
       {
         key: "DREAMGRAPH_LLM_NORMALIZER_TEMPERATURE",
         defaultValue: "0.1",
-        description: "Low-temperature setting for consistent normalization.",
+        description: "Normalizer temperature",
+        section: "Normalizer",
       },
       {
         key: "DREAMGRAPH_LLM_NORMALIZER_MAX_TOKENS",
-        defaultValue: "1024",
-        description: "Maximum output tokens for the normalizer model.",
+        defaultValue: "4096",
+        description: "Normalizer max tokens",
+        section: "Normalizer",
+      },
+      {
+        key: "DG_PROMOTION_CONFIDENCE",
+        defaultValue: "0.62",
+        description: "Minimum combined confidence for edge promotion to validated graph",
+        section: "Promotion & Retention Thresholds",
+      },
+      {
+        key: "DG_PROMOTION_PLAUSIBILITY",
+        defaultValue: "0.45",
+        description: "Minimum plausibility score for promotion",
+        section: "Promotion & Retention Thresholds",
+      },
+      {
+        key: "DG_PROMOTION_EVIDENCE",
+        defaultValue: "0.4",
+        description: "Minimum evidence score for promotion",
+        section: "Promotion & Retention Thresholds",
+      },
+      {
+        key: "DG_PROMOTION_EVIDENCE_COUNT",
+        defaultValue: "2",
+        description: "Minimum distinct evidence signals for promotion",
+        section: "Promotion & Retention Thresholds",
+      },
+      {
+        key: "DG_RETENTION_PLAUSIBILITY",
+        defaultValue: "0.35",
+        description: "Minimum plausibility for retention as latent (below = rejected)",
+        section: "Promotion & Retention Thresholds",
+      },
+      {
+        key: "DG_MAX_CONTRADICTION",
+        defaultValue: "0.3",
+        description: "Maximum contradiction score before rejection",
+        section: "Promotion & Retention Thresholds",
+      },
+      {
+        key: "DG_DECAY_TTL",
+        defaultValue: "8",
+        description: "Edge time-to-live in dream cycles (removed when TTL reaches 0)",
+        section: "Dream Decay",
+      },
+      {
+        key: "DG_DECAY_RATE",
+        defaultValue: "0.05",
+        description: "Confidence reduction per cycle if not reinforced",
+        section: "Dream Decay",
+      },
+      {
+        key: "DG_MEMORY_TTL_CYCLES",
+        defaultValue: "30",
+        description: "Reinforcement memory TTL (cycles of inactivity before forgetting)",
+        section: "Dream Decay",
+      },
+      {
+        key: "DG_MAX_ACTIVE_TENSIONS",
+        defaultValue: "200",
+        description: "Max active (unresolved) tensions",
+        section: "Tension System",
+      },
+      {
+        key: "DG_TENSION_TTL",
+        defaultValue: "30",
+        description: "Default TTL for new tensions (cycles before auto-expire)",
+        section: "Tension System",
+      },
+      {
+        key: "DG_TENSION_URGENCY_DECAY",
+        defaultValue: "0.01",
+        description: "Urgency decay per cycle for non-recurring tensions",
+        section: "Tension System",
+      },
+      {
+        key: "DG_BARREN_THRESHOLD",
+        defaultValue: "3",
+        description: "Consecutive 0-yield cycles before a strategy gets benched",
+        section: "Adaptive Dream Strategy",
+      },
+      {
+        key: "DG_PROBE_INTERVAL",
+        defaultValue: "6",
+        description: "Cycles between probe runs for benched strategies",
+        section: "Adaptive Dream Strategy",
+      },
+      {
+        key: "DG_STRATEGY_HISTORY",
+        defaultValue: "12",
+        description: "Strategy yield history length",
+        section: "Adaptive Dream Strategy",
+      },
+      {
+        key: "DG_LLM_BUDGET",
+        defaultValue: "0.35",
+        description: "LLM dream budget as fraction of total (0.0-1.0)",
+        section: "Adaptive Dream Strategy",
+      },
+      {
+        key: "DG_PGO_BUDGET",
+        defaultValue: "0.15",
+        description: "PGO wave budget as fraction of total (0.0-1.0)",
+        section: "Adaptive Dream Strategy",
+      },
+      {
+        key: "DG_NORMALIZER_BATCH_SIZE",
+        defaultValue: "20",
+        description: "Max edges per LLM semantic validation batch",
+        section: "Normalizer Tuning",
+      },
+      {
+        key: "DG_NORMALIZER_LLM_THRESHOLD",
+        defaultValue: "0.35",
+        description: "Minimum confidence for LLM semantic evaluation of latent edges",
+        section: "Normalizer Tuning",
       },
       {
         key: "DATABASE_URL",
         defaultValue: "postgresql://user:password@host:5432/dbname",
-        description: "PostgreSQL connection string used by database schema and query tools.",
-        secret: true,
+        description: "PostgreSQL connection string used by database schema/query tools",
+        section: "Database",
+      },
+      {
+        key: "DG_DB_MAX_CONNECTIONS",
+        defaultValue: "3",
+        description: "Max concurrent PostgreSQL connections",
+        section: "Database",
+      },
+      {
+        key: "DG_DB_STATEMENT_TIMEOUT",
+        defaultValue: "5000",
+        description: "Statement timeout (ms)",
+        section: "Database",
+      },
+      {
+        key: "DG_DB_OPERATION_TIMEOUT",
+        defaultValue: "10000",
+        description: "Operation timeout (ms) — hard cap on entire query_db_schema",
+        section: "Database",
       },
     ];
 
     const lines: string[] = [
       "# DreamGraph Engine Configuration",
-      "# Auto-generated by dashboard config save. Edit freely — values here",
-      "# override global environment variables on next daemon restart.",
-      "# Unconfigured values are kept as commented placeholders with defaults.",
+      "# Per-instance environment settings. Uncomment and edit as needed.",
+      "# Values here override global environment variables.",
       "",
     ];
 
+    let currentSection = "";
     for (const entry of template) {
-      const value = vars[entry.key] ?? "";
+      if (entry.section !== currentSection) {
+        if (currentSection !== "") lines.push("");
+        if ([
+          "Promotion & Retention Thresholds",
+          "Dream Decay",
+          "Tension System",
+          "Adaptive Dream Strategy",
+          "Normalizer Tuning",
+          "Database",
+        ].includes(entry.section) && currentSection !== entry.section) {
+          if (!lines.includes("# ===================================================================")) {
+            lines.push("# ===================================================================");
+            lines.push("# ADVANCED TUNING — for experienced users only.");
+            lines.push("# These control cognitive engine internals. The defaults work well");
+            lines.push("# for most projects. Only change them if you know what you're doing.");
+            lines.push("# ===================================================================");
+            lines.push("");
+          }
+        }
+        if (!["LLM Provider", "Base LLM Defaults", "Dreamer", "Normalizer"].includes(entry.section)) {
+          lines.push(`# --- ${entry.section} ---`);
+        }
+        currentSection = entry.section;
+      }
+
       lines.push(`# ${entry.description}`);
+      const value = vars[entry.key] ?? "";
       if (value === "" || value == null) {
-        const placeholderValue = entry.secret
-          ? entry.defaultValue || ""
-          : entry.defaultValue;
-        lines.push(`# ${entry.key}=${placeholderValue}`);
+        lines.push(`# ${entry.key}=${entry.defaultValue}`);
       } else {
         const needsQuotes = /[\s#"']/.test(value);
         lines.push(`${entry.key}=${needsQuotes ? `"${value}"` : value}`);
       }
-      lines.push("");
     }
 
     const remainingKeys = Object.keys(vars).filter(
       key => !template.some(entry => entry.key === key),
     );
     if (remainingKeys.length > 0) {
+      lines.push("");
       lines.push("# Additional persisted values");
       for (const key of remainingKeys.sort()) {
         const value = vars[key] ?? "";
@@ -126,9 +306,9 @@ export function writeEngineEnv(
           lines.push(`${key}=${needsQuotes ? `"${value}"` : value}`);
         }
       }
-      lines.push("");
     }
 
+    lines.push("");
     writeFileSync(envPath, lines.join("\n"), "utf-8");
     logger.info(`engine.env: persisted ${Object.keys(vars).length} keys to ${envPath}`);
   } catch (err) {

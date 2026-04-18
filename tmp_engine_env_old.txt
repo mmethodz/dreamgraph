@@ -1,5 +1,5 @@
 # DreamGraph Engine Configuration
-# Per-instance environment settings. Uncomment and edit as needed.
+# Per-instance LLM provider settings. Uncomment and edit as needed.
 # Values here override global environment variables.
 #
 # Provider: ollama (local, default) | openai (API) | anthropic (Claude API) | sampling (MCP client) | none
@@ -81,8 +81,6 @@
 # DG_NORMALIZER_LLM_THRESHOLD=0.35
 
 # --- Database ---
-# PostgreSQL connection string used by database schema/query tools
-# DATABASE_URL=postgresql://user:password@host:5432/dbname
 # Max concurrent PostgreSQL connections
 # DG_DB_MAX_CONNECTIONS=3
 # Statement timeout (ms)
