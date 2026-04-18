@@ -87,7 +87,15 @@ dg start my-project --http                # Start the daemon
 
 You can prepare your own named presets by copying `~/.dreamgraph/templates/default/` to another directory such as `~/.dreamgraph/templates/openai/`, then running `dg init --template openai`.
 
-Configure your LLM — either edit `~/.dreamgraph/<instance-uuid>/config/engine.env` or open the web dashboard at `http://localhost:<port>/config`. New instances now seed `config/engine.env` from `~/.dreamgraph/templates/<template>/config/engine.env` when available (default template: `default`), then fall back to the repository template, and finally to a built-in programmatic scaffold if no template file is available. Then scan:
+Configure your LLM — either edit `~/.dreamgraph/<instance-uuid>/config/engine.env` or open the web dashboard at `http://localhost:<port>/config`. New instances now seed `config/engine.env` from `~/.dreamgraph/templates/<template>/config/engine.env` when available (default template: `default`), then fall back to the repository template, and finally to a built-in programmatic scaffold if no template file is available.
+
+Repository configuration is automatic in instance mode:
+- `project_root` is the attached working project for the instance
+- `repos` is the named repository map available to MCP code/git/scan tools
+- on startup, DreamGraph builds the runtime repo registry from `config/mcp.json`, then merges `DREAMGRAPH_REPOS` from the instance `engine.env`, and finally auto-registers the attached `project_root` as a repo if it is not already present
+- this means repos configured for the instance are automatically available to graph scans and code tools after restart, with no extra operator steps
+
+Then scan:
 
 ```bash
 dg scan my-project                        # Scan, dream, discover ADRs, schedule follow-ups

@@ -87,8 +87,13 @@ export const config = {
    * Set via DREAMGRAPH_REPOS env var as a JSON object:
    *   {"my-app": "/home/user/repos/my-app", "api": "/home/user/repos/api"}
    *
-   * In instance mode, repos from mcp.json are merged at startup.
-   * If project_root is set and no repos are mapped, it is auto-registered.
+   * In instance mode, the final runtime repo registry is built automatically from:
+   *   1. config/mcp.json repos
+   *   2. DREAMGRAPH_REPOS loaded from the instance engine.env
+   *   3. the attached project_root auto-registered as a repo if not already present
+   *
+   * This means every repo configured for an instance becomes available to MCP tools
+   * without any extra operator steps after restart.
    */
   repos: parseRepos() as Record<string, string>,
 
@@ -142,7 +147,7 @@ export const config = {
 
   /** v7.0 — LLM provider configuration for dream engine */
   llm: parseLlmConfig(),
-} as const;
+} as const;;
 
 /**
  * Update the database connection string at runtime.

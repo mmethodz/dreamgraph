@@ -55,8 +55,8 @@ export function writeEngineEnv(
       },
       {
         key: "DREAMGRAPH_REPOS",
-        defaultValue: '{"dreamgraph":"C:/path/to/repo"}',
-        description: "JSON object mapping repository IDs to absolute local paths for code, git, and scan tools.",
+        defaultValue: '{"dashboard":"C:/path/to/dashboard","api":"C:/path/to/api"}',
+        description: "JSON object mapping additional repository IDs to absolute local paths for code, git, and scan tools. The attached project_root is auto-registered separately.",
         section: "Repository Mapping",
       },
       {

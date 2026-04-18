@@ -573,24 +573,53 @@ export async function resolveInstanceAtStartup(): Promise<InstanceScope | null> 
     setMutexKeyResolver((key) => scope.mutexKey(key));
 
     // Load per-instance engine.env (LLM provider, API keys, model config).
-    // Values are injected into process.env BEFORE any config parsing runs,
-    // so parseLlmConfig() picks up instance-specific overrides while
-    // falling back to global env vars for anything not specified.
     const envVars = loadEngineEnv(scope.engineEnvPath);
     if (envVars > 0) {
       logger.info(`Loaded ${envVars} env vars from ${scope.engineEnvPath}`);
     }
 
-    // Merge instance repos into config.repos so all tools can discover them.
-    // mcp.json repos take precedence, then project_root as fallback default.
-    for (const [name, repoPath] of Object.entries(scope.repos)) {
-      config.repos[name] = repoPath;
+    const instanceRepos = scope.repos;
+    const envReposRaw = process.env.DREAMGRAPH_REPOS ?? "{}";
+    let envRepos: Record<string, string> = {};
+    try {
+      const parsed = JSON.parse(envReposRaw);
+      if (typeof parsed === "object" && parsed !== null) {
+        envRepos = parsed as Record<string, string>;
+      }
+    } catch {
+      logger.warn("Failed to parse DREAMGRAPH_REPOS from engine.env; ignoring invalid JSON repo mapping");
     }
-    // If project_root is set but no repos are configured, auto-register it
-    if (instance.project_root && Object.keys(config.repos).length === 0) {
-      const basename = instance.project_root.replace(/\\/g, "/").split("/").pop() ?? "project";
-      config.repos[basename] = instance.project_root;
-      logger.info(`Auto-registered project_root as repo '${basename}': ${instance.project_root}`);
+
+    const mergedRepos: Record<string, string> = {
+      ...instanceRepos,
+      ...envRepos,
+    };
+
+    if (instance.project_root) {
+      const projectRoot = instance.project_root;
+      const normalizedProjectRoot = resolve(projectRoot);
+      const hasProjectRootRegistered = Object.values(mergedRepos).some(
+        (repoPath) => resolve(repoPath) === normalizedProjectRoot,
+      );
+
+      if (!hasProjectRootRegistered) {
+        const basename = projectRoot.replace(/\\/g, "/").split("/").pop() ?? "project";
+        let repoId = basename;
+        let suffix = 2;
+        while (mergedRepos[repoId] && resolve(mergedRepos[repoId]) !== normalizedProjectRoot) {
+          repoId = `${basename}-${suffix}`;
+          suffix++;
+        }
+        mergedRepos[repoId] = projectRoot;
+        logger.info(`Auto-registered attached project_root as repo '${repoId}': ${projectRoot}`);
+      }
+    }
+
+    for (const key of Object.keys(config.repos)) {
+      delete config.repos[key];
+    }
+    for (const [name, repoPath] of Object.entries(mergedRepos)) {
+      config.repos[name] = repoPath;
     }
 
     logger.info(`Instance mode activated: ${scope}`);
