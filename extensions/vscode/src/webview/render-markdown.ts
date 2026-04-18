@@ -21,7 +21,7 @@
 export function getRenderScript(): string {
   return `
     (function() {
-      // markdown-it instance — shared, configured once
+      const MERMAID_MAX_CHARS = 12000;
       const md = window.markdownit({
         html: false,
         linkify: true,
@@ -32,7 +32,20 @@ export function getRenderScript(): string {
         window.registerCardFencePlugin(md);
       }
 
-      // Override link_open to add target="_blank" and rel="noopener noreferrer"
+      const defaultFence = md.renderer.rules.fence || function(tokens, idx, options, env, self) {
+        return self.renderToken(tokens, idx, options);
+      };
+      md.renderer.rules.fence = function(tokens, idx, options, env, self) {
+        const token = tokens[idx];
+        const info = (token.info || '').trim().toLowerCase();
+        if (info === 'mermaid') {
+          const source = token.content || '';
+          const escaped = md.utils.escapeHtml(source);
+          return '<div class="mermaid-block pending"><pre class="mermaid-source">' + escaped + '</pre><div class="mermaid-diagram"></div></div>';
+        }
+        return defaultFence(tokens, idx, options, env, self);
+      };
+
       const defaultLinkOpen = md.renderer.rules.link_open || function(tokens, idx, options, _env, self) {
         return self.renderToken(tokens, idx, options);
       };
@@ -52,11 +65,6 @@ export function getRenderScript(): string {
         return defaultLinkOpen(tokens, idx, options, env, self);
       };
 
-      /**
-       * Render markdown content to sanitized HTML.
-       * Stage 1: markdown-it (html:false) → HTML string
-       * Stage 2: DOMPurify explicit allowlist → safe HTML
-       */
       window.renderMarkdown = function(content) {
         const raw = md.render(content);
         const clean = DOMPurify.sanitize(raw, {
@@ -67,19 +75,71 @@ export function getRenderScript(): string {
             'ul','ol','li',
             'table','thead','tbody','tr','th','td',
             'a','img','span','div','hr',
+            'svg','g','path','line','rect','circle','ellipse','polygon','polyline','text','tspan','defs','marker','foreignObject','style'
           ],
-          ALLOWED_ATTR: ['href','src','alt','class','target','rel'],
+          ALLOWED_ATTR: [
+            'href','src','alt','class','target','rel',
+            'viewBox','width','height','x','y','x1','x2','y1','y2','cx','cy','r','rx','ry','d','points',
+            'fill','stroke','stroke-width','stroke-linecap','stroke-linejoin','stroke-dasharray',
+            'transform','xmlns','role','aria-roledescription','aria-label','style','id','marker-start','marker-end','dominant-baseline','text-anchor'
+          ],
           ALLOW_DATA_ATTR: false,
           ADD_ATTR: ['target'],
         });
         return clean;
       };
 
-      /**
-       * Apply copy buttons to all <pre><code> blocks inside a container.
-       * Idempotency: always called after a full innerHTML rebuild, so no
-       * stale buttons survive. Never called during streaming.
-       */
+      window.renderMermaidDiagrams = async function(container) {
+        if (!container || typeof window.mermaid === 'undefined') return;
+        const blocks = Array.from(container.querySelectorAll('.mermaid-block'));
+        if (blocks.length === 0) return;
+
+        try {
+          window.mermaid.initialize({
+            startOnLoad: false,
+            securityLevel: 'strict',
+            theme: document.body.classList.contains('vscode-dark') ? 'dark' : 'default',
+          });
+        } catch {}
+
+        for (const block of blocks) {
+          if (!(block instanceof HTMLElement)) continue;
+          const sourceEl = block.querySelector('.mermaid-source');
+          const diagramEl = block.querySelector('.mermaid-diagram');
+          if (!(sourceEl instanceof HTMLElement) || !(diagramEl instanceof HTMLElement)) continue;
+          const source = sourceEl.textContent || '';
+
+          if (!source.trim()) {
+            block.classList.remove('pending');
+            continue;
+          }
+
+          if (source.length > MERMAID_MAX_CHARS) {
+            block.classList.remove('pending');
+            block.classList.add('failed');
+            diagramEl.innerHTML = '<div class="mermaid-error">Mermaid diagram omitted: source too large to render safely.</div>';
+            sourceEl.hidden = false;
+            continue;
+          }
+
+          try {
+            const renderId = 'mermaid-' + Math.random().toString(36).slice(2);
+            const result = await window.mermaid.render(renderId, source);
+            diagramEl.innerHTML = result.svg;
+            sourceEl.hidden = true;
+            block.classList.remove('pending');
+            block.classList.remove('failed');
+            block.classList.add('rendered');
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            block.classList.remove('pending');
+            block.classList.add('failed');
+            diagramEl.innerHTML = '<div class="mermaid-error">Unable to render Mermaid diagram: ' + md.utils.escapeHtml(message) + '</div>';
+            sourceEl.hidden = false;
+          }
+        }
+      };
+
       window.addCopyButtons = function(container) {
         container.querySelectorAll('pre > code').forEach(function(block) {
           const btn = document.createElement('button');
@@ -94,20 +154,12 @@ export function getRenderScript(): string {
         });
       };
 
-      /**
-       * Render a completed (non-streaming) assistant message bubble.
-       * Adds copy buttons immediately since this is the final render.
-       */
-      window.renderCompletedMessage = function(el, content) {
+      window.renderCompletedMessage = async function(el, content) {
         el.innerHTML = window.renderMarkdown(content);
+        await window.renderMermaidDiagrams(el);
         window.addCopyButtons(el);
       };
 
-      /**
-       * Global link interceptor. Catches all <a href="http..."> clicks and
-       * routes them through the extension host (vscode.env.openExternal).
-       * Must be attached once at webview init, not per-bubble.
-       */
       window.initLinkInterceptor = function() {
         document.addEventListener('click', function(e) {
           const link = e.target.closest('a[href]');

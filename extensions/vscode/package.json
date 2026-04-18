@@ -258,6 +258,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",
     "dompurify": "^3.4.0",
-    "markdown-it": "^14.1.1"
+    "markdown-it": "^14.1.1",
+    "mermaid": "^11.12.0"
   }
 }
