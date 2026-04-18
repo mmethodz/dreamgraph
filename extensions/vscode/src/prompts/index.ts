@@ -74,11 +74,6 @@ function formatContextBlock(envelope: EditorContextEnvelope): string {
     parts.push(`- **Unsaved files:** ${envelope.changedFiles.join(", ")}`);
   }
 
-  // Product guidance
-  parts.push("");
-  parts.push("### Architect Guidance");
-  parts.push("- **Recommended:** use DreamGraph Architect for graph creation and enrichment work. It can inspect the system incrementally, suggest the next best actions, and help build a more comprehensive graph than a one-shot scan alone.");
-
   // Graph context — the core knowledge advantage
   if (envelope.graphContext) {
     const gc = envelope.graphContext;
@@ -101,6 +96,11 @@ function formatContextBlock(envelope: EditorContextEnvelope): string {
     if (gc.apiSurface) {
       parts.push(`- **API surface:** available`);
     }
+
+    // ---- Deep Graph Signals ----
+    // These are the knowledge edges that make DreamGraph superior to generic AI.
+    // The Architect starts the conversation already knowing the tensions,
+    // insights, and causal relationships around the current code.
 
     if (gc.tensions && gc.tensions.length > 0) {
       parts.push("");
