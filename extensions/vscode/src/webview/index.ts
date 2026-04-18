@@ -1,6 +1,7 @@
 import { getRenderScript } from './render-markdown.js';
 import { getEntityLinksScript } from './entity-links.js';
 import { getCardRendererScript } from './card-renderer.js';
+import { getChatRuntimeScript } from './chat-runtime.js';
 
 // Bundled webview bootstrap for Slice 3 Option C migration.
 // Exposes the same globals expected by chat-panel.ts webview runtime.
@@ -9,6 +10,7 @@ import { getCardRendererScript } from './card-renderer.js';
     getCardRendererScript(),
     getRenderScript(),
     getEntityLinksScript(),
+    getChatRuntimeScript(),
   ];
 
   for (const source of scripts) {

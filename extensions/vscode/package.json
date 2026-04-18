@@ -210,6 +210,29 @@
           "default": 16000,
           "description": "Maximum token budget for Architect context assembly."
         },
+        "dreamgraph.architect.reportingMode": {
+          "type": "string",
+          "enum": ["quiet", "standard", "deep", "forensic"],
+          "default": "standard",
+          "description": "Controls Architect response verbosity."
+        },
+        "dreamgraph.architect.traceVisibility": {
+          "type": "string",
+          "enum": ["hidden", "compact", "expanded"],
+          "default": "compact",
+          "description": "Controls how much tool trace detail Architect surfaces."
+        },
+        "dreamgraph.architect.autonomyMode": {
+          "type": "string",
+          "enum": ["cautious", "conscientious", "eager", "autonomous"],
+          "default": "cautious",
+          "description": "Default Architect autonomy mode for multi-pass continuation behavior."
+        },
+        "dreamgraph.architect.autoPassBudget": {
+          "type": "number",
+          "default": 0,
+          "description": "Default number of auto-authorized passes for Architect when autonomy is enabled. 0 disables pass counting by default."
+        },
         "dreamgraph.architect.anthropic.effort": {
           "type": "string",
           "enum": [
