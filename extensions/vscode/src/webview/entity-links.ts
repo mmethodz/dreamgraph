@@ -31,6 +31,12 @@ export function getEntityLinksScript(): string {
       var ENTITY_SCHEMES = ['feature', 'workflow', 'data-model', 'entity', 'adr', 'tension', 'edge', 'file'];
       var ENTITY_URI_RE = /\\b(feature|workflow|data-model|entity|adr|tension|edge|file):\\/\\/[\\w.\\/@→#%~_-]+/g;
 
+      // Bare file path pattern — matches paths like src/foo/bar.ts, ./components/App.tsx
+      // Requires at least one directory separator and a known code file extension.
+      // Group 1 captures leading whitespace/punctuation (preserved), group 2 captures the path.
+      var FILE_EXT_LIST = 'ts|tsx|js|jsx|mjs|cjs|json|md|css|scss|html|xml|yaml|yml|py|cs|csproj|xaml|sln|java|kt|swift|go|rs|rb|sh|ps1|sql|vue|svelte';
+      var FILE_PATH_RE = new RegExp('(^|[\\\\s(\\\\[,])(\\\\.{0,2}/?[\\\\w._-]+/(?:[\\\\w._-]+/)*[\\\\w._-]+\\\\.(?:' + FILE_EXT_LIST + '))(?=[\\\\s)\\\\],.:;!?]|$)', 'gm');
+
       /**
        * Linkify entity URIs in an HTML string, skipping content inside
        * <pre>…</pre> and <code>…</code> blocks.
@@ -90,14 +96,21 @@ export function getEntityLinksScript(): string {
           // Even indices are text nodes — may be empty
           var node = tagParts[t];
           if (!node) continue;
-          // Don't process text inside href="…" (already handled by tag split)
-          tagParts[t] = node.replace(ENTITY_URI_RE, function(match, scheme) {
+          // Replace entity URIs first
+          node = node.replace(ENTITY_URI_RE, function(match, scheme) {
             var name = match.slice(scheme.length + 3); // strip "scheme://"
             var label = _formatEntityLabel(scheme, name);
             return '<a class="entity-link" data-type="' + _escAttr(scheme) +
                    '" data-uri="' + _escAttr(match) + '" href="#" title="' +
                    _escAttr(match) + '">' + _escHtml(label) + '</a>';
           });
+          // Then linkify bare file paths (e.g. src/foo/bar.ts, ./components/App.tsx)
+          node = node.replace(FILE_PATH_RE, function(match, prefix, filePath) {
+            return prefix + '<a class="entity-link file-link" data-type="file" data-uri="file://' +
+                   _escAttr(filePath) + '" href="#" title="Open ' +
+                   _escAttr(filePath) + '">📄\\u00a0' + _escHtml(filePath) + '</a>';
+          });
+          tagParts[t] = node;
         }
         return tagParts.join('');
       }

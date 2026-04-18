@@ -159,6 +159,55 @@ function fail(error: string): string {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Per-file Mutex — prevents concurrent edits to the same file       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Simple async mutex keyed by file path. When Anthropic models fire
+ * multiple modify_entity / write_file calls targeting the same file
+ * simultaneously, the mutex serialises them so only one edit is
+ * in-flight per file at a time. Different files can still be edited
+ * concurrently without blocking.
+ */
+const fileLocks = new Map<string, Promise<void>>();
+
+async function withFileLock<T>(absPath: string, fn: () => Promise<T>): Promise<T> {
+  const key = absPath.toLowerCase(); // normalise on Windows
+  const prev = fileLocks.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const next = new Promise<void>((r) => { release = r; });
+  fileLocks.set(key, next);
+  try {
+    await prev; // wait for previous edit on this file to finish
+    return await fn();
+  } finally {
+    release();
+    // GC: remove the entry only if we're still the tail
+    if (fileLocks.get(key) === next) fileLocks.delete(key);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Large-entity safety — detect risky whole-class replacements       */
+/* ------------------------------------------------------------------ */
+
+/** Rough count of top-level members inside a class/interface body. */
+function countMembers(text: string): number {
+  // Heuristic: count lines that start a method, property, or constructor
+  const memberPattern = /^\s+(public|private|protected|static|readonly|abstract|async|get |set |constructor\b|\w+\s*\()/gm;
+  const matches = text.match(memberPattern);
+  return matches?.length ?? 0;
+}
+
+/**
+ * Maximum number of members a class/interface can have for a whole-entity
+ * replacement without explicit confirmation. Beyond this threshold the
+ * tool rejects the edit and asks the model to target individual members
+ * using parentEntity instead.
+ */
+const LARGE_ENTITY_MEMBER_THRESHOLD = 15;
+
+/* ------------------------------------------------------------------ */
 /*  OutputChannel + keyword extraction (from Copilot-style runner)    */
 /* ------------------------------------------------------------------ */
 
@@ -373,42 +422,68 @@ async function handleModifyEntity(input: Record<string, unknown>): Promise<strin
   }
 
   const absPath = resolvePath(filePath);
-  const uri = vscode.Uri.file(absPath);
 
-  try {
-    const doc = await vscode.workspace.openTextDocument(uri);
+  // Per-file mutex: serialise concurrent edits to the same file
+  return withFileLock(absPath, async () => {
+    const uri = vscode.Uri.file(absPath);
 
-    // Try VS Code symbol provider first (language-server-accurate)
-    const symbols = await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
-      'vscode.executeDocumentSymbolProvider', uri,
-    );
+    try {
+      const doc = await vscode.workspace.openTextDocument(uri);
 
-    let target: vscode.DocumentSymbol | undefined;
-    if (symbols && symbols.length > 0) {
-      target = findSymbol(symbols, entityName, parentEntity);
+      // Try VS Code symbol provider first (language-server-accurate)
+      const symbols = await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
+        'vscode.executeDocumentSymbolProvider', uri,
+      );
+
+      let target: vscode.DocumentSymbol | undefined;
+      if (symbols && symbols.length > 0) {
+        target = findSymbol(symbols, entityName, parentEntity);
+      }
+
+      if (target) {
+        // ── Large-entity safety guard ──
+        // When replacing an entire class/interface (no parentEntity), check
+        // whether the existing entity has many members. If so, the model
+        // likely intended to edit a single member but replaced the whole
+        // class, which drops unrelated code.
+        if (!parentEntity) {
+          const existingText = doc.getText(target.range);
+          const existingMembers = countMembers(existingText);
+          const newMembers = countMembers(newContent);
+          if (
+            existingMembers > LARGE_ENTITY_MEMBER_THRESHOLD &&
+            newMembers < existingMembers * 0.8
+          ) {
+            return fail(
+              `Safety guard: "${entityName}" has ${existingMembers} members but the replacement ` +
+              `only contains ${newMembers}. This would drop unrelated code. Use parentEntity ` +
+              `to target the specific member you want to change, e.g. ` +
+              `{ "entity": "memberName", "parentEntity": "${entityName}" }.`,
+            );
+          }
+        }
+
+        // Symbol-based replacement
+        const edit = new vscode.WorkspaceEdit();
+        edit.replace(uri, target.range, newContent);
+        const applied = await vscode.workspace.applyEdit(edit);
+        if (!applied) return fail('VS Code rejected the edit');
+        await doc.save();
+        return ok({
+          message: `Modified ${parentEntity ? parentEntity + '.' : ''}${entityName} in ${path.basename(absPath)} (${newContent.split('\n').length} lines)`,
+          filePath: absPath,
+          entity: entityName,
+          parentEntity,
+          method: 'symbol-provider',
+        });
+      }
+
+      // Fallback: regex-based
+      return await regexEntityReplace(doc, entityName, newContent, absPath);
+    } catch (err) {
+      return fail(`modify_entity failed: ${err instanceof Error ? err.message : String(err)}`);
     }
-
-    if (target) {
-      // Symbol-based replacement
-      const edit = new vscode.WorkspaceEdit();
-      edit.replace(uri, target.range, newContent);
-      const applied = await vscode.workspace.applyEdit(edit);
-      if (!applied) return fail('VS Code rejected the edit');
-      await doc.save();
-      return ok({
-        message: `Modified ${parentEntity ? parentEntity + '.' : ''}${entityName} in ${path.basename(absPath)} (${newContent.split('\n').length} lines)`,
-        filePath: absPath,
-        entity: entityName,
-        parentEntity,
-        method: 'symbol-provider',
-      });
-    }
-
-    // Fallback: regex-based
-    return await regexEntityReplace(doc, entityName, newContent, absPath);
-  } catch (err) {
-    return fail(`modify_entity failed: ${err instanceof Error ? err.message : String(err)}`);
-  }
+  });
 }
 
 function findSymbol(
@@ -551,23 +626,26 @@ async function handleWriteFile(input: Record<string, unknown>): Promise<string> 
 
   const absPath = resolvePath(filePath);
 
-  // Create parent directories automatically
-  const dir = path.dirname(absPath);
-  await fs.mkdir(dir, { recursive: true });
+  // Per-file mutex: serialise concurrent writes to the same file
+  return withFileLock(absPath, async () => {
+    // Create parent directories automatically
+    const dir = path.dirname(absPath);
+    await fs.mkdir(dir, { recursive: true });
 
-  const uri = vscode.Uri.file(absPath);
+    const uri = vscode.Uri.file(absPath);
 
-  try {
-    await vscode.workspace.fs.writeFile(uri, encoded);
-    return ok({
-      message: `Wrote ${path.basename(absPath)} (${content.split('\n').length} lines, ${encoded.length} bytes)`,
-      filePath: absPath,
-      lines: content.split('\n').length,
-      bytes: encoded.length,
-    });
-  } catch (err) {
-    return fail(`write_file failed: ${err instanceof Error ? err.message : String(err)}`);
-  }
+    try {
+      await vscode.workspace.fs.writeFile(uri, encoded);
+      return ok({
+        message: `Wrote ${path.basename(absPath)} (${content.split('\n').length} lines, ${encoded.length} bytes)`,
+        filePath: absPath,
+        lines: content.split('\n').length,
+        bytes: encoded.length,
+      });
+    } catch (err) {
+      return fail(`write_file failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  });
 }
 
 /* ------------------------------------------------------------------ */

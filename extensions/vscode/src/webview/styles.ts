@@ -371,6 +371,10 @@ export function getStyles(): string {
       border-bottom-style: solid;
       text-decoration: none;
     }
+    a.entity-link.file-link {
+      font-family: var(--vscode-editor-font-family, monospace);
+      font-size: 0.88em;
+    }
 
     /* ── Slice 2: Empty state ── */
     #empty-state {

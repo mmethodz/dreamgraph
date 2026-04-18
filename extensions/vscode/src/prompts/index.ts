@@ -177,6 +177,7 @@ export interface AssembledPrompt {
  * @param contextText - Optional assembled context text (from ContextBuilder.assembleContextBlock)
  * @param additionalInstructions - Optional additional instructions appended after the context
  * @param autonomyState - Optional autonomy state to inject policy/contract blocks
+ * @param provider - Optional LLM provider name to inject provider-specific discipline
  */
 export function assemblePrompt(
   task: ArchitectTask,
@@ -184,6 +185,7 @@ export function assemblePrompt(
   contextText?: string,
   additionalInstructions?: string,
   autonomyState?: AutonomyInstructionState,
+  provider?: string,
 ): AssembledPrompt {
   const parts: string[] = [ARCHITECT_CORE];
 
@@ -211,6 +213,13 @@ export function assemblePrompt(
   if (autonomyBlock) {
     parts.push(autonomyBlock);
     parts.push(getStructuredResponseContractBlock());
+  }
+
+  // Provider-specific discipline — Anthropic models (Claude) tend to execute
+  // many tool calls without pausing, which corrupts code on large tasks.
+  // This block enforces a surgical, slice-based work pattern.
+  if (provider === 'anthropic') {
+    parts.push(getAnthropicDisciplineBlock());
   }
 
   // Additional instructions
@@ -256,4 +265,42 @@ export function inferTask(
     default:
       return "chat";
   }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Anthropic Pacing Discipline                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Returns an instruction block that constrains Anthropic (Claude) models
+ * to work in short, surgical passes instead of attempting to rewrite
+ * entire files or fire many tool calls without pausing.
+ *
+ * This prevents two classes of corruption:
+ * 1. Racing modify_entity calls on the same file (now also guarded by mutex)
+ * 2. Whole-class replacement that drops unrelated members
+ */
+function getAnthropicDisciplineBlock(): string {
+  return `## Tool Discipline (CRITICAL — enforced by the system)
+
+### Surgical Edits — Never Replace Entire Large Entities
+- When editing a class, interface, or module with many members, target the SPECIFIC member using \`parentEntity\`.
+  Example: \`{ "entity": "SaveCommand", "parentEntity": "EntryViewModel" }\`
+- NEVER regenerate an entire class just to change one method. The tool will REJECT replacements that drop unrelated members.
+- If you need to change multiple members in the same class, make separate \`modify_entity\` calls for each member.
+
+### One File At A Time — Breathe Between Passes
+- Complete all edits to one file before moving to the next.
+- After modifying a file, call \`run_command\` to verify it compiles before editing the next file.
+- Do NOT fire multiple \`modify_entity\` calls targeting the same file in parallel — they are serialised by a mutex and the second call will see stale symbol positions if the first changed line counts.
+
+### Slice-Based Work Pattern
+- Break large tasks into slices of 1–3 files each.
+- After each slice: verify (build/test), report what changed, then assess next steps.
+- If a slice fails verification, fix it before starting the next slice.
+- Present recommended next actions after each slice so the user can steer.
+
+### Read Before Write
+- Always \`read_local_file\` the target entity/section BEFORE calling \`modify_entity\`.
+- This ensures you have the current content, not a cached/stale version from earlier in the conversation.`;
 }

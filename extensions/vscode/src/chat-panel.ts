@@ -400,6 +400,20 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
           if (typeof uri === 'string' && /^[a-z-]+:\/\//.test(uri)) {
             const [scheme, rawName = ''] = uri.split('://');
             const name = decodeURIComponent(rawName);
+
+            // file:// URIs open the file directly in the editor
+            if (scheme === 'file') {
+              const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
+              const absPath = path.isAbsolute(name) ? name : path.resolve(ws, name);
+              try {
+                const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(absPath));
+                await vscode.window.showTextDocument(doc, { preview: true });
+              } catch {
+                void vscode.window.showWarningMessage(`Could not open file: ${name}`);
+              }
+              break;
+            }
+
             vscode.commands.executeCommand('dreamgraph.navigateEntity', uri).then(
               undefined,
               async () => {
@@ -513,7 +527,8 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       const autonomyInstruction: AutonomyInstructionState | undefined = this._autonomyEnabled
         ? { ...this._autonomyState, enabled: true }
         : undefined;
-      const { system } = assemblePrompt(task, envelope, undefined, undefined, autonomyInstruction);
+      const provider = this.architectLlm?.provider ?? undefined;
+      const { system } = assemblePrompt(task, envelope, undefined, undefined, autonomyInstruction, provider);
 
       const llmMessages: ArchitectMessage[] = [{ role: 'system', content: system }];
       const recentMessages = this.messages.slice(-20);
@@ -1270,7 +1285,8 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       const envelope = this.contextBuilder ? await this.contextBuilder.buildEnvelope(prompt) : null;
       const task = inferTask(envelope?.intentMode ?? 'ask_dreamgraph');
       const autonomyInstruction: AutonomyInstructionState = { ...this._autonomyState, enabled: true };
-      const { system } = assemblePrompt(task, envelope, undefined, undefined, autonomyInstruction);
+      const provider = this.architectLlm?.provider ?? undefined;
+      const { system } = assemblePrompt(task, envelope, undefined, undefined, autonomyInstruction, provider);
 
       const llmMessages: ArchitectMessage[] = [{ role: 'system', content: system }];
       const recentMessages = this.messages.slice(-20);
@@ -2000,10 +2016,13 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       const wrapper = document.createElement('div');
       wrapper.className = 'markdown-body';
       const renderMarkdown = window.renderMarkdown || ((s) => escapeHtml(s));
-      const html = renderMarkdown(message.content || '');
-      wrapper.innerHTML = html;
+      let html = renderMarkdown(message.content || '');
       if (typeof window.linkifyEntities === 'function') {
-        window.linkifyEntities(wrapper);
+        html = window.linkifyEntities(html) || html;
+      }
+      wrapper.innerHTML = html;
+      if (typeof window.applyEntityLinks === 'function') {
+        window.applyEntityLinks(wrapper);
       }
       return wrapper;
     }
@@ -2073,9 +2092,13 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       if (!streamingBubble || !streamingMarkdownEl) return;
       streamingRaw += chunk;
       const renderMarkdown = window.renderMarkdown || ((s) => escapeHtml(s));
-      streamingMarkdownEl.innerHTML = renderMarkdown(streamingRaw);
+      let html = renderMarkdown(streamingRaw);
       if (typeof window.linkifyEntities === 'function') {
-        window.linkifyEntities(streamingMarkdownEl);
+        html = window.linkifyEntities(html) || html;
+      }
+      streamingMarkdownEl.innerHTML = html;
+      if (typeof window.applyEntityLinks === 'function') {
+        window.applyEntityLinks(streamingMarkdownEl);
       }
       messagesEl.scrollTop = messagesEl.scrollHeight;
     }
@@ -2154,6 +2177,34 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
         autoresize();
         promptEl.focus();
       });
+    });
+
+    // Clipboard image paste — intercept paste events on the prompt area
+    // and forward image data to the extension host for attachment.
+    promptEl.addEventListener('paste', (event) => {
+      const items = event.clipboardData?.items;
+      if (!items) return;
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.type.startsWith('image/')) {
+          event.preventDefault();
+          const blob = item.getAsFile();
+          if (!blob) return;
+          const reader = new FileReader();
+          reader.onload = () => {
+            const dataUrl = reader.result;
+            if (typeof dataUrl !== 'string') return;
+            // dataUrl format: "data:image/png;base64,iVBOR..."
+            const commaIdx = dataUrl.indexOf(',');
+            if (commaIdx < 0) return;
+            const dataBase64 = dataUrl.slice(commaIdx + 1);
+            const mimeType = item.type || 'image/png';
+            vscode.postMessage({ type: 'pasteImage', dataBase64, mimeType });
+          };
+          reader.readAsDataURL(blob);
+          return; // handle only the first image
+        }
+      }
     });
 
     window.addEventListener('message', (event) => {
