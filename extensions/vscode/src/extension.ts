@@ -44,6 +44,8 @@ import {
   openChatCommand,
   setArchitectApiKeyCommand,
   showGraphSignalCommand,
+  setAutonomyModeCommand,
+  resetAutonomyCommand,
   type CommandServices,
 } from "./commands.js";
 
@@ -177,6 +179,9 @@ export function activate(context: vscode.ExtensionContext): void {
     ["dreamgraph.showGraphSignal", () => showGraphSignalCommand(services)],
     // Files Changed
     ["dreamgraph.clearChangedFiles", () => changedFiles.clear()],
+    // Autonomy
+    ["dreamgraph.setAutonomyMode", () => setAutonomyModeCommand(services)],
+    ["dreamgraph.resetAutonomy", () => resetAutonomyCommand(services)],
   ];
 
   for (const [id, handler] of commands) {
@@ -227,6 +232,12 @@ export function activate(context: vscode.ExtensionContext): void {
           mcpClient.updateBaseUrl(`http://${host}:${currentPort}`);
           dashboardView.updateDaemonUrl(host, currentPort);
         }
+      }
+      if (
+        e.affectsConfiguration("dreamgraph.architect.autonomyMode") ||
+        e.affectsConfiguration("dreamgraph.architect.autoPassBudget")
+      ) {
+        chatPanel.applyAutonomySettings();
       }
     }),
   );

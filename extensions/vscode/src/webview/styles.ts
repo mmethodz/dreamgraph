@@ -684,5 +684,62 @@ export function getStyles(): string {
       font-size: 0.78em;
       color: var(--vscode-errorForeground, #f14c4c);
     }
+
+    /* ── Autonomy status bar ── */
+    #autonomy-bar {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 10px;
+      border-bottom: 1px solid var(--vscode-panel-border);
+      background: var(--vscode-sideBarSectionHeader-background, transparent);
+      font-size: 0.82em;
+    }
+    .autonomy-mode {
+      font-weight: 600;
+      padding: 1px 6px;
+      border-radius: 3px;
+    }
+    .autonomy-mode-cautious { color: var(--vscode-charts-blue, #4fc1ff); }
+    .autonomy-mode-conscientious { color: var(--vscode-charts-green, #89d185); }
+    .autonomy-mode-eager { color: var(--vscode-charts-yellow, #cca700); }
+    .autonomy-mode-autonomous { color: var(--vscode-charts-orange, #d18616); }
+    #autonomy-counter {
+      opacity: 0.8;
+      font-variant-numeric: tabular-nums;
+    }
+    #autonomy-reset-btn {
+      margin-left: auto;
+      font-size: 0.85em;
+    }
+
+    /* ── Recommended actions ── */
+    .recommended-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid var(--vscode-panel-border);
+    }
+    .action-chip {
+      display: inline-flex;
+      align-items: center;
+      padding: 3px 10px;
+      border: 1px solid var(--vscode-button-secondaryBorder, var(--vscode-panel-border));
+      border-radius: 12px;
+      background: var(--vscode-button-secondaryBackground, transparent);
+      color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+      font-size: 0.82em;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .action-chip:hover {
+      background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground));
+    }
+    .action-chip-all {
+      font-weight: 600;
+      border-color: var(--vscode-button-border, var(--vscode-focusBorder));
+    }
   `;
 }

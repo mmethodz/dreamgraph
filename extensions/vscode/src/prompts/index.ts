@@ -1,6 +1,6 @@
 /**
  * Prompt Assembler — composes the Architect system prompt from
- * core identity + task overlay + context block.
+ * core identity + task overlay + context block + autonomy/reporting contracts.
  *
  * @see TDD §7.5 (Prompt Architecture), §7.4 (Chat Flow)
  */
@@ -11,6 +11,9 @@ import { ARCHITECT_VALIDATE } from "./architect-validate.js";
 import { ARCHITECT_PATCH } from "./architect-patch.js";
 import { ARCHITECT_SUGGEST } from "./architect-suggest.js";
 import type { EditorContextEnvelope } from "../types.js";
+import { getAutonomyInstructionBlock, type AutonomyInstructionState } from "../autonomy.js";
+import { getStructuredResponseContractBlock } from "../autonomy-contract.js";
+import { getReportingInstructionBlock } from "../reporting.js";
 
 /* ------------------------------------------------------------------ */
 /*  Task types                                                        */
@@ -173,12 +176,14 @@ export interface AssembledPrompt {
  * @param envelope - Editor context envelope (may be null for config-only calls)
  * @param contextText - Optional assembled context text (from ContextBuilder.assembleContextBlock)
  * @param additionalInstructions - Optional additional instructions appended after the context
+ * @param autonomyState - Optional autonomy state to inject policy/contract blocks
  */
 export function assemblePrompt(
   task: ArchitectTask,
   envelope: EditorContextEnvelope | null,
   contextText?: string,
   additionalInstructions?: string,
+  autonomyState?: AutonomyInstructionState,
 ): AssembledPrompt {
   const parts: string[] = [ARCHITECT_CORE];
 
@@ -196,6 +201,16 @@ export function assemblePrompt(
   // Assembled context text (file content, ADRs, etc.)
   if (contextText) {
     parts.push(contextText);
+  }
+
+  // Reporting contract (always injected so model knows verbosity expectations)
+  parts.push(getReportingInstructionBlock());
+
+  // Autonomy contract (injected when autonomy is enabled)
+  const autonomyBlock = getAutonomyInstructionBlock(autonomyState);
+  if (autonomyBlock) {
+    parts.push(autonomyBlock);
+    parts.push(getStructuredResponseContractBlock());
   }
 
   // Additional instructions

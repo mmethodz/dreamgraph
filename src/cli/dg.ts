@@ -13,6 +13,8 @@
  *   dg instances switch <uuid|name>
  *   dg status [<uuid|name>] [--instance <uuid>]
  *   dg scan <uuid|name> [--depth shallow|deep] [--targets ...]
+ *   dg curate <uuid|name> [--json] [--targets ...] [--dry-run]
+ *   dg enrich <uuid|name> [--depth shallow|deep] [--targets ...]
  *   dg schedule <uuid|name> [--add|--delete|--run|--pause|--resume|--history]
  *   dg archive <uuid|name>
  *   dg destroy <uuid|name> [--confirm]
@@ -54,6 +56,8 @@ Commands:
   instances switch <query>    Set the active instance for the current shell
   status <query>              Show instance cognitive state
   scan <query>                Trigger a project scan on a running instance
+  curate <query>              Improve graph signal quality on a running instance
+  enrich <query>              Expand graph coverage on a running instance
   schedule <query> [--add|…]  Manage dream schedules on a running instance
   start <query> [--http]      Start a daemon server process
   stop <query> [--force]      Stop a running daemon process

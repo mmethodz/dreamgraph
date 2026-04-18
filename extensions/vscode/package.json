@@ -145,6 +145,14 @@
       {
         "command": "dreamgraph.runBuild",
         "title": "DreamGraph: Run Build Script"
+      },
+      {
+        "command": "dreamgraph.setAutonomyMode",
+        "title": "DreamGraph: Set Autonomy Mode"
+      },
+      {
+        "command": "dreamgraph.resetAutonomy",
+        "title": "DreamGraph: Reset Autonomy"
       }
     ],
     "configuration": {

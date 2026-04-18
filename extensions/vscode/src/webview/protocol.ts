@@ -53,7 +53,10 @@ export type ExtensionToWebviewMessage =
   // Slice 4+
   | { type: 'entityStatus'; requestId: string; results: Record<string, EntityVerification> }
   | { type: 'toolTrace'; calls: ToolTraceEntry[] }
-  | { type: 'actionResult'; requestId: string; success: boolean; error?: string };
+  | { type: 'actionResult'; requestId: string; success: boolean; error?: string }
+  // Autonomy
+  | { type: 'autonomyStatus'; status: { mode: string; countingActive: boolean; completed: number; remaining: number; totalAuthorized?: number; summary: string } }
+  | { type: 'recommendedActions'; messageId: string; actions: { id: string; label: string; rationale?: string }[]; doAllEligible: boolean };
 
 // ── Webview → Extension ─────────────────────────────────────────────────────
 
@@ -76,4 +79,9 @@ export type WebviewToExtensionMessage =
   | { type: 'navigateEntity'; uri: string }
   // Slice 4+
   | { type: 'verifyEntities'; requestId: string; names: string[] }
-  | { type: 'executeAction'; requestId: string; action: string; context: Record<string, unknown> };
+  | { type: 'executeAction'; requestId: string; action: string; context: Record<string, unknown> }
+  // Autonomy
+  | { type: 'selectRecommendedAction'; actionId: string }
+  | { type: 'doAllRecommendedActions' }
+  | { type: 'setAutonomyMode'; mode: string }
+  | { type: 'resetAutonomy' };

@@ -832,3 +832,25 @@ export async function showGraphSignalCommand(svc: CommandServices): Promise<void
     svc.chatPanel.open();
   }
 }
+
+/* ================================================================== */
+/*  AUTONOMY COMMANDS                                                 */
+/* ================================================================== */
+
+export async function setAutonomyModeCommand(
+  svc: CommandServices,
+): Promise<void> {
+  const modes = ["cautious", "conscientious", "eager", "autonomous"] as const;
+  const picked = await vscode.window.showQuickPick(
+    modes.map((m) => ({ label: m, description: m === "cautious" ? "(default)" : undefined })),
+    { placeHolder: "Select autonomy mode" },
+  );
+  if (!picked) return;
+  const config = vscode.workspace.getConfiguration("dreamgraph.architect");
+  await config.update("autonomyMode", picked.label, vscode.ConfigurationTarget.Workspace);
+  // applyAutonomySettings is called via onDidChangeConfiguration listener
+}
+
+export function resetAutonomyCommand(svc: CommandServices): void {
+  svc.chatPanel.applyAutonomySettings();
+}

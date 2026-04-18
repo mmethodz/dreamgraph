@@ -32,6 +32,16 @@ import type { ContextBuilder } from './context-builder';
 import type { ChangedFilesView, ChangeType } from './changed-files-view';
 import { LOCAL_TOOL_DEFINITIONS, isLocalTool, executeLocalTool } from './local-tools.js';
 import { assemblePrompt, inferTask } from './prompts/index.js';
+import {
+  createAutonomyState,
+  deriveAutonomyStatusView,
+  type AutonomyState,
+  type AutonomyInstructionState,
+  type RecommendedAction,
+} from './autonomy.js';
+import { analyzePass, advanceAutonomyStateIfContinued, buildContinuationPrompt } from './autonomy-loop.js';
+import { extractStructuredPassEnvelope } from './autonomy-structured.js';
+import { getAutonomyMode, getAutonomyPassBudget, parseAutonomyRequest } from './reporting.js';
 
 type ChatRole = 'user' | 'assistant' | 'system';
 
@@ -130,7 +140,24 @@ type ExtensionToWebviewMessage =
   | { type: 'restoreDraft'; text: string }
   | { type: 'entityStatus'; requestId: string; results: Record<string, EntityVerification> }
   | { type: 'toolTrace'; calls: ToolTraceEntry[] }
-  | { type: 'verdict'; verdict: VerdictBanner };
+  | { type: 'verdict'; verdict: VerdictBanner }
+  | { type: 'autonomyStatus'; status: AutonomyStatusMessage }
+  | { type: 'recommendedActions'; messageId: string; actions: RecommendedActionMessage[]; doAllEligible: boolean };
+
+interface AutonomyStatusMessage {
+  mode: string;
+  countingActive: boolean;
+  completed: number;
+  remaining: number;
+  totalAuthorized?: number;
+  summary: string;
+}
+
+interface RecommendedActionMessage {
+  id: string;
+  label: string;
+  rationale?: string;
+}
 
 type WebviewToExtensionMessage =
   | { type: 'ready' }
@@ -154,7 +181,12 @@ type WebviewToExtensionMessage =
   // Slice 2
   | { type: 'navigateEntity'; uri: string }
   // Slice 4
-  | { type: 'verifyEntities'; requestId: string; names: string[] };
+  | { type: 'verifyEntities'; requestId: string; names: string[] }
+  // Autonomy
+  | { type: 'selectRecommendedAction'; actionId: string }
+  | { type: 'doAllRecommendedActions' }
+  | { type: 'setAutonomyMode'; mode: string }
+  | { type: 'resetAutonomy' };
 
 export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable {
   public static readonly viewType = 'dreamgraph.chatView';
@@ -189,6 +221,15 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
   private _actionLog: ActionExecutionRecord[] = [];
   private _actionStateByMessage = new Map<string, Set<string>>();
   private _hoverActionStateByMessage = new Map<string, HoverActionState>();
+
+  /** Autonomy session state — tracks mode, pass budget, and continuation policy. */
+  private _autonomyState: AutonomyState = createAutonomyState(getAutonomyMode(), getAutonomyPassBudget());
+  /** Whether autonomy continuation is actively enabled for this session. */
+  private _autonomyEnabled = getAutonomyMode() !== 'cautious' || (getAutonomyPassBudget() ?? 0) > 0;
+  /** The last set of recommended actions from a pass analysis. */
+  private _lastRecommendedActions: RecommendedAction[] = [];
+  /** Whether an autonomy continuation loop is currently running. */
+  private _autonomyContinuing = false;
 
   private static readonly MAX_RENDERED_MESSAGE_CHARS = 100_000;
   private static readonly MAX_ENTITY_LINKS_PER_MESSAGE = 100;
@@ -287,6 +328,7 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
     webviewView.webview.onDidReceiveMessage(async (message: WebviewToExtensionMessage) => {
       switch (message.type) {
         case 'ready':
+          this._syncAutonomyFromSettings();
           await this.rehydrateWebview();
           this._sendModelUpdate();
           this._checkApiKeyWarning();
@@ -393,6 +435,24 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
           await this._pinMessage(message.messageId);
           break;
         }
+        case 'selectRecommendedAction': {
+          const actionMsg = message as { type: 'selectRecommendedAction'; actionId: string };
+          await this._executeRecommendedAction(actionMsg.actionId);
+          break;
+        }
+        case 'doAllRecommendedActions': {
+          await this._executeAllRecommendedActions();
+          break;
+        }
+        case 'setAutonomyMode': {
+          const modeMsg = message as { type: 'setAutonomyMode'; mode: string };
+          this._setAutonomyMode(modeMsg.mode);
+          break;
+        }
+        case 'resetAutonomy': {
+          this._resetAutonomy();
+          break;
+        }
       }
     }, null, this.disposables);
 
@@ -410,6 +470,9 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
   }
 
   private async handleUserMessage(text: string): Promise<void> {
+    // Detect and apply autonomy mode requests from user text
+    this._detectAutonomyRequest(text);
+
     const attachmentSummary = this._attachmentSummaryForUserMessage();
     const userMessage: ChatMessage = {
       id: this._createMessageId(),
@@ -447,7 +510,10 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
 
       const envelope = this.contextBuilder ? await this.contextBuilder.buildEnvelope(text) : null;
       const task = inferTask(envelope?.intentMode ?? 'ask_dreamgraph');
-      const { system } = assemblePrompt(task, envelope);
+      const autonomyInstruction: AutonomyInstructionState | undefined = this._autonomyEnabled
+        ? { ...this._autonomyState, enabled: true }
+        : undefined;
+      const { system } = assemblePrompt(task, envelope, undefined, undefined, autonomyInstruction);
 
       const llmMessages: ArchitectMessage[] = [{ role: 'system', content: system }];
       const recentMessages = this.messages.slice(-20);
@@ -514,6 +580,11 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       await this.persistMessages();
       this.attachments = [];
       await this._syncAttachments();
+
+      // Autonomy: analyze the pass and decide whether to continue
+      if (this._autonomyEnabled) {
+        await this._handleAutonomyPassComplete(redactedFullContent, assistantMessage.id ?? '', llmMessages, tools);
+      }
     } catch (err: unknown) {
       const errorText = err instanceof Error ? err.message : String(err);
       const isAbort = err instanceof DOMException && err.name === 'AbortError';
@@ -726,6 +797,7 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
     await this.postState();
     if (this.draftText) await this.postMessage({ type: 'restoreDraft', text: this.draftText });
     await this._syncAttachments();
+    if (this._autonomyEnabled) this._broadcastAutonomyStatus();
   }
 
   private async postState(): Promise<void> {
@@ -1014,6 +1086,284 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
   private static readonly MAX_RETRIES = 3;
   private static readonly MAX_VERIFICATION_BATCH_SIZE = 50;
   private static readonly VERIFICATION_TIMEOUT_MS = 5_000;
+  /** Maximum number of autonomous continuation passes to prevent runaway loops. */
+  private static readonly MAX_AUTONOMY_PASSES = 20;
+
+  /* ------------------------------------------------------------------ */
+  /*  Autonomy — session state & continuation loop                      */
+  /* ------------------------------------------------------------------ */
+
+  /** Re-read autonomy settings from VS Code configuration and apply. */
+  private _syncAutonomyFromSettings(): void {
+    const mode = getAutonomyMode();
+    const budget = getAutonomyPassBudget();
+    this._autonomyState = createAutonomyState(mode, budget);
+    this._autonomyEnabled = mode !== 'cautious' || (budget ?? 0) > 0;
+    if (this._autonomyEnabled) this._broadcastAutonomyStatus();
+  }
+
+  /** Called from extension.ts when configuration changes. */
+  public applyAutonomySettings(): void {
+    this._syncAutonomyFromSettings();
+  }
+
+  private _detectAutonomyRequest(text: string): void {
+    const lower = text.toLowerCase();
+    const hasAutonomyKeyword = /\b(autonomous|eager|conscientious|cautious)\b/.test(lower)
+      || /next\s+\d+\s+passes|for\s+\d+\s+passes/.test(lower)
+      || /\bautonomous(ly)?\b/.test(lower)
+      || /\bstay\s+cautious\b/.test(lower);
+
+    if (!hasAutonomyKeyword) return;
+
+    const parsed = parseAutonomyRequest(text, this._autonomyState);
+    this._autonomyState = {
+      mode: parsed.mode,
+      remainingAutoPasses: parsed.remainingAutoPasses,
+      completedAutoPasses: parsed.completedAutoPasses,
+      totalAuthorizedPasses: parsed.totalAuthorizedPasses,
+    };
+    this._autonomyEnabled = true;
+    this._broadcastAutonomyStatus();
+  }
+
+  private _setAutonomyMode(mode: string): void {
+    const valid = ['cautious', 'conscientious', 'eager', 'autonomous'] as const;
+    const m = valid.find((v) => v === mode);
+    if (!m) return;
+    this._autonomyState = { ...this._autonomyState, mode: m };
+    this._autonomyEnabled = true;
+    this._broadcastAutonomyStatus();
+  }
+
+  private _resetAutonomy(): void {
+    this._autonomyState = createAutonomyState('cautious');
+    this._autonomyEnabled = false;
+    this._autonomyContinuing = false;
+    this._lastRecommendedActions = [];
+    this._broadcastAutonomyStatus();
+  }
+
+  private _broadcastAutonomyStatus(): void {
+    const status = deriveAutonomyStatusView(this._autonomyState);
+    void this.postMessage({
+      type: 'autonomyStatus',
+      status: {
+        mode: status.mode,
+        countingActive: status.countingActive,
+        completed: status.completed,
+        remaining: status.remaining,
+        totalAuthorized: status.totalAuthorized,
+        summary: status.summary,
+      },
+    });
+  }
+
+  private async _handleAutonomyPassComplete(
+    content: string,
+    messageId: string,
+    llmMessages: ArchitectMessage[],
+    tools: ToolDefinition[],
+  ): Promise<void> {
+    // Extract structured envelope and build recommended actions
+    const envelope = extractStructuredPassEnvelope(content);
+    const actions: RecommendedAction[] = envelope.nextSteps;
+    this._lastRecommendedActions = actions;
+
+    // Run pass analysis to get continuation decision
+    const result = analyzePass(this._autonomyState, { content, actions });
+
+    // Broadcast actions to webview
+    if (result.actionSet.actions.length > 0) {
+      void this.postMessage({
+        type: 'recommendedActions',
+        messageId,
+        actions: result.actionSet.actions.map((a) => ({ id: a.id, label: a.label, rationale: a.rationale })),
+        doAllEligible: result.actionSet.doAllEligible,
+      });
+    }
+
+    if (result.decision.shouldContinue && !this.abortController?.signal.aborted) {
+      // Advance state and continue
+      this._autonomyState = advanceAutonomyStateIfContinued(this._autonomyState, result.decision);
+      this._broadcastAutonomyStatus();
+
+      // Safety: cap autonomous continuation
+      if (this._autonomyState.completedAutoPasses >= ChatPanel.MAX_AUTONOMY_PASSES) {
+        const stopMsg: ChatMessage = {
+          id: this._createMessageId(),
+          role: 'system',
+          content: `Autonomy safety limit reached (${ChatPanel.MAX_AUTONOMY_PASSES} passes). ${result.decision.reason}`,
+          timestamp: new Date().toISOString(),
+          instanceId: this.currentInstanceId,
+        };
+        this.messages.push(stopMsg);
+        await this.persistMessages();
+        await this.postMessage({ type: 'addMessage', message: stopMsg, actions: [], roleMeta: this._roleMetaFor(stopMsg), contextFooter: undefined });
+        return;
+      }
+
+      // Post continuation notice
+      const selectedAction = result.actionSet.actions.find((a) => a.id === result.selectedActionId);
+      const statusView = deriveAutonomyStatusView(this._autonomyState);
+      const noticeText = `*${result.decision.reason}*${selectedAction ? ` Next: ${selectedAction.label}.` : ''} ${statusView.countingActive ? `[${statusView.summary}]` : ''}`;
+      const notice: ChatMessage = {
+        id: this._createMessageId(),
+        role: 'system',
+        content: noticeText,
+        timestamp: new Date().toISOString(),
+        instanceId: this.currentInstanceId,
+      };
+      this.messages.push(notice);
+      await this.persistMessages();
+      await this.postMessage({ type: 'addMessage', message: notice, actions: [], roleMeta: this._roleMetaFor(notice), contextFooter: undefined });
+
+      // Trigger next pass
+      const continuationPrompt = result.nextPrompt ?? buildContinuationPrompt(selectedAction?.label);
+      await this._runAutonomyContinuationPass(continuationPrompt, llmMessages, tools);
+    } else {
+      // Stopped — update status and show reason
+      this._broadcastAutonomyStatus();
+      if (result.decision.reason) {
+        const statusView = deriveAutonomyStatusView(this._autonomyState);
+        const stopText = `*${result.decision.reason}* ${statusView.countingActive ? `[${statusView.summary}]` : ''}`;
+        const stopMsg: ChatMessage = {
+          id: this._createMessageId(),
+          role: 'system',
+          content: stopText,
+          timestamp: new Date().toISOString(),
+          instanceId: this.currentInstanceId,
+        };
+        this.messages.push(stopMsg);
+        await this.persistMessages();
+        await this.postMessage({ type: 'addMessage', message: stopMsg, actions: [], roleMeta: this._roleMetaFor(stopMsg), contextFooter: undefined });
+      }
+    }
+  }
+
+  private async _runAutonomyContinuationPass(
+    prompt: string,
+    baseLlmMessages: ArchitectMessage[],
+    tools: ToolDefinition[],
+  ): Promise<void> {
+    if (this._autonomyContinuing) return; // prevent re-entrancy
+    this._autonomyContinuing = true;
+
+    try {
+      // Build continuation message
+      const userMessage: ChatMessage = {
+        id: this._createMessageId(),
+        role: 'user',
+        content: prompt,
+        timestamp: new Date().toISOString(),
+        instanceId: this.currentInstanceId,
+      };
+      this.messages.push(userMessage);
+      await this.persistMessages();
+
+      this.streaming = true;
+      this.streamingContent = '';
+      this._lastToolTrace = [];
+      this._lastVerdict = null;
+      this.abortController = new AbortController();
+
+      const envelope = this.contextBuilder ? await this.contextBuilder.buildEnvelope(prompt) : null;
+      const task = inferTask(envelope?.intentMode ?? 'ask_dreamgraph');
+      const autonomyInstruction: AutonomyInstructionState = { ...this._autonomyState, enabled: true };
+      const { system } = assemblePrompt(task, envelope, undefined, undefined, autonomyInstruction);
+
+      const llmMessages: ArchitectMessage[] = [{ role: 'system', content: system }];
+      const recentMessages = this.messages.slice(-20);
+      for (const msg of recentMessages) {
+        if (msg.role === 'user' || msg.role === 'assistant') llmMessages.push({ role: msg.role, content: msg.content });
+      }
+
+      await this.postMessage({ type: 'stream-start' });
+
+      let fullContent = '';
+      if (tools.length > 0) {
+        fullContent = await this.runAgenticLoop(llmMessages, tools);
+      } else {
+        const req = this._createRequestSignal();
+        try {
+          await this.architectLlm!.stream(llmMessages, (chunk: string) => {
+            const safeChunk = this._redactSecrets(chunk);
+            fullContent += safeChunk;
+            this.streamingContent += safeChunk;
+            void this.postMessage({ type: 'stream-chunk', chunk: safeChunk });
+          }, req.signal);
+        } finally {
+          req.dispose();
+        }
+      }
+
+      const redactedFullContent = this._redactSecrets(fullContent);
+      this._lastVerdict = this._deriveVerdict(redactedFullContent, this._lastToolTrace);
+      const finalContent = this._applyRenderLimits(redactedFullContent);
+      const implicitEntities = this._detectImplicitEntities(redactedFullContent);
+      const implicitEntityNotice = implicitEntities.names.length > 0
+        ? this._formatImplicitEntityNotice(implicitEntities)
+        : undefined;
+
+      const assistantMessage: ChatMessage = {
+        id: this._createMessageId(),
+        role: 'assistant',
+        content: finalContent.content,
+        fullContent: redactedFullContent,
+        implicitEntityNotice,
+        timestamp: new Date().toISOString(),
+        instanceId: this.currentInstanceId,
+      };
+      this.messages.push(assistantMessage);
+      await this.persistMessages();
+
+      await this.postMessage({ type: 'stream-end', done: true });
+      await this.postMessage({
+        type: 'addMessage',
+        message: assistantMessage,
+        actions: this._buildMessageActions(assistantMessage),
+        roleMeta: this._roleMetaFor(assistantMessage),
+        contextFooter: this._contextFooterFor(assistantMessage),
+      });
+
+      if (this._lastVerdict) {
+        void this.postMessage({ type: 'verdict', verdict: this._lastVerdict });
+      }
+      if (this._lastToolTrace.length > 0) {
+        void this.postMessage({ type: 'toolTrace', calls: [...this._lastToolTrace] });
+      }
+
+      // Recursively analyze the new pass
+      this._autonomyContinuing = false;
+      await this._handleAutonomyPassComplete(redactedFullContent, assistantMessage.id ?? '', llmMessages, tools);
+    } catch (err: unknown) {
+      const errorText = err instanceof Error ? err.message : String(err);
+      const isAbort = err instanceof DOMException && err.name === 'AbortError';
+      const displayText = isAbort ? 'Autonomous continuation stopped.' : `Error during continuation: ${errorText}`;
+      const errMsg: ChatMessage = { id: this._createMessageId(), role: 'system', content: displayText, timestamp: new Date().toISOString(), instanceId: this.currentInstanceId };
+      this.messages.push(errMsg);
+      await this.persistMessages();
+      await this.postMessage({ type: 'addMessage', message: errMsg, actions: [], roleMeta: this._roleMetaFor(errMsg), contextFooter: undefined });
+    } finally {
+      this._autonomyContinuing = false;
+      this.resetStreamState();
+    }
+  }
+
+  private async _executeRecommendedAction(actionId: string): Promise<void> {
+    const action = this._lastRecommendedActions.find((a) => a.id === actionId);
+    if (!action) return;
+    await this.handleUserMessage(action.label);
+  }
+
+  private async _executeAllRecommendedActions(): Promise<void> {
+    const labels = this._lastRecommendedActions
+      .filter((a) => a.eligible && a.withinScope)
+      .map((a) => a.label);
+    if (labels.length === 0) return;
+    const combined = `Execute these steps sequentially:\n${labels.map((l, i) => `${i + 1}. ${l}`).join('\n')}`;
+    await this.handleUserMessage(combined);
+  }
   private static readonly SECRET_PATTERNS = [
     /(?:api[_-]?key|secret|token|password|passwd|auth)\s*[:=]\s*\S+/gi,
     /(?:sk-|pk-|ghp_|gho_|github_pat_)\S+/g,
@@ -1410,6 +1760,11 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
     <button id="set-api-key-btn" class="icon-btn" title="Set API key" aria-label="Set API key">🔑</button>
     <button id="clear-btn" class="icon-btn" title="Clear conversation" aria-label="Clear conversation">🗑️</button>
   </div>
+  <div id="autonomy-bar" style="display:none">
+    <span id="autonomy-mode-label"></span>
+    <span id="autonomy-counter"></span>
+    <button id="autonomy-reset-btn" class="icon-btn" title="Reset autonomy" aria-label="Reset autonomy" style="display:none">✕</button>
+  </div>
 
   <div id="messages"></div>
   <div id="empty-state">
@@ -1788,6 +2143,8 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
     stopBtn.addEventListener('click', () => vscode.postMessage({ type: 'stop' }));
     clearBtn.addEventListener('click', () => vscode.postMessage({ type: 'clear' }));
     attachBtn.addEventListener('click', () => vscode.postMessage({ type: 'pickAttachments' }));
+    const autonomyResetBtn = document.getElementById('autonomy-reset-btn');
+    if (autonomyResetBtn) autonomyResetBtn.addEventListener('click', () => vscode.postMessage({ type: 'resetAutonomy' }));
     providerSelect.addEventListener('change', () => vscode.postMessage({ type: 'changeProvider', provider: providerSelect.value }));
     modelSelect.addEventListener('change', () => vscode.postMessage({ type: 'changeModel', model: modelSelect.value }));
     setApiKeyBtn.addEventListener('click', () => vscode.postMessage({ type: 'setApiKey' }));
@@ -1900,6 +2257,48 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
         case 'error':
           console.error(msg.error);
           break;
+        case 'autonomyStatus': {
+          const bar = document.getElementById('autonomy-bar');
+          const label = document.getElementById('autonomy-mode-label');
+          const counter = document.getElementById('autonomy-counter');
+          const resetBtn = document.getElementById('autonomy-reset-btn');
+          if (bar && label && counter && resetBtn) {
+            const s = msg.status;
+            bar.style.display = 'flex';
+            label.textContent = s.mode.charAt(0).toUpperCase() + s.mode.slice(1);
+            label.className = 'autonomy-mode autonomy-mode-' + s.mode;
+            counter.textContent = s.countingActive ? s.summary : '';
+            resetBtn.style.display = s.mode !== 'cautious' || s.countingActive ? 'inline-flex' : 'none';
+          }
+          break;
+        }
+        case 'recommendedActions': {
+          const targetBubble = messagesEl.querySelector('.message[data-message-id="' + msg.messageId + '"]');
+          if (targetBubble) {
+            const existing = targetBubble.querySelector('.recommended-actions');
+            if (existing) existing.remove();
+            const wrapper = document.createElement('div');
+            wrapper.className = 'recommended-actions';
+            for (const action of msg.actions || []) {
+              const chip = document.createElement('button');
+              chip.className = 'action-chip';
+              chip.textContent = action.label;
+              if (action.rationale) chip.title = action.rationale;
+              chip.addEventListener('click', () => vscode.postMessage({ type: 'selectRecommendedAction', actionId: action.id }));
+              wrapper.appendChild(chip);
+            }
+            if (msg.doAllEligible && (msg.actions || []).length > 1) {
+              const doAll = document.createElement('button');
+              doAll.className = 'action-chip action-chip-all';
+              doAll.textContent = 'Do all';
+              doAll.addEventListener('click', () => vscode.postMessage({ type: 'doAllRecommendedActions' }));
+              wrapper.appendChild(doAll);
+            }
+            targetBubble.appendChild(wrapper);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+          }
+          break;
+        }
       }
     });
 
