@@ -36,6 +36,30 @@ export function writeEngineEnv(
 
     const template: Array<{ key: string; defaultValue: string; description: string; section: string }> = [
       {
+        key: "DREAMGRAPH_INSTANCE_UUID",
+        defaultValue: "",
+        description: "Stable instance identifier. Usually auto-generated when the instance is created.",
+        section: "Instance",
+      },
+      {
+        key: "DREAMGRAPH_MASTER_DIR",
+        defaultValue: "./.dreamgraph/master",
+        description: "Master storage directory for shared DreamGraph state and exported data.",
+        section: "Instance",
+      },
+      {
+        key: "DREAMGRAPH_DATA_DIR",
+        defaultValue: "./.dreamgraph/data",
+        description: "Instance data directory for seed files, dreams, ADRs, and registry data.",
+        section: "Instance",
+      },
+      {
+        key: "DREAMGRAPH_REPOS",
+        defaultValue: '{"dreamgraph":"C:/path/to/repo"}',
+        description: "JSON object mapping repository IDs to absolute local paths for code, git, and scan tools.",
+        section: "Repository Mapping",
+      },
+      {
         key: "DREAMGRAPH_LLM_PROVIDER",
         defaultValue: "ollama",
         description: "Provider: ollama (local, default) | openai (API) | anthropic (Claude API) | sampling (MCP client) | none",
@@ -255,6 +279,7 @@ export function writeEngineEnv(
     ];
 
     let currentSection = "";
+    let advancedHeaderWritten = false;
     for (const entry of template) {
       if (entry.section !== currentSection) {
         if (currentSection !== "") lines.push("");
@@ -265,15 +290,14 @@ export function writeEngineEnv(
           "Adaptive Dream Strategy",
           "Normalizer Tuning",
           "Database",
-        ].includes(entry.section) && currentSection !== entry.section) {
-          if (!lines.includes("# ===================================================================")) {
-            lines.push("# ===================================================================");
-            lines.push("# ADVANCED TUNING — for experienced users only.");
-            lines.push("# These control cognitive engine internals. The defaults work well");
-            lines.push("# for most projects. Only change them if you know what you're doing.");
-            lines.push("# ===================================================================");
-            lines.push("");
-          }
+        ].includes(entry.section) && !advancedHeaderWritten) {
+          lines.push("# ===================================================================");
+          lines.push("# ADVANCED TUNING — for experienced users only.");
+          lines.push("# These control cognitive engine internals. The defaults work well");
+          lines.push("# for most projects. Only change them if you know what you're doing.");
+          lines.push("# ===================================================================");
+          lines.push("");
+          advancedHeaderWritten = true;
         }
         if (!["LLM Provider", "Base LLM Defaults", "Dreamer", "Normalizer"].includes(entry.section)) {
           lines.push(`# --- ${entry.section} ---`);
