@@ -104,6 +104,22 @@ code /path/to/your/repo                   # Extension auto-connects
 
 The scan populates the knowledge graph, runs an initial dream cycle, discovers implicit ADRs, and schedules follow-up dreams. Open the Chat panel and start asking immediately.
 
+### Build a Comprehensive Graph
+
+For graph creation and multi-pass enrichment, **use DreamGraph Architect**.
+
+Why:
+- it can continue when scans are partial or expensive
+- it can suggest the next best action
+- it can build a comprehensive graph incrementally across repos
+- it can combine structural evidence with deeper semantic enrichment over time
+
+A useful operating model is:
+- `dg scan` for mechanical scanning
+- `dg enrich` for graph coverage from the CLI
+- `dg curate` for graph quality cleanup from the CLI
+- **DreamGraph Architect** for guided graph creation, enrichment, and next-step recommendations
+
 ### Onboard the Extension
 
 1. The extension installs automatically via `install.ps1` / `install.sh`.
@@ -123,15 +139,7 @@ You can change provider and model at any time — the graph-grounded context is 
 # ~/.dreamgraph/<instance-uuid>/config/engine.env
 DREAMGRAPH_LLM_PROVIDER=openai
 DREAMGRAPH_LLM_URL=https://api.openai.com/v1
-DREAMGRAPH_LLM_API_KEY=your-api-key-here
-DREAMGRAPH_LLM_DREAMER_MODEL=gpt-4o-mini
-DREAMGRAPH_LLM_DREAMER_TEMPERATURE=0.9
-DREAMGRAPH_LLM_DREAMER_MAX_TOKENS=10240
-DREAMGRAPH_LLM_NORMALIZER_MODEL=gpt-5.4-nano
-DREAMGRAPH_LLM_NORMALIZER_TEMPERATURE=0.1
-DREAMGRAPH_LLM_NORMALIZER_MAX_TOKENS=4096
-
-# Extension Architect (VS Code-side)
+DREAMGRAPH_LLM_API_KEY=**** Extension Architect (VS Code-side)
 # Settings → dreamgraph.architect.provider / model
 # API key → Ctrl+Shift+P → DreamGraph: Set Architect API Key
 ```
@@ -204,6 +212,8 @@ dg schedule my-project --add --name "nightly" --action dream_cycle --type interv
 | `dg restart <name>` | Restart the daemon |
 | `dg status [name]` | Show instance status, cognitive state, daemon info |
 | `dg scan <name>` | Trigger a full project scan on a running instance |
+| `dg enrich <name>` | Expand graph coverage from the CLI |
+| `dg curate <name>` | Improve graph signal quality from the CLI |
 | `dg schedule <name>` | List dream schedules |
 | `dg schedule <name> --add` | Add a new dream schedule (interval, cron, cycle-based, idle-triggered) |
 | `dg schedule <name> --run <id>` | Force-run a schedule immediately |
@@ -391,6 +401,8 @@ docs/               # Architecture, cognitive engine, tools, data model, workflo
 | [docs/narrative.md](docs/narrative.md) | Auto-generated system chronicle |
 | [docs/anthropic-opus-4-7.md](docs/anthropic-opus-4-7.md) | Anthropic Architect configuration, Opus 4.7 migration notes, effort/thinking guidance |
 | [docs/setup-llm.md](docs/setup-llm.md) | Correct daemon vs extension LLM setup, engine.env examples, common configuration mistakes |
+| [docs/architect-reporting.md](docs/architect-reporting.md) | Architect reporting modes, verbosity layers, trace visibility |
+| [docs/graph-operations.md](docs/graph-operations.md) | Enrich vs curate operating model and Architect recommendation |
 
 ---
 

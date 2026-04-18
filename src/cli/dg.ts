@@ -174,6 +174,18 @@ async function main(): Promise<void> {
         await cmdScan(positional.slice(1), flags);
         break;
 
+      case "enrich": {
+        const { cmdEnrich } = await import("./commands/enrich.js");
+        await cmdEnrich(positional.slice(1), flags);
+        break;
+      }
+
+      case "curate": {
+        const { cmdCurate } = await import("./commands/curate.js");
+        await cmdCurate(positional.slice(1), flags);
+        break;
+      }
+
       case "schedule":
         await cmdSchedule(positional.slice(1), flags);
         break;
