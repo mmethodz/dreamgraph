@@ -135,6 +135,16 @@ function shell(title: string, body: string, activeTab: string): string {
 </html>`;
 }
 
+function html(res: ServerResponse, statusCode: number, body: string): void {
+  res.writeHead(statusCode, { "Content-Type": "text/html; charset=utf-8" });
+  res.end(body);
+}
+
+function json(res: ServerResponse, statusCode: number, payload: unknown): void {
+  res.writeHead(statusCode, { "Content-Type": "application/json; charset=utf-8" });
+  res.end(JSON.stringify(payload));
+}
+
 /* ------------------------------------------------------------------ */
 /*  CSS                                                               */
 /* ------------------------------------------------------------------ */
@@ -841,12 +851,10 @@ async function renderConfig(savedSection?: string): Promise<string> {
 
   let body = `<h1>Configuration</h1>`;
 
-  // Success toast after POST
   if (savedSection) {
     body += `<div class="toast">✓ ${esc(savedSection)} configuration saved successfully.</div>`;
   }
 
-  // Restart server banner
   body += `<div class="card" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
     <div>
       <strong>Server Control</strong>
@@ -865,7 +873,6 @@ async function renderConfig(savedSection?: string): Promise<string> {
       try {
         await fetch('/restart', { method: 'POST' });
       } catch(e) { /* connection will drop */ }
-      // Poll until the server comes back
       let attempts = 0;
       const poll = setInterval(async () => {
         attempts++;
@@ -878,7 +885,6 @@ async function renderConfig(savedSection?: string): Promise<string> {
     });
   </script>`;
 
-  // ---- Instance (read-only) ----
   body += `<h2>Instance</h2>
   <div class="card">
     <div class="kv"><span class="kv-key">Mode</span><span class="kv-val">${isInstanceMode() ? "UUID-scoped" : "Legacy (flat)"}</span></div>
@@ -893,7 +899,6 @@ async function renderConfig(savedSection?: string): Promise<string> {
     `}
   </div>`;
 
-  // ---- Server (read-only) ----
   body += `<h2>Server</h2>
   <div class="card">
     <div class="kv"><span class="kv-key">Name</span><span class="kv-val">${config.server.name}</span></div>
@@ -901,7 +906,6 @@ async function renderConfig(savedSection?: string): Promise<string> {
     <div class="kv"><span class="kv-key">Debug</span><span class="kv-val">${config.env.debug ? "true" : "false"}</span></div>
   </div>`;
 
-  // ---- Repos (read-only) ----
   const repos = scope?.repos ?? config.repos;
   body += `<h2>Repos</h2>`;
   if (Object.keys(repos).length === 0) {
@@ -915,12 +919,9 @@ async function renderConfig(savedSection?: string): Promise<string> {
     </table>`;
   }
 
-  // ---- LLM (combined — Provider / Dreamer / Normalizer) ----
-
-  // Pre-compute API key HTML — avoids nested template literal issues
   const effectiveApiKey = llmCfg.apiKey || process.env.DREAMGRAPH_LLM_API_KEY || "";
   const hasApiKey = effectiveApiKey.length > 0;
-  const maskedApiKey = hasApiKey
+  const maskedApiKey = effectiveApiKey
     ? effectiveApiKey.length > 8
       ? effectiveApiKey.slice(0, 5) + "\u2022\u2022\u2022" + effectiveApiKey.slice(-4)
       : "\u2022\u2022\u2022\u2022" + effectiveApiKey.slice(-4)
@@ -929,11 +930,10 @@ async function renderConfig(savedSection?: string): Promise<string> {
     ? '<span class="badge badge-green" style="margin-left:8px">set</span>'
       + '<span class="api-key-mask">' + esc(maskedApiKey) + '</span>'
     : '<span class="badge badge-red" style="margin-left:8px">not set</span>';
-  const apiKeyPlaceholder = hasApiKey ? "(set \u2014 leave blank to keep)" : "sk-... or API key";
+  const apiKeyPlaceholder = hasApiKey ? "(set — leave blank to keep)" : "sk-...****** or API key";
 
   body += `<h2>LLM</h2>`;
 
-  // LLM not-configured guidance banner
   if (llmCfg.provider === "none" || !llmCfg.provider) {
     body += `<div class="card" style="border-left:4px solid var(--accent);margin-bottom:16px;background:var(--card-bg)">
       <strong style="color:var(--accent)">LLM Not Configured</strong>
@@ -950,7 +950,6 @@ async function renderConfig(savedSection?: string): Promise<string> {
   body += `
   <div class="section-group">
 
-    <!-- Provider -->
     <div class="sub-section">
       <h3>Provider</h3>
       <form method="POST" action="/config" class="config-form">
@@ -981,7 +980,6 @@ async function renderConfig(savedSection?: string): Promise<string> {
       </form>
     </div>
 
-    <!-- Dreamer -->
     <div class="sub-section">
       <h3>Dreamer</h3>
       <p class="sub-desc">Creative settings for dream cycle generation.</p>
@@ -1010,7 +1008,6 @@ async function renderConfig(savedSection?: string): Promise<string> {
       </form>
     </div>
 
-    <!-- Normalizer -->
     <div class="sub-section">
       <h3>Normalizer</h3>
       <p class="sub-desc">Precise settings for validation / truth-filter pass.</p>
@@ -1039,7 +1036,6 @@ async function renderConfig(savedSection?: string): Promise<string> {
       </form>
     </div>
 
-    <!-- Provider URL auto-fill + Model selector JS -->
     <script>
     (function() {
       var PROVIDER_URLS = {
@@ -1073,19 +1069,16 @@ async function renderConfig(savedSection?: string): Promise<string> {
 
       var CUSTOM_VALUE = '__custom__';
 
-      /** Auto-fill base URL when provider changes */
       window.__dgUpdateProviderUrl = function() {
         var prov = document.getElementById('llm-provider').value;
         var urlInput = document.getElementById('llm-baseUrl');
         if (PROVIDER_URLS[prov] !== undefined) {
           urlInput.value = PROVIDER_URLS[prov];
         }
-        // Also refresh model dropdowns for new provider
         buildModelSelect('dreamer');
         buildModelSelect('normalizer');
       };
 
-      /** Build a model <select> with presets + Custom option */
       function buildModelSelect(role) {
         var sel = document.getElementById(role + '-select');
         var input = document.getElementById(role + '-model');
@@ -1095,10 +1088,8 @@ async function renderConfig(savedSection?: string): Promise<string> {
         var models = MODEL_PRESETS[prov] || [];
         var current = input.value;
 
-        // Clear existing options
         sel.innerHTML = '';
 
-        // Add preset models
         models.forEach(function(m) {
           var opt = document.createElement('option');
           opt.value = m;
@@ -1106,41 +1097,34 @@ async function renderConfig(savedSection?: string): Promise<string> {
           sel.appendChild(opt);
         });
 
-        // Add "Custom…" option at the end
         var customOpt = document.createElement('option');
         customOpt.value = CUSTOM_VALUE;
         customOpt.textContent = 'Custom\u2026';
         sel.appendChild(customOpt);
 
-        // Select the right option
         if (current && models.indexOf(current) !== -1) {
           sel.value = current;
           input.style.display = 'none';
         } else {
-          // Current model is custom (not in presets)
           sel.value = CUSTOM_VALUE;
           input.style.display = '';
         }
       }
 
-      /** Handle model select change */
       window.__dgModelSelect = function(role) {
         var sel = document.getElementById(role + '-select');
         var input = document.getElementById(role + '-model');
         if (!sel || !input) return;
 
         if (sel.value === CUSTOM_VALUE) {
-          // Show text input for custom model
           input.style.display = '';
           input.focus();
         } else {
-          // Preset selected — copy to hidden input
           input.value = sel.value;
           input.style.display = 'none';
         }
       };
 
-      // Initialise on load
       buildModelSelect('dreamer');
       buildModelSelect('normalizer');
     })();
@@ -1148,25 +1132,38 @@ async function renderConfig(savedSection?: string): Promise<string> {
 
   </div>`;
 
-  // ---- Database (editable — connection string + test) ----
-  const dbConnMasked = config.database.connectionString
-    ? config.database.connectionString.replace(/\/\/([^:]+):([^@]+)@/, "//****:****@")
+  const effectiveDbConnectionString = config.database.connectionString || process.env.DATABASE_URL || "";
+  const hasDbConnectionString = effectiveDbConnectionString.length > 0;
+  const dbConnMasked = effectiveDbConnectionString
+    ? effectiveDbConnectionString.replace(/\/\/([^:]+):([^@]+)@/, "//****:****@")
     : "";
+  const dbConnectionPlaceholder = hasDbConnectionString
+    ? "saved in engine.env — leave blank to keep existing"
+    : "postgresql://user:password@host:5432/dbname";
+  const dbSavedBadge = hasDbConnectionString
+    ? '<span class="badge badge-green" style="margin-left:8px">set</span>'
+    : '<span class="badge badge-red" style="margin-left:8px">not set</span>';
+
   body += `<h2>Database</h2>
   <div class="card">
     <form method="POST" action="/config" class="config-form" id="db-form">
       <input type="hidden" name="_section" value="database">
       <div class="form-row">
         <label>Connection String</label>
-        <input name="connectionString" value="${escAttr(config.database.connectionString)}" placeholder="postgresql://user:pass@host:5432/dbname" style="max-width:480px">
+        <div class="api-key-wrap" style="max-width:480px">
+          <input id="dbConnectionInput" name="connectionString" type="password" value="" placeholder="${escAttr(dbConnectionPlaceholder)}" style="max-width:none">
+          <button type="button" class="api-key-toggle" onclick="var i=document.getElementById('dbConnectionInput');if(i.type==='password'){i.type='text';this.textContent='Hide'}else{i.type='password';this.textContent='Show'}">Show</button>
+        </div>
+        ${dbSavedBadge}
       </div>
-      <div class="kv" style="padding:6px 0"><span class="kv-key">Masked</span><span class="kv-val">${dbConnMasked ? esc(dbConnMasked) : '<span class="badge badge-yellow">not set</span>'}</span></div>
+      <div class="kv" style="padding:6px 0"><span class="kv-key">Saved Value</span><span class="kv-val">${dbConnMasked ? esc(dbConnMasked) : '<span class="badge badge-yellow">not set</span>'}</span></div>
       <div class="kv" style="padding:6px 0"><span class="kv-key">Max Connections</span><span class="kv-val">${config.database.maxConnections}</span></div>
       <div class="kv" style="padding:6px 0"><span class="kv-key">Statement Timeout</span><span class="kv-val">${fmtMs(config.database.statementTimeoutMs)}</span></div>
       <div class="kv" style="padding:6px 0;border-bottom:none"><span class="kv-key">Operation Timeout</span><span class="kv-val">${fmtMs(config.database.operationTimeoutMs)}</span></div>
       <div class="form-actions">
         <button type="submit" class="btn btn-primary">Save</button>
         <button type="button" class="btn btn-secondary" id="btn-test-db">Test Connection</button>
+        <button type="button" class="btn btn-secondary" id="btn-clear-db" ${hasDbConnectionString ? "" : "disabled"}>Clear Saved Connection</button>
       </div>
     </form>
     <div id="db-test-result" class="db-test-result"></div>
@@ -1175,7 +1172,7 @@ async function renderConfig(savedSection?: string): Promise<string> {
     document.getElementById('btn-test-db').addEventListener('click', async function() {
       const btn = this;
       const res_el = document.getElementById('db-test-result');
-      const connInput = document.querySelector('#db-form input[name="connectionString"]');
+      const connInput = document.getElementById('dbConnectionInput');
       btn.disabled = true;
       btn.textContent = 'Testing…';
       res_el.className = 'db-test-result';
@@ -1202,9 +1199,24 @@ async function renderConfig(savedSection?: string): Promise<string> {
         btn.textContent = 'Test Connection';
       }
     });
+
+    document.getElementById('btn-clear-db').addEventListener('click', async function() {
+      if (!confirm('Clear the saved database connection string from engine.env?')) return;
+      const btn = this;
+      btn.disabled = true;
+      btn.textContent = 'Clearing…';
+      try {
+        const r = await fetch('/config/clear-db', { method: 'POST' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        window.location.href = '/config?saved=database';
+      } catch(e) {
+        alert('Failed to clear saved DB connection string: ' + e.message);
+        btn.disabled = false;
+        btn.textContent = 'Clear Saved Connection';
+      }
+    });
   </script>`;
 
-  // ---- Scheduler (editable) ----
   body += `<h2>Scheduler</h2>
   <div class="card">
     <form method="POST" action="/config" class="config-form">
@@ -1245,7 +1257,6 @@ async function renderConfig(savedSection?: string): Promise<string> {
     </form>
   </div>`;
 
-  // ---- Events (editable) ----
   body += `<h2>Event Router</h2>
   <div class="card">
     <form method="POST" action="/config" class="config-form">
@@ -1273,7 +1284,6 @@ async function renderConfig(savedSection?: string): Promise<string> {
     </form>
   </div>`;
 
-  // ---- Narrative (editable) ----
   body += `<h2>Narrative</h2>
   <div class="card">
     <form method="POST" action="/config" class="config-form">
@@ -1305,7 +1315,6 @@ async function renderConfig(savedSection?: string): Promise<string> {
     </form>
   </div>`;
 
-  // ---- Advanced Configuration Note ----
   const scope2 = getActiveScope();
   const envPath = scope2
     ? `<code>${esc(scope2.configDir.replace(/\\/g, "/"))}/engine.env</code>`
@@ -1420,11 +1429,41 @@ async function handleConfigPost(
         break;
       }
       case "database": {
-        const connStr = body.connectionString ?? "";
-        updateDatabaseConnectionString(connStr);
+        const sentConnectionString = body.connectionString ?? "";
+        const resolvedConnectionString = sentConnectionString.trim().length > 0
+          ? sentConnectionString.trim()
+          : (config.database.connectionString || process.env.DATABASE_URL || "");
+
+        updateDatabaseConnectionString(resolvedConnectionString);
+        if (resolvedConnectionString) {
+          process.env.DATABASE_URL = resolvedConnectionString;
+        }
+
+        const scope = getActiveScope();
+        if (scope) {
+          const llmBase = getLlmConfig();
+          const dreamer = getDreamerLlmConfig();
+          const normalizer = getNormalizerLlmConfig();
+          const effectiveApiKey = llmBase.apiKey || process.env.DREAMGRAPH_LLM_API_KEY || "";
+          writeEngineEnv(scope.engineEnvPath, {
+            DREAMGRAPH_LLM_PROVIDER: llmBase.provider,
+            DREAMGRAPH_LLM_URL: llmBase.baseUrl,
+            DREAMGRAPH_LLM_API_KEY: effectiveApiKey,
+            DREAMGRAPH_LLM_DREAMER_MODEL: dreamer.model,
+            DREAMGRAPH_LLM_DREAMER_TEMPERATURE: String(dreamer.temperature),
+            DREAMGRAPH_LLM_DREAMER_MAX_TOKENS: String(dreamer.maxTokens),
+            DREAMGRAPH_LLM_NORMALIZER_MODEL: normalizer.model,
+            DREAMGRAPH_LLM_NORMALIZER_TEMPERATURE: String(normalizer.temperature),
+            DREAMGRAPH_LLM_NORMALIZER_MAX_TOKENS: String(normalizer.maxTokens),
+            DATABASE_URL: resolvedConnectionString,
+          });
+        } else {
+          logger.warn("Dashboard: No active scope — database connection string updated in memory only");
+        }
+
         // Reset pool so next DB query uses the new connection string
         await resetDbPool();
-        logger.info("Dashboard: Database connection string updated via web UI");
+        logger.info("Dashboard: Database connection string updated via web UI and persisted to engine.env");
         break;
       }
       default:
@@ -1473,6 +1512,38 @@ async function handleTestDbPost(
     "Cache-Control": "no-cache",
   });
   res.end(JSON.stringify(result));
+}
+
+async function handleClearDbPost(
+  res: ServerResponse,
+): Promise<void> {
+  updateDatabaseConnectionString("");
+  delete process.env.DATABASE_URL;
+
+  const scope = getActiveScope();
+  if (scope) {
+    const llmBase = getLlmConfig();
+    const dreamer = getDreamerLlmConfig();
+    const normalizer = getNormalizerLlmConfig();
+    const effectiveApiKey = getLlmConfig().apiKey || process.env.DREAMGRAPH_LLM_API_KEY || "";
+    writeEngineEnv(scope.engineEnvPath, {
+      DREAMGRAPH_LLM_PROVIDER: llmBase.provider,
+      DREAMGRAPH_LLM_URL: llmBase.baseUrl,
+      DREAMGRAPH_LLM_API_KEY: effectiveApiKey,
+      DREAMGRAPH_LLM_DREAMER_MODEL: dreamer.model,
+      DREAMGRAPH_LLM_DREAMER_TEMPERATURE: String(dreamer.temperature),
+      DREAMGRAPH_LLM_DREAMER_MAX_TOKENS: String(dreamer.maxTokens),
+      DREAMGRAPH_LLM_NORMALIZER_MODEL: normalizer.model,
+      DREAMGRAPH_LLM_NORMALIZER_TEMPERATURE: String(normalizer.temperature),
+      DREAMGRAPH_LLM_NORMALIZER_MAX_TOKENS: String(normalizer.maxTokens),
+      DATABASE_URL: "",
+    });
+  } else {
+    logger.warn("Dashboard: No active scope — database connection string cleared in memory only");
+  }
+
+  await resetDbPool();
+  json(res, 200, { ok: true });
 }
 
 /* ------------------------------------------------------------------ */
@@ -1858,13 +1929,16 @@ export async function handleDashboardRoute(
   res: ServerResponse,
   pathname: string,
 ): Promise<boolean> {
-  // POST handlers — apply changes, then redirect
   if (req.method === "POST" && pathname === "/config") {
     await handleConfigPost(req, res);
     return true;
   }
   if (req.method === "POST" && pathname === "/config/test-db") {
     await handleTestDbPost(req, res);
+    return true;
+  }
+  if (req.method === "POST" && pathname === "/config/clear-db") {
+    await handleClearDbPost(res);
     return true;
   }
   if (req.method === "POST" && pathname === "/schedules") {
@@ -1876,62 +1950,61 @@ export async function handleDashboardRoute(
     return true;
   }
 
-  // Only GET for all other dashboard pages
-  if (req.method !== "GET") return false;
-
-  let html: string;
-  try {
-    switch (pathname) {
-      case "/":
-        html = await renderIndex();
-        break;
-      case "/status":
-        html = await renderStatus();
-        break;
-      case "/schedules": {
-        const url = new URL(req.url ?? "/", "http://localhost");
-        const toast = url.searchParams.get("toast") ?? undefined;
-        html = await renderSchedules(toast);
-        break;
-      }
-      case "/config": {
-        const url = new URL(req.url ?? "/", "http://localhost");
-        const savedSection = url.searchParams.get("saved") ?? undefined;
-        html = await renderConfig(savedSection);
-        break;
-      }
-      case "/docs":
-        html = await renderDocs();
-        break;
-      case "/health":
-        html = await renderHealth();
-        break;
-      default:
-        // /docs/:slug — render a specific markdown file (supports section/slug paths)
-        if (pathname.startsWith("/docs/")) {
-          const raw = decodeURIComponent(pathname.slice(6));
-          // Strip trailing .md if present (links from rendered markdown already include it)
-          const slug = raw.replace(/\.md$/, "");
-          if (slug && !slug.includes("..")) {
-            html = await renderDocFile(`${slug}.md`);
-            break;
-          }
-        }
-        return false;
+  if (req.method === "GET" && (pathname === "/" || pathname === "")) {
+    html(res, 200, await renderIndex());
+    return true;
+  }
+  if (req.method === "GET" && pathname === "/status") {
+    html(res, 200, await renderStatus());
+    return true;
+  }
+  if (req.method === "GET" && pathname === "/health") {
+    const accept = String(req.headers.accept ?? "");
+    if (accept.includes("application/json")) {
+      const status = await engine.getStatus();
+      const sessions = _ctx.getSessionCount();
+      const llmCfg = getLlmConfig();
+      const ok = !!(status.llm?.available);
+      json(res, ok ? 200 : 503, {
+        ok,
+        state: status.current_state,
+        sessions,
+        llm: {
+          provider: llmCfg.provider,
+          dreamer_model: getDreamerLlmConfig().model,
+          normalizer_model: getNormalizerLlmConfig().model,
+          available: status.llm?.available ?? false,
+        },
+        instance: isInstanceMode() ? getActiveScope()?.uuid : null,
+      });
+    } else {
+      html(res, 200, await renderHealth());
     }
-  } catch (err) {
-    logger.error("Dashboard render error:", err);
-    res.writeHead(500, { "Content-Type": "text/html" });
-    res.end(shell("Error", `<h1>Internal Error</h1><pre>${esc(String(err))}</pre>`, ""));
+    return true;
+  }
+  if (req.method === "GET" && pathname === "/schedules") {
+    const url = new URL(req.url ?? "/schedules", `http://${req.headers.host ?? 'localhost'}`);
+    const toast = url.searchParams.get("toast") ?? undefined;
+    html(res, 200, await renderSchedules(toast));
+    return true;
+  }
+  if (req.method === "GET" && pathname === "/config") {
+    const url = new URL(req.url ?? "/config", `http://${req.headers.host ?? 'localhost'}`);
+    const saved = url.searchParams.get("saved") ?? undefined;
+    html(res, 200, await renderConfig(saved));
+    return true;
+  }
+  if (req.method === "GET" && pathname === "/docs") {
+    html(res, 200, await renderDocs());
+    return true;
+  }
+  if (req.method === "GET" && pathname.startsWith("/docs/")) {
+    const rel = decodeURIComponent(pathname.slice("/docs/".length));
+    html(res, 200, await renderDocFile(rel));
     return true;
   }
 
-  res.writeHead(200, {
-    "Content-Type": "text/html; charset=utf-8",
-    "Cache-Control": "no-cache",
-  });
-  res.end(html);
-  return true;
+  return false;
 }
 
 /* ------------------------------------------------------------------ */
