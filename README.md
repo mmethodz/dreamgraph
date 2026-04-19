@@ -425,7 +425,11 @@ Contributions welcome in: normalization strategies, graph modeling, tension heur
 
 DreamGraph is source-available under the DreamGraph License (BSL-based) — see [LICENSE](LICENSE).
 
-- Free for personal, research, and internal commercial use
-- Not allowed to offer as a competing service or platform
+- Personal use
+- Private study
+- Academic research
+- Security review
+- Non-Commercial Use
+- Evaluation Use
 
 Commercial licensing: mika.jussila@siteledger.io
