@@ -1,52 +1,218 @@
-# DreamGraph License v1.1
+# DreamGraph Source-Available Community License v2.0
 
-## 1. Introduction
+**Important:** This license is **source-available**. It is **not** an Open Source Initiative approved license and should not be described as "open source" or "FOSS" unless and until the Licensed Work, or a stated edition of it, is separately released under an OSI-approved license.
 
-This license governs the use of the DreamGraph software.
+Copyright (c) 2026 Mika Jussila and DreamGraph contributors, if any, as identified in the project records.
 
-## 2. Grant of License
+## 1. Purpose
 
-You are hereby granted a non-exclusive, worldwide, royalty-free license to use the DreamGraph software, including but not limited to its source code, binaries, and documentation.
+The purpose of this license is to let the public read, evaluate, test, study, and improve the DreamGraph software while protecting the Licensor's ability to commercially license the software for production, enterprise, managed-service, OEM, and competitive uses.
 
-## 3. Modifications
+## 2. Definitions
 
-You have the right to modify, merge, publish, or distribute copies of the DreamGraph software,
-provided that you include this license in all copies or substantial portions of the software.
+For purposes of this license:
 
-## 4. Attribution
+- **"Licensor"** means the copyright owner of the Licensed Work.
+- **"Licensed Work"** means the DreamGraph software made available under this license, including its source code, object code, build scripts, configuration templates, documentation, and related materials included in the same repository or distribution, but excluding third-party software that is separately licensed.
+- **"You"** or **"Your"** means the individual or legal entity exercising rights under this license.
+- **"Non-Commercial Use"** means use that is not primarily intended for or directed toward commercial advantage, monetary compensation, internal business operations, delivery of client services, or support of a revenue-generating activity.
+- **"Evaluation Use"** means internal testing, review, proof-of-concept work, security review, compatibility assessment, and similar evaluation activity performed solely to decide whether to obtain a commercial license. Evaluation Use does **not** include production use, use for client work, or use to operate any business workflow.
+- **"Production Use"** means any use of the Licensed Work with live, business, customer, operational, or revenue-related data, or in support of internal business operations, customer-facing systems, managed services, consulting services, or any real-world operational workload beyond purely experimental or evaluation activity.
+- **"Commercial Use"** means any Production Use, any use for a fee or other consideration, any use by or for a for-profit or government entity other than limited Evaluation Use, any use to support internal business operations, any use in client services, any managed or hosted offering, any OEM or embedded distribution, and any use in or for a Competitive Offering.
+- **"Competitive Offering"** means any product, service, library, model, platform, hosted offering, extension, agent, framework, runtime, managed service, developer tool, or commercial feature that substantially competes with, replaces, replicates, or exposes material functionality of the Licensed Work.
+- **"Managed Service"** means making the Licensed Work, or material functionality of it, available to third parties as a hosted, cloud, SaaS, API, service bureau, platform, or managed offering.
+- **"Derivative Work"** means any modified version of the Licensed Work or any work based on the Licensed Work to the extent protected by applicable copyright law.
+- **"Open Source Project"** means a project whose source code is publicly available under an OSI-approved license.
 
-You must give appropriate credit to the original authors of the DreamGraph software,
-provide a link to the license, and indicate if changes were made.
+## 3. Ownership and Reservation of Rights
 
-## 5. Warranty Disclaimer
+The Licensed Work is licensed, not sold. The Licensor retains all right, title, and interest in and to the Licensed Work, including all intellectual property rights, except for the limited rights expressly granted under this license.
 
-The software is provided "as is", without warranty of any kind, express or implied,
-including but not limited to the warranties of merchantability, fitness for a particular purpose,
-non-infringement or course of performance.
+No rights are granted by implication, estoppel, or otherwise.
 
-## 6. Limitation of Liability
+## 4. Limited License Grant
 
-In no event shall the authors or copyright holders be liable for any claim,
- damages or other liability, whether in an action of contract, tort or otherwise,
-arising from, out of or in connection with the software or the use or other dealings in the software.
+Subject to Your full compliance with this license, the Licensor grants You a limited, non-exclusive, non-transferable, non-sublicensable, revocable copyright license to:
 
-## 7. Acceptance
+1. download, access, and use the Licensed Work for:
+   - personal use;
+   - private study;
+   - academic research;
+   - security review;
+   - Non-Commercial Use; and
+   - Evaluation Use;
+2. modify the Licensed Work for those same permitted purposes;
+3. create Derivative Works for those same permitted purposes; and
+4. copy and redistribute the Licensed Work or Derivative Works **only** as expressly allowed by Section 6.
 
-By using the DreamGraph software, you accept and agree to be bound by the terms of this license.
+This license does **not** grant any right to engage in Commercial Use unless You first obtain a separate written commercial license from the Licensor.
 
-## 8. Termination
+## 5. Commercial Use Requires a Separate Commercial License
 
-This license will terminate automatically if you fail to comply with any of the terms and conditions
-of this license. Upon termination, you must cease all use of the software and destroy any copies in your possession.
+You must obtain a separate written commercial license from the Licensor before You, directly or indirectly:
 
-## 9. Governing Law
+1. engage in any Commercial Use;
+2. engage in any Production Use;
+3. use the Licensed Work within or for the benefit of a for-profit business, government body, public authority, or other organization, except for limited Evaluation Use;
+4. use the Licensed Work in connection with internal business operations, internal engineering workflows, internal automation, internal code analysis, internal architecture analysis, internal knowledge systems, or internal development platforms, except for limited Evaluation Use;
+5. provide the Licensed Work, or material functionality of it, as a Managed Service;
+6. sublicense, resell, lease, host, white-label, distribute for a fee, commercialize, or monetize the Licensed Work or any Derivative Work;
+7. embed or integrate the Licensed Work into a product or service that You sell, license, host, provide, or operate for third parties;
+8. use the Licensed Work to build, train, improve, support, or operate a Competitive Offering; or
+9. authorize a third party to do any of the foregoing on Your behalf.
 
-This license shall be governed by and construed in accordance with the laws of the jurisdiction in which the software was released.
+For clarity, a company may review and test the Licensed Work internally for Evaluation Use only. That permission does not authorize Production Use, operational deployment, customer use, revenue-generating use, or use beyond evaluation.
 
-## 10. Amendments
+## 6. Redistribution Conditions
 
-This license may only be amended or modified by a written agreement signed by the parties.
+You may redistribute the Licensed Work or Derivative Works **only** if all of the following are true:
 
-## 11. Contact
+1. the redistribution is solely for Non-Commercial Use or Evaluation Use;
+2. You provide a complete copy of this license with every copy of the Licensed Work or Derivative Work;
+3. You preserve all copyright, attribution, trademark, patent, and proprietary notices;
+4. You clearly state that the Licensed Work is licensed under the **DreamGraph Source-Available Community License v2.0**;
+5. You clearly identify any modifications You made, including the date of the modification if reasonably practicable;
+6. You do not charge any fee other than reasonable cost recovery for transfer or hosting of the copy itself;
+7. You do not imply endorsement by the Licensor; and
+8. You do not use the name "DreamGraph" or any DreamGraph logos except as allowed under Section 8.
 
-For any questions regarding this license, please contact the original authors.
+Any redistribution outside this Section requires a separate written commercial license.
+
+## 7. Restrictions
+
+You may not, and may not permit or assist any third party to:
+
+1. engage in any Commercial Use without a separate written commercial license;
+2. engage in any Production Use without a separate written commercial license;
+3. provide the Licensed Work as a Managed Service;
+4. use the Licensed Work, or any Derivative Work, in a Competitive Offering;
+5. remove, alter, obscure, or bypass licensing, attribution, proprietary, or security notices or technical restrictions;
+6. misrepresent the origin, authorship, authorship history, or provenance of the Licensed Work;
+7. represent that the Licensed Work is open source, FOSS, or available under any OSI-approved license unless the Licensor has expressly released that version or edition under such a license;
+8. use the Licensor's names, marks, logos, or branding except as expressly permitted under Section 8;
+9. transfer or assign Your rights under this license;
+10. sublicense the Licensed Work;
+11. use the Licensed Work in violation of applicable law; or
+12. use the Licensed Work to infringe, misappropriate, or violate the rights of the Licensor or any third party.
+
+## 8. Attribution and Trademarks
+
+### 8.1 Attribution
+If You redistribute the Licensed Work or any Derivative Work as permitted by this license, You must:
+
+- give appropriate credit to the Licensor;
+- include a link to the original repository or site designated by the Licensor, if one is provided;
+- include a copy of this license; and
+- clearly indicate that changes were made, if applicable.
+
+### 8.2 Trademark Reservation
+No trademark rights are granted under this license.
+
+You may use the word mark **DreamGraph** only in nominative fair use to truthfully describe the Licensed Work, such as "Fork of DreamGraph" or "Based on DreamGraph," provided You do not imply sponsorship, endorsement, certification, partnership, or affiliation.
+
+You may not use DreamGraph logos, icons, trade dress, or other branding assets without prior written permission from the Licensor.
+
+## 9. Patent License and Patent Retaliation
+
+Subject to Your compliance with this license, the Licensor grants You a limited, non-exclusive, non-transferable, non-sublicensable license under patent claims that the Licensor can license, but only to the extent necessarily infringed by Your permitted use of the unmodified Licensed Work under this license.
+
+This patent license does **not** extend to:
+
+- any Commercial Use;
+- any Production Use;
+- any Managed Service;
+- any Competitive Offering;
+- any Derivative Work except to the minimum extent required for Your permitted modifications under Section 4; or
+- combinations with other software, hardware, or data except to the minimum extent required to exercise Your permitted rights under this license.
+
+If You or Your affiliate assert, file, maintain, or voluntarily participate in a patent claim alleging that the Licensed Work, or any contribution to it, infringes a patent, then all rights granted to You under this license terminate immediately upon written notice from the Licensor.
+
+## 10. No Support; No Hosting Rights; No Service Levels
+
+This license does not obligate the Licensor to provide support, maintenance, updates, patches, hosting rights, service levels, warranties, indemnities, or any other services.
+
+## 11. Compliance and Records
+
+If the Licensor reasonably believes that Your use may exceed the scope of this license, the Licensor may request a written certification describing:
+
+- the nature of Your use;
+- whether the use is Non-Commercial Use, Evaluation Use, Production Use, or Commercial Use;
+- whether any third parties are accessing the Licensed Work or its functionality; and
+- whether any fees, revenue, or operational business processes are connected to the use.
+
+You agree to provide a truthful written response within fifteen (15) business days of such a request.
+
+## 12. Third-Party Components
+
+Third-party software included with or referenced by the Licensed Work may be subject to separate license terms. Those third-party terms govern the third-party software, not this license.
+
+## 13. Termination
+
+This license terminates automatically and immediately if You violate this license.
+
+If the Licensor determines that a violation is curable and provides written notice, the Licensor may, at its sole discretion, allow a cure period of up to fifteen (15) days. No cure period is required for:
+
+- Commercial Use without a commercial license;
+- Production Use without a commercial license;
+- use in a Managed Service;
+- use in a Competitive Offering;
+- trademark misuse;
+- bad-faith conduct; or
+- intentional removal of notices or technical protections.
+
+Upon termination, You must immediately:
+
+1. stop all use of the Licensed Work and any Derivative Works based on it;
+2. stop all distribution and access;
+3. destroy or permanently delete all copies in Your possession or control, except to the extent retention is required by law; and
+4. on request, certify compliance in writing.
+
+Sections 3, 5, 7, 8, 9, 10, 11, 13, 14, 15, 16, and 17 survive termination.
+
+## 14. Warranty Disclaimer
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THE LICENSED WORK IS PROVIDED **"AS IS"** AND **"AS AVAILABLE"**, WITH ALL FAULTS.
+
+THE LICENSOR DISCLAIMS ALL WARRANTIES, WHETHER EXPRESS, IMPLIED, STATUTORY, OR OTHERWISE, INCLUDING ANY WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, NON-INFRINGEMENT, ACCURACY, QUIET ENJOYMENT, OR THAT THE LICENSED WORK WILL BE UNINTERRUPTED, ERROR-FREE, SECURE, OR MEET YOUR REQUIREMENTS.
+
+## 15. Limitation of Liability
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT WILL THE LICENSOR OR ANY COPYRIGHT HOLDER BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, CONSEQUENTIAL, OR PUNITIVE DAMAGES, OR FOR ANY LOSS OF DATA, LOSS OF PROFITS, LOSS OF REVENUE, LOSS OF GOODWILL, BUSINESS INTERRUPTION, OR COST OF SUBSTITUTE GOODS OR SERVICES, ARISING OUT OF OR RELATED TO THE LICENSED WORK OR THIS LICENSE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THE TOTAL AGGREGATE LIABILITY OF THE LICENSOR AND ALL COPYRIGHT HOLDERS ARISING OUT OF OR RELATED TO THE LICENSED WORK OR THIS LICENSE WILL NOT EXCEED THE GREATER OF:
+
+1. ONE HUNDRED (100) EURO; OR
+2. THE AMOUNT YOU PAID THE LICENSOR FOR THE LICENSED WORK DURING THE TWELVE (12) MONTHS BEFORE THE EVENT GIVING RISE TO THE CLAIM.
+
+## 16. Governing Law and Venue
+
+This license is governed by the laws of Finland, excluding its conflict-of-laws rules.
+
+The courts of Helsinki, Finland have exclusive jurisdiction over any dispute arising out of or relating to this license or the Licensed Work, except where mandatory law requires otherwise.
+
+## 17. Entire Agreement; Amendments; Waiver; Severability
+
+This license is the entire agreement between You and the Licensor regarding the Licensed Work under this license.
+
+Any amendment, waiver, or additional permission must be in a written instrument signed by the Licensor.
+
+If any provision of this license is held unenforceable, that provision will be enforced to the maximum extent permitted and the remaining provisions will remain in full force and effect.
+
+A failure by the Licensor to enforce any provision is not a waiver of future enforcement.
+
+## 18. Commercial Licensing Contact
+
+For commercial licensing, OEM terms, managed-service rights, enterprise deployment rights, government deployment rights, strategic partnerships, or other permissions beyond this license, contact:
+
+**[INSERT LICENSING EMAIL OR URL]**
+
+## 19. Practical Interpretation Notes (Non-Binding)
+
+These examples are explanatory only. If there is any conflict between these examples and the legal terms above, the legal terms above control.
+
+- A student, researcher, or hobbyist may study, run, and modify DreamGraph for personal or academic purposes.
+- A company may evaluate DreamGraph internally before buying a commercial license, but may not use it to run production engineering workflows, customer systems, or internal business operations without a commercial license.
+- A consultant may not use DreamGraph to deliver services to paying clients without a commercial license.
+- A cloud provider may not offer DreamGraph or DreamGraph-powered functionality as a hosted service without a commercial license.
+- A software vendor may not embed DreamGraph into a commercial product, extension, or platform without a commercial license.
+- A competitor may not use DreamGraph to build or operate a competing coding agent, engineering runtime, IDE assistant, or managed service.
