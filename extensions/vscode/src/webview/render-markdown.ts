@@ -59,7 +59,7 @@ export function getRenderScript(): string {
        */
       window.renderMarkdown = function(content) {
         const raw = md.render(content);
-        const clean = DOMPurify.sanitize(raw, {
+        var clean = DOMPurify.sanitize(raw, {
           ALLOWED_TAGS: [
             'h1','h2','h3','h4','h5','h6',
             'p','br','strong','em','code',
@@ -67,9 +67,10 @@ export function getRenderScript(): string {
             'ul','ol','li',
             'table','thead','tbody','tr','th','td',
             'a','img','span','div','hr',
+            'details','summary','button',
           ],
-          ALLOWED_ATTR: ['href','src','alt','class','target','rel'],
-          ALLOW_DATA_ATTR: false,
+          ALLOWED_ATTR: ['href','src','alt','class','target','rel','open','title'],
+          ALLOW_DATA_ATTR: true,
           ADD_ATTR: ['target'],
         });
         return clean;

@@ -31,11 +31,11 @@ export function getEntityLinksScript(): string {
       var ENTITY_SCHEMES = ['feature', 'workflow', 'data-model', 'entity', 'adr', 'tension', 'edge', 'file'];
       var ENTITY_URI_RE = /\\b(feature|workflow|data-model|entity|adr|tension|edge|file):\\/\\/[\\w.\\/@→#%~_-]+/g;
 
-      // Bare file path pattern — matches paths like src/foo/bar.ts, ./components/App.tsx
-      // Requires at least one directory separator and a known code file extension.
+      // Bare file path pattern — matches paths like src/foo/bar.ts, ./components/App.tsx,
+      // or simple filenames like README.md, SplashPage.xaml.cs.
       // Group 1 captures leading whitespace/punctuation (preserved), group 2 captures the path.
       var FILE_EXT_LIST = 'ts|tsx|js|jsx|mjs|cjs|json|md|css|scss|html|xml|yaml|yml|py|cs|csproj|xaml|sln|java|kt|swift|go|rs|rb|sh|ps1|sql|vue|svelte';
-      var FILE_PATH_RE = new RegExp('(^|[\\\\s(\\\\[,])(\\\\.{0,2}/?[\\\\w._-]+/(?:[\\\\w._-]+/)*[\\\\w._-]+\\\\.(?:' + FILE_EXT_LIST + '))(?=[\\\\s)\\\\],.:;!?]|$)', 'gm');
+      var FILE_PATH_RE = new RegExp('(^|[\\\\s(\\\\[,])(\\\\.{0,2}/?(?:[\\\\w._-]+/)*[\\\\w._-]+\\\\.(?:' + FILE_EXT_LIST + ')(?:\\\\.(?:' + FILE_EXT_LIST + '))?)(?=[\\\\s)\\\\],.:;!?]|$)', 'gm');
 
       /**
        * Linkify entity URIs in an HTML string, skipping content inside

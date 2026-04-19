@@ -542,6 +542,78 @@ export function getStyles(): string {
       line-height: 1.5;
     }
 
+    /* ── Structured JSON envelope card ── */
+    .dg-envelope {
+      margin: 10px 0;
+      padding: 10px 14px;
+      border-radius: 8px;
+      border: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.35));
+      background: color-mix(in srgb, var(--vscode-editor-background, #1e1e1e) 82%, var(--vscode-foreground, #ccc));
+    }
+    .dg-envelope-title {
+      font-size: 0.68em;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--vscode-descriptionForeground, #888);
+      margin-bottom: 6px;
+    }
+    .dg-envelope-summary {
+      font-size: 0.95em;
+      line-height: 1.5;
+      margin-bottom: 8px;
+    }
+    .dg-envelope-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+    .dg-envelope-pill {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 10px;
+      border: 1px solid color-mix(in srgb, var(--vscode-foreground, #ccc) 22%, transparent);
+      background: color-mix(in srgb, var(--vscode-foreground, #ccc) 10%, transparent);
+      font-size: 0.78em;
+      color: var(--vscode-foreground, #ccc);
+    }
+    .dg-pill-complete  { border-color: color-mix(in srgb, #4ec9b0 40%, transparent); background: color-mix(in srgb, #4ec9b0 14%, transparent); color: #4ec9b0; }
+    .dg-pill-advancing { border-color: color-mix(in srgb, #3794ff 40%, transparent); background: color-mix(in srgb, #3794ff 14%, transparent); color: #3794ff; }
+    .dg-pill-stalled   { border-color: color-mix(in srgb, #d18616 40%, transparent); background: color-mix(in srgb, #d18616 14%, transparent); color: #d18616; }
+    .dg-pill-blocked   { border-color: color-mix(in srgb, #f14c4c 40%, transparent); background: color-mix(in srgb, #f14c4c 14%, transparent); color: #f14c4c; }
+    .dg-pill-low       { border-color: color-mix(in srgb, #4ec9b0 40%, transparent); background: color-mix(in srgb, #4ec9b0 14%, transparent); color: #4ec9b0; }
+    .dg-pill-medium    { border-color: color-mix(in srgb, #d18616 40%, transparent); background: color-mix(in srgb, #d18616 14%, transparent); color: #d18616; }
+    .dg-pill-high      { border-color: color-mix(in srgb, #f14c4c 40%, transparent); background: color-mix(in srgb, #f14c4c 14%, transparent); color: #f14c4c; }
+    .dg-envelope-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 10px;
+      padding-top: 8px;
+      border-top: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.2));
+    }
+    .dg-envelope-actions-label {
+      width: 100%;
+      font-size: 0.72em;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--vscode-descriptionForeground, #888);
+      margin-bottom: 2px;
+    }
+    .dg-envelope-action {
+      background: color-mix(in srgb, var(--vscode-button-background, #0e639c) 25%, transparent) !important;
+      border-color: color-mix(in srgb, var(--vscode-button-background, #0e639c) 55%, transparent) !important;
+      color: var(--vscode-button-foreground, #fff) !important;
+      font-weight: 500;
+      padding: 4px 14px;
+      border-radius: 14px;
+    }
+    .dg-envelope-action:hover {
+      background: color-mix(in srgb, var(--vscode-button-background, #0e639c) 45%, transparent) !important;
+    }
+
     /* ── Slice 4: verification + trace ── */
     .verdict-banner {
       display: flex;

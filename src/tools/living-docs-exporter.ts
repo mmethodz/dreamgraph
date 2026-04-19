@@ -580,7 +580,7 @@ async function genUIRegistry(
       idx += "| ID | Name | Status | Superseded By | Reason |\n";
       idx += "|----|------|--------|---------------|--------|\n";
       for (const el of deprecated) {
-        idx += `| [${el.id}](${slugify(el.id)}.md) | ${el.name} | ${getUIElementStatus(el)} | ${el.superseded_by ?? "-"} | ${(el.deprecation_reason ?? "-").replace(/\|/g, "\\|")} |\n`;
+        idx += `| [${el.id}](${slugify(el.id)}.md) | ${el.name} | ${getUIElementStatus(el)} | ${el.superseded_by ?? "-"} | ${(el.deprecation_reason ?? "-").replace(/\\/g, "\\\\").replace(/\|/g, "\\|")} |\n`;
       }
       idx += "\n";
     }

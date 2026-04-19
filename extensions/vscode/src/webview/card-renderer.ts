@@ -35,11 +35,11 @@ export function getCardRendererScript(): string {
       }
 
       function parseCardBody(src) {
-        const lines = String(src || '').replace(/\r\n/g, '\n').split('\n');
+        const lines = String(src || '').replace(/\\r\\n/g, '\\n').split('\\n');
         const out = { fields: {}, bodyLines: [] };
         let inBody = false;
         for (const line of lines) {
-          const match = !inBody ? line.match(/^([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$/) : null;
+          const match = !inBody ? line.match(/^([A-Za-z][A-Za-z0-9_-]*):\\s*(.*)$/) : null;
           if (match) {
             out.fields[match[1].toLowerCase()] = match[2];
             continue;
@@ -53,7 +53,7 @@ export function getCardRendererScript(): string {
             out.bodyLines.push(line);
           }
         }
-        out.body = out.bodyLines.join('\n').trim();
+        out.body = out.bodyLines.join('\\n').trim();
         return out;
       }
 
@@ -105,7 +105,7 @@ export function getCardRendererScript(): string {
           ? '<div class="dg-card-meta">' + normalized.meta.map(function(item) { return '<span class="dg-card-chip">' + escHtml(item) + '</span>'; }).join('') + '</div>'
           : '';
         const body = normalized.body
-          ? '<div class="dg-card-body">' + escHtml(normalized.body).replace(/\n/g, '<br>') + '</div>'
+          ? '<div class="dg-card-body">' + escHtml(normalized.body).replace(/\\n/g, '<br>') + '</div>'
           : '';
         return '<details class="dg-card dg-card-' + escAttr(type) + '" open>' +
           '<summary class="dg-card-summary">' +
@@ -116,6 +116,45 @@ export function getCardRendererScript(): string {
         '</details>';
       }
 
+      function renderEnvelope(env) {
+        var html = '<div class="dg-envelope">';
+        html += '<div class="dg-envelope-title">SUMMARY</div>';
+        html += '<div class="dg-envelope-summary">' + escHtml(env.summary) + '</div>';
+        html += '<div class="dg-envelope-meta">';
+        if (env.goal_status) {
+          html += '<span class="dg-envelope-pill dg-pill-' + escAttr(env.goal_status) + '">' + escHtml(env.goal_status) + '</span>';
+        }
+        if (env.progress_status) {
+          html += '<span class="dg-envelope-pill dg-pill-' + escAttr(env.progress_status) + '">' + escHtml(env.progress_status) + '</span>';
+        }
+        if (env.uncertainty) {
+          html += '<span class="dg-envelope-pill">' + escHtml('uncertainty: ' + env.uncertainty) + '</span>';
+        }
+        html += '</div>';
+
+        var steps = Array.isArray(env.recommended_next_steps) ? env.recommended_next_steps : [];
+        if (steps.length > 0) {
+          html += '<div class="dg-envelope-actions">';
+          html += '<div class="dg-envelope-actions-label">Suggested Actions</div>';
+          for (var i = 0; i < steps.length; i++) {
+            var step = steps[i];
+            var label = step.label || step.id || ('Step ' + (i + 1));
+            var title = step.rationale ? escAttr(step.rationale) : '';
+            html += '<button class="action-chip dg-envelope-action" data-action-id="' + escAttr(step.id || '') + '"' +
+                    (title ? ' title="' + title + '"' : '') + '>' +
+                    escHtml(label) + '</button>';
+          }
+          if (steps.length > 1) {
+            html += '<button class="action-chip action-chip-all dg-envelope-do-all">Do all</button>';
+          }
+          html += '</div>';
+        }
+        html += '</div>';
+        return html;
+      }
+
+      window.renderEnvelope = renderEnvelope;
+
       window.registerCardFencePlugin = function(md) {
         if (!md || typeof md.renderer !== 'object') return;
         const defaultFence = md.renderer.rules.fence || function(tokens, idx, options, env, self) {
@@ -125,7 +164,22 @@ export function getCardRendererScript(): string {
         md.renderer.rules.fence = function(tokens, idx, options, env, self) {
           const token = tokens[idx];
           const info = String(token.info || '').trim();
-          const lang = info.split(/\s+/)[0].toLowerCase();
+          const lang = info.split(/\\s+/)[0].toLowerCase();
+
+          // Handle structured JSON envelopes from DreamGraph
+          if (lang === 'json') {
+            try {
+              const parsed = JSON.parse(token.content || '');
+              if (parsed && typeof parsed === 'object' && typeof parsed.summary === 'string' &&
+                  ('goal_status' in parsed || 'recommended_next_steps' in parsed)) {
+                return renderEnvelope(parsed);
+              }
+            } catch (_e) {
+              // Not valid JSON or not an envelope — fall through
+            }
+            return defaultFence(tokens, idx, options, env, self);
+          }
+
           if (!/^(entity|adr|tension|insight)$/.test(lang)) {
             return defaultFence(tokens, idx, options, env, self);
           }
@@ -134,7 +188,7 @@ export function getCardRendererScript(): string {
             const parsed = parseCardBody(token.content || '');
             const fieldCount = Object.keys(parsed.fields || {}).length;
             const onlyId = fieldCount === 1 && Object.prototype.hasOwnProperty.call(parsed.fields, 'id');
-            if (onlyId && !parsed.body && !/\n$/.test(String(token.content || ''))) {
+            if (onlyId && !parsed.body && !/\\n$/.test(String(token.content || ''))) {
               return defaultFence(tokens, idx, options, env, self);
             }
             const normalized = normalizeCard(lang, parsed);

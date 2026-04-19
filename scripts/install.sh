@@ -220,38 +220,26 @@ if can_build_vscode_extension; then
         else
             ok "Extension built"
 
-            # Try VSIX package + code --install-extension (instant activation)
-            VSIX_INSTALLED=false
-            VSCE_BIN="$EXT_SOURCE/node_modules/.bin/vsce"
-            if [[ -x "$VSCE_BIN" ]]; then
-                ( cd "$EXT_SOURCE" && "$VSCE_BIN" package --no-dependencies 2>&1 ) | grep -E 'DONE|Packaged'
-                VSIX=$(ls -t "$EXT_SOURCE"/*.vsix 2>/dev/null | head -1)
-                if [[ -n "$VSIX" ]]; then
-                    code --install-extension "$VSIX" --force 2>&1
-                    if [[ $? -eq 0 ]]; then
-                        VSIX_INSTALLED=true
-                        ok "Extension installed via VSIX"
-                        # Install runtime deps into the deployed extension directory
-                        ( cd "$EXT_DEST" && npm install --omit=dev 2>/dev/null )
-                        ok "Runtime dependencies installed"
-                    fi
-                    rm -f "$VSIX"
-                fi
-            fi
+            # Always use direct file deploy (VSIX install silently skips same-version updates)
+            # Remove stale dist to avoid leftover files from older builds
+            [[ -d "$EXT_DEST/dist" ]] && rm -rf "$EXT_DEST/dist"
 
-            # Fallback: manual deploy to extensions directory
-            if [[ "$VSIX_INSTALLED" != "true" ]]; then
-                mkdir -p "$EXT_DEST/dist"
-                cp -r "$EXT_SOURCE/dist/"* "$EXT_DEST/dist/"
-                cp "$EXT_SOURCE/package.json" "$EXT_DEST/package.json"
-                # Re-install production-only deps for runtime
-                ( cd "$EXT_SOURCE" && npm install --omit=dev 2>/dev/null )
-                if [[ -d "$EXT_SOURCE/node_modules" ]]; then
-                    cp -r "$EXT_SOURCE/node_modules" "$EXT_DEST/node_modules"
-                fi
-                ok "Extension deployed to $EXT_DEST"
-                warn "Reload VS Code to activate the extension"
+            mkdir -p "$EXT_DEST/dist"
+            cp -r "$EXT_SOURCE/dist/"* "$EXT_DEST/dist/"
+            cp "$EXT_SOURCE/package.json" "$EXT_DEST/package.json"
+            # Copy media assets (activity bar icon, marketplace icon)
+            if [[ -d "$EXT_SOURCE/media" ]]; then
+                mkdir -p "$EXT_DEST/media"
+                cp -r "$EXT_SOURCE/media/"* "$EXT_DEST/media/"
             fi
+            # Copy README for marketplace / extension details
+            if [[ -f "$EXT_SOURCE/README.md" ]]; then
+                cp "$EXT_SOURCE/README.md" "$EXT_DEST/README.md"
+            fi
+            # Install runtime dependencies (@modelcontextprotocol/sdk)
+            ( cd "$EXT_DEST" && npm install --omit=dev 2>/dev/null )
+            ok "Extension deployed to $EXT_DEST"
+            warn "Reload VS Code to activate the extension"
         fi
     else
         warn "Extension source not found at $EXT_SOURCE -- skipping"

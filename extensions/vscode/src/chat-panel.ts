@@ -16,6 +16,7 @@ import type { ChatMemory, PersistedMessage } from './chat-memory';
 import { getStyles } from './webview/styles.js';
 import { getRenderScript } from './webview/render-markdown.js';
 import { getEntityLinksScript } from './webview/entity-links.js';
+import { getCardRendererScript } from './webview/card-renderer.js';
 import type { GraphSignalProvider } from './graph-signal';
 import {
   ANTHROPIC_MODELS,
@@ -55,6 +56,8 @@ interface ChatMessage {
   implicitEntityNotice?: string;
   pinned?: boolean;
   sourceMessageId?: string;
+  verdict?: VerdictBanner;
+  toolTrace?: ToolTraceEntry[];
 }
 
 interface MessageAction {
@@ -185,6 +188,8 @@ type WebviewToExtensionMessage =
   // Autonomy
   | { type: 'selectRecommendedAction'; actionId: string }
   | { type: 'doAllRecommendedActions' }
+  | { type: 'envelopeAction'; label: string }
+  | { type: 'envelopeDoAll'; labels: string[] }
   | { type: 'setAutonomyMode'; mode: string }
   | { type: 'resetAutonomy' };
 
@@ -405,11 +410,32 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
             if (scheme === 'file') {
               const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
               const absPath = path.isAbsolute(name) ? name : path.resolve(ws, name);
+              let opened = false;
               try {
                 const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(absPath));
                 await vscode.window.showTextDocument(doc, { preview: true });
+                opened = true;
               } catch {
-                void vscode.window.showWarningMessage(`Could not open file: ${name}`);
+                // Direct path failed — search workspace for the filename
+              }
+              if (!opened) {
+                const basename = name.includes('/') ? name : `**/${name}`;
+                const matches = await vscode.workspace.findFiles(basename, '**/node_modules/**', 5);
+                if (matches.length === 1) {
+                  const doc = await vscode.workspace.openTextDocument(matches[0]);
+                  await vscode.window.showTextDocument(doc, { preview: true });
+                } else if (matches.length > 1) {
+                  const picked = await vscode.window.showQuickPick(
+                    matches.map((m) => ({ label: vscode.workspace.asRelativePath(m), uri: m })),
+                    { placeHolder: `Multiple matches for ${name}` },
+                  );
+                  if (picked) {
+                    const doc = await vscode.workspace.openTextDocument(picked.uri);
+                    await vscode.window.showTextDocument(doc, { preview: true });
+                  }
+                } else {
+                  void vscode.window.showWarningMessage(`Could not open file: ${name}`);
+                }
               }
               break;
             }
@@ -456,6 +482,22 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
         }
         case 'doAllRecommendedActions': {
           await this._executeAllRecommendedActions();
+          break;
+        }
+        case 'envelopeAction': {
+          const envMsg = message as { type: 'envelopeAction'; label: string };
+          if (envMsg.label) await this.handleUserMessage(envMsg.label);
+          break;
+        }
+        case 'envelopeDoAll': {
+          const envAllMsg = message as { type: 'envelopeDoAll'; labels: string[] };
+          const labels = Array.isArray(envAllMsg.labels) ? envAllMsg.labels : [];
+          if (labels.length === 1) {
+            await this.handleUserMessage(labels[0]);
+          } else if (labels.length > 1) {
+            const combined = `Execute these steps sequentially:\n${labels.map((l, i) => `${i + 1}. ${l}`).join('\n')}`;
+            await this.handleUserMessage(combined);
+          }
           break;
         }
         case 'setAutonomyMode': {
@@ -514,6 +556,7 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       return;
     }
 
+    let assistantMessage: ChatMessage | undefined;
     try {
       this.streaming = true;
       this.streamingContent = '';
@@ -582,7 +625,7 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       const implicitEntityNotice = implicitEntities.names.length > 0
         ? this._formatImplicitEntityNotice(implicitEntities)
         : undefined;
-      const assistantMessage: ChatMessage = {
+      assistantMessage = {
         id: this._createMessageId(),
         role: 'assistant',
         content: finalContent.content,
@@ -590,6 +633,8 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
         implicitEntityNotice,
         timestamp: new Date().toISOString(),
         instanceId: this.currentInstanceId,
+        verdict: this._lastVerdict ?? undefined,
+        toolTrace: this._lastToolTrace.length > 0 ? [...this._lastToolTrace] : undefined,
       };
       this.messages.push(assistantMessage);
       await this.persistMessages();
@@ -610,6 +655,15 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       await this.postMessage({ type: 'addMessage', message: errMsg, actions: this._buildMessageActions(errMsg), roleMeta: this._roleMetaFor(errMsg), contextFooter: this._contextFooterFor(errMsg) });
     } finally {
       this.resetStreamState();
+      if (assistantMessage) {
+        void this.postMessage({
+          type: 'addMessage',
+          message: assistantMessage,
+          actions: this._buildMessageActions(assistantMessage),
+          roleMeta: this._roleMetaFor(assistantMessage),
+          contextFooter: this._contextFooterFor(assistantMessage),
+        });
+      }
     }
   }
 
@@ -1329,11 +1383,21 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
         implicitEntityNotice,
         timestamp: new Date().toISOString(),
         instanceId: this.currentInstanceId,
+        verdict: this._lastVerdict ?? undefined,
+        toolTrace: this._lastToolTrace.length > 0 ? [...this._lastToolTrace] : undefined,
       };
       this.messages.push(assistantMessage);
       await this.persistMessages();
 
       await this.postMessage({ type: 'stream-end', done: true });
+
+      if (this._lastVerdict) {
+        await this.postMessage({ type: 'verdict', verdict: this._lastVerdict });
+      }
+      if (this._lastToolTrace.length > 0) {
+        await this.postMessage({ type: 'toolTrace', calls: [...this._lastToolTrace] });
+      }
+
       await this.postMessage({
         type: 'addMessage',
         message: assistantMessage,
@@ -1341,13 +1405,6 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
         roleMeta: this._roleMetaFor(assistantMessage),
         contextFooter: this._contextFooterFor(assistantMessage),
       });
-
-      if (this._lastVerdict) {
-        void this.postMessage({ type: 'verdict', verdict: this._lastVerdict });
-      }
-      if (this._lastToolTrace.length > 0) {
-        void this.postMessage({ type: 'toolTrace', calls: [...this._lastToolTrace] });
-      }
 
       // Recursively analyze the new pass
       this._autonomyContinuing = false;
@@ -1755,6 +1812,7 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
     const domPurifyScript = this._domPurifySource
       ? `<script nonce="${nonce}">${this._domPurifySource}</script>`
       : '';
+    const cardRendererScript = `<script nonce="${nonce}">${getCardRendererScript()}</script>`;
     const renderScript = `<script nonce="${nonce}">${getRenderScript()}</script>`;
     const entityLinkScript = `<script nonce="${nonce}">${getEntityLinksScript()}</script>`;
     const webviewBundleScript = this._webviewBundleUri
@@ -1809,6 +1867,7 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
   ${markdownItScript}
   ${domPurifyScript}
   ${webviewBundleScript}
+  ${!this._webviewBundleUri ? cardRendererScript : ''}
   ${!this._webviewBundleUri ? renderScript : ''}
   ${!this._webviewBundleUri ? entityLinkScript : ''}
   <script nonce="${nonce}">
@@ -1991,7 +2050,7 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       if (verifyTimer) clearTimeout(verifyTimer);
       verifyTimer = setTimeout(() => {
         const names = Array.from(container.querySelectorAll('a.entity-link'))
-          .map((a) => a.getAttribute('data-entity-name') || a.textContent || '')
+          .map((a) => a.getAttribute('data-entity-name') || a.getAttribute('data-uri') || a.textContent || '')
           .map((s) => s.trim())
           .filter(Boolean)
           .slice(0, 100);
@@ -2005,11 +2064,64 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
     function applyEntityVerification(container, results) {
       if (!container) return;
       for (const link of container.querySelectorAll('a.entity-link')) {
-        const name = (link.getAttribute('data-entity-name') || link.textContent || '').trim();
+        const name = (link.getAttribute('data-entity-name') || link.getAttribute('data-uri') || link.textContent || '').trim();
         const status = results?.[name]?.status || 'unverified';
         link.classList.remove('entity-verified', 'entity-latent', 'entity-tension', 'entity-unverified');
         link.classList.add('entity-' + status);
       }
+    }
+
+    function schedulePostRenderWork(node, options) {
+      if (!node) return;
+      const opts = options || {};
+      requestAnimationFrame(() => {
+        if (typeof window.applyEntityLinks === 'function') {
+          window.applyEntityLinks(node);
+        }
+        // DOM-based envelope replacement: find <pre><code> containing JSON envelopes
+        if (typeof window.renderEnvelope === 'function') {
+          node.querySelectorAll('pre').forEach((pre) => {
+            const code = pre.querySelector('code');
+            if (!code) return;
+            try {
+              const text = code.textContent || '';
+              const obj = JSON.parse(text);
+              if (obj && typeof obj === 'object' && typeof obj.summary === 'string' &&
+                  ('goal_status' in obj || 'recommended_next_steps' in obj)) {
+                const wrapper = document.createElement('div');
+                wrapper.innerHTML = window.renderEnvelope(obj);
+                const rendered = wrapper.firstElementChild;
+                if (rendered) pre.replaceWith(rendered);
+              }
+            } catch(_e) {}
+          });
+        }
+        // Wire envelope action chip clicks
+        node.querySelectorAll('.dg-envelope-action:not([data-wired])').forEach((btn) => {
+          btn.setAttribute('data-wired', '1');
+          btn.addEventListener('click', () => {
+            const actionId = btn.getAttribute('data-action-id') || '';
+            const label = btn.textContent || actionId;
+            if (label) vscode.postMessage({ type: 'envelopeAction', label: label });
+          });
+        });
+        node.querySelectorAll('.dg-envelope-do-all:not([data-wired])').forEach((btn) => {
+          btn.setAttribute('data-wired', '1');
+          btn.addEventListener('click', () => {
+            const labels = [];
+            node.querySelectorAll('.dg-envelope-action').forEach((a) => {
+              if (a.textContent) labels.push(a.textContent);
+            });
+            if (labels.length > 0) vscode.postMessage({ type: 'envelopeDoAll', labels: labels });
+          });
+        });
+        if (opts.verify !== false) {
+          scheduleVerification(node);
+        }
+        if (opts.stickToBottom !== false) {
+          messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+      });
     }
 
     function renderAssistantBody(message) {
@@ -2021,46 +2133,53 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
         html = window.linkifyEntities(html) || html;
       }
       wrapper.innerHTML = html;
-      if (typeof window.applyEntityLinks === 'function') {
-        window.applyEntityLinks(wrapper);
-      }
       return wrapper;
     }
 
-    function createMessageNode(message, actions, roleMeta, contextFooter) {
+    function createMessageNode(message, actions, roleMeta, contextFooter, uiState) {
       const bubble = document.createElement('div');
       bubble.className = 'message ' + message.role;
       bubble.dataset.messageId = message.id || '';
       if (roleMeta) bubble.appendChild(createRoleHeader(roleMeta, message.id));
 
       if (message.role === 'assistant') {
+        const state = uiState || {};
         const body = renderAssistantBody(message);
         bubble.appendChild(body);
-        const verdict = renderVerdictBanner(lastVerdict);
+        const verdict = renderVerdictBanner(state.verdict || null);
         if (verdict) bubble.appendChild(verdict);
         const implicit = renderImplicitEntityNotice(message.implicitEntityNotice);
         if (implicit) bubble.appendChild(implicit);
-        const trace = renderToolTrace(lastToolTrace);
+        const trace = renderToolTrace(state.toolTrace || []);
         if (trace) bubble.appendChild(trace);
-        bubble.appendChild(renderProvenance(message, lastToolTrace));
+        bubble.appendChild(renderProvenance(message, state.toolTrace || []));
         const actionBlock = renderMessageActions(message, actions);
         if (actionBlock) bubble.appendChild(actionBlock);
         const footer = renderContextFooter(contextFooter);
         if (footer) bubble.appendChild(footer);
-        scheduleVerification(body);
+        schedulePostRenderWork(body);
       } else {
-        bubble.textContent = message.content || '';
+        if (roleMeta) {
+          const body = document.createElement('div');
+          body.className = 'message-text';
+          body.textContent = message.content || '';
+          bubble.appendChild(body);
+        } else {
+          bubble.textContent = message.content || '';
+        }
         const footer = renderContextFooter(contextFooter);
         if (footer) bubble.appendChild(footer);
       }
       return bubble;
     }
 
-    function addMessage(message, actions, roleMeta, contextFooter) {
+    function addMessage(message, actions, roleMeta, contextFooter, uiState) {
       setEmptyStateVisible(false);
-      const node = createMessageNode(message, actions, roleMeta, contextFooter);
+      const node = createMessageNode(message, actions, roleMeta, contextFooter, uiState);
       messagesEl.appendChild(node);
-      messagesEl.scrollTop = messagesEl.scrollHeight;
+      requestAnimationFrame(() => {
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+      });
     }
 
     function rerenderMessageActions(messageId) {
@@ -2071,7 +2190,7 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       const entry = messages.find((m) => m.message?.id === messageId);
       if (!entry) return;
       bubble.remove();
-      addMessage(entry.message, entry.actions, entry.roleMeta, entry.contextFooter);
+      addMessage(entry.message, entry.actions, entry.roleMeta, entry.contextFooter, entry.uiState || { toolTrace: [], verdict: null });
     }
 
     function startStreaming() {
@@ -2083,6 +2202,7 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       streamingMarkdownEl.className = 'markdown-body';
       streamingBubble.appendChild(streamingMarkdownEl);
       messagesEl.appendChild(streamingBubble);
+      schedulePostRenderWork(streamingMarkdownEl, { verify: false });
       sendBtn.style.display = 'none';
       stopBtn.style.display = 'inline-flex';
       thinkingEl.style.display = 'flex';
@@ -2097,13 +2217,11 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
         html = window.linkifyEntities(html) || html;
       }
       streamingMarkdownEl.innerHTML = html;
-      if (typeof window.applyEntityLinks === 'function') {
-        window.applyEntityLinks(streamingMarkdownEl);
-      }
-      messagesEl.scrollTop = messagesEl.scrollHeight;
+      schedulePostRenderWork(streamingMarkdownEl, { verify: false });
     }
 
     function endStreaming() {
+      if (streamingBubble) streamingBubble.remove();
       streamingBubble = null;
       streamingMarkdownEl = null;
       streamingRaw = '';
@@ -2127,6 +2245,10 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
           : message.role === 'user'
             ? 'Instance: ' + (message.instanceId || 'default')
             : 'Instance: ' + (message.instanceId || 'default') + ' • System message',
+        uiState: {
+          toolTrace: Array.isArray(message.toolTrace) ? message.toolTrace : [],
+          verdict: message.verdict || null,
+        },
       }));
       vscode.setState({ ...(vscode.getState() || {}), messages: entries });
       messagesEl.innerHTML = '';
@@ -2136,7 +2258,7 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       }
       setEmptyStateVisible(false);
       for (const entry of entries) {
-        addMessage(entry.message, entry.actions, entry.roleMeta, entry.contextFooter);
+        addMessage(entry.message, entry.actions, entry.roleMeta, entry.contextFooter, entry.uiState);
       }
     }
 
@@ -2237,15 +2359,17 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
           break;
         }
         case 'addMessage': {
+          const uiState = { toolTrace: [...lastToolTrace], verdict: lastVerdict };
           const state = vscode.getState() || {};
           const entries = [...(state.messages || []), {
             message: msg.message,
             actions: msg.actions || [],
             roleMeta: msg.roleMeta,
             contextFooter: msg.contextFooter,
+            uiState: uiState,
           }];
           vscode.setState({ ...state, messages: entries });
-          addMessage(msg.message, msg.actions || [], msg.roleMeta, msg.contextFooter);
+          addMessage(msg.message, msg.actions || [], msg.roleMeta, msg.contextFooter, uiState);
           break;
         }
         case 'messageActionState': {

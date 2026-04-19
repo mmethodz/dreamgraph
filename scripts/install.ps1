@@ -284,51 +284,33 @@ if (Test-CanBuildVsCodeExtension) {
             } else {
                 Write-Ok "Extension built"
 
-                # Try VSIX package + code --install-extension (instant activation)
-                $vsixInstalled = $false
-                $vscePath = Join-Path $ExtSourceDir "node_modules\.bin\vsce.cmd"
+                # Always use direct file deploy (VSIX install silently skips same-version updates)
                 $prevPref2 = $ErrorActionPreference
                 $ErrorActionPreference = "SilentlyContinue"
-                if (Test-Path $vscePath) {
-                    & $vscePath package --no-dependencies 2>&1 | Where-Object { $_ -match 'DONE|Packaged' } | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
-                    $vsix = Get-ChildItem -Filter "*.vsix" -Path $ExtSourceDir | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-                    if ($vsix) {
-                        & code --install-extension $vsix.FullName --force 2>&1 | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
-                        if ($LASTEXITCODE -eq 0) {
-                            $vsixInstalled = $true
-                            Write-Ok "Extension installed via VSIX"
-                            # Install runtime deps into the deployed extension directory
-                            Push-Location $ExtDest
-                            & npm install --omit=dev 2>&1 | Out-Null
-                            Pop-Location
-                            Write-Ok "Runtime dependencies installed"
-                        }
-                        Remove-Item $vsix.FullName -Force -ErrorAction SilentlyContinue
-                    }
+
+                # Remove stale dist to avoid leftover files from older builds
+                if (Test-Path "$ExtDest\dist") {
+                    Remove-Item -Recurse -Force "$ExtDest\dist"
                 }
 
-                # Fallback: manual deploy to extensions directory
-                if (-not $vsixInstalled) {
-                    New-Item -ItemType Directory -Path "$ExtDest\dist" -Force | Out-Null
-                    Copy-Item -Path "dist\*" -Destination "$ExtDest\dist\" -Recurse -Force
-                    Copy-Item -Path "package.json" -Destination "$ExtDest\package.json" -Force
-                    # Copy media assets (activity bar icon, marketplace icon)
-                    if (Test-Path "media") {
-                        New-Item -ItemType Directory -Path "$ExtDest\media" -Force | Out-Null
-                        Copy-Item -Path "media\*" -Destination "$ExtDest\media\" -Recurse -Force
-                    }
-                    # Copy README for marketplace / extension details
-                    if (Test-Path "README.md") {
-                        Copy-Item -Path "README.md" -Destination "$ExtDest\README.md" -Force
-                    }
-                    # Copy node_modules for runtime dependencies (@modelcontextprotocol/sdk)
-                    & npm install --omit=dev 2>&1 | Out-Null
-                    if (Test-Path "node_modules") {
-                        Copy-Item -Path "node_modules" -Destination "$ExtDest\node_modules" -Recurse -Force
-                    }
-                    Write-Ok "Extension deployed to $ExtDest"
-                    Write-Warn "Reload VS Code (Ctrl+Shift+P > Reload Window) to activate"
+                New-Item -ItemType Directory -Path "$ExtDest\dist" -Force | Out-Null
+                Copy-Item -Path "dist\*" -Destination "$ExtDest\dist\" -Recurse -Force
+                Copy-Item -Path "package.json" -Destination "$ExtDest\package.json" -Force
+                # Copy media assets (activity bar icon, marketplace icon)
+                if (Test-Path "media") {
+                    New-Item -ItemType Directory -Path "$ExtDest\media" -Force | Out-Null
+                    Copy-Item -Path "media\*" -Destination "$ExtDest\media\" -Recurse -Force
                 }
+                # Copy README for marketplace / extension details
+                if (Test-Path "README.md") {
+                    Copy-Item -Path "README.md" -Destination "$ExtDest\README.md" -Force
+                }
+                # Install runtime dependencies (@modelcontextprotocol/sdk)
+                Push-Location $ExtDest
+                & npm install --omit=dev 2>&1 | Out-Null
+                Pop-Location
+                Write-Ok "Extension deployed to $ExtDest"
+                Write-Warn "Reload VS Code (Ctrl+Shift+P > Reload Window) to activate"
                 $ErrorActionPreference = $prevPref2
             }
         } finally {
