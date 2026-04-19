@@ -324,8 +324,8 @@ export class ArchitectLlm implements vscode.Disposable {
     return content.map((block) => {
       if (block.type === "text") return { type: "text", text: block.text };
       return {
-        type: "image_url",
-        image_url: { url: `data:${block.mimeType};base64,${block.dataBase64}` },
+        type: "input_image",
+        image_url: `data:${block.mimeType};base64,${block.dataBase64}`,
       };
     });
   }
