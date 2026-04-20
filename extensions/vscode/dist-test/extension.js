@@ -176,6 +176,9 @@ function activate(context) {
         ["dreamgraph.showGraphSignal", () => (0, commands_js_1.showGraphSignalCommand)(services)],
         // Files Changed
         ["dreamgraph.clearChangedFiles", () => changedFiles.clear()],
+        // Autonomy
+        ["dreamgraph.setAutonomyMode", () => (0, commands_js_1.setAutonomyModeCommand)(services)],
+        ["dreamgraph.resetAutonomy", () => (0, commands_js_1.resetAutonomyCommand)(services)],
     ];
     for (const [id, handler] of commands) {
         context.subscriptions.push(vscode.commands.registerCommand(id, handler));
@@ -200,6 +203,10 @@ function activate(context) {
                 mcpClient.updateBaseUrl(`http://${host}:${currentPort}`);
                 dashboardView.updateDaemonUrl(host, currentPort);
             }
+        }
+        if (e.affectsConfiguration("dreamgraph.architect.autonomyMode") ||
+            e.affectsConfiguration("dreamgraph.architect.autoPassBudget")) {
+            chatPanel.applyAutonomySettings();
         }
     }));
     // ---- Auto-connect on activation ----

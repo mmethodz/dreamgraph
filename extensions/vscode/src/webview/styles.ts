@@ -708,6 +708,56 @@ export function getStyles(): string {
       color: var(--vscode-descriptionForeground);
       border-top: 1px dashed var(--vscode-panel-border);
       padding-top: 6px;
+      display: flex;
+      align-items: baseline;
+      flex-wrap: wrap;
+      gap: 5px;
+    }
+
+    /* ── Anchor migration state badges ── */
+    .anchor-state-badge {
+      display: inline-block;
+      padding: 1px 7px;
+      border-radius: 10px;
+      font-size: 0.9em;
+      font-weight: 500;
+      border: 1px solid transparent;
+      white-space: nowrap;
+      vertical-align: baseline;
+    }
+    /* promoted — graph identity confirmed, success tint */
+    .anchor-state-promoted {
+      color: #4ec9b0;
+      background: color-mix(in srgb, #4ec9b0 12%, transparent);
+      border-color: color-mix(in srgb, #4ec9b0 35%, transparent);
+    }
+    /* rebound — symbol moved, still trackable, neutral/info */
+    .anchor-state-rebound {
+      color: #3794ff;
+      background: color-mix(in srgb, #3794ff 12%, transparent);
+      border-color: color-mix(in srgb, #3794ff 35%, transparent);
+    }
+    /* drifted — approximate match, warn */
+    .anchor-state-drifted {
+      color: #d18616;
+      background: color-mix(in srgb, #d18616 12%, transparent);
+      border-color: color-mix(in srgb, #d18616 35%, transparent);
+    }
+    /* archived — no match found, muted */
+    .anchor-state-archived {
+      color: var(--vscode-descriptionForeground);
+      background: color-mix(in srgb, var(--vscode-descriptionForeground) 10%, transparent);
+      border-color: color-mix(in srgb, var(--vscode-descriptionForeground) 25%, transparent);
+      text-decoration: line-through;
+      opacity: 0.75;
+    }
+    /* native / canonical — normal in-session anchor, subtle */
+    .anchor-state-native,
+    .anchor-state-canonical {
+      color: var(--vscode-descriptionForeground);
+      background: transparent;
+      border-color: color-mix(in srgb, var(--vscode-descriptionForeground) 18%, transparent);
+      opacity: 0.85;
     }
     .implicit-entity-notice {
       margin-top: 10px;

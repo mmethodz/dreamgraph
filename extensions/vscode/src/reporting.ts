@@ -51,6 +51,7 @@ export function getReportingInstructionBlock(): string {
     `- **Trace visibility:** ${trace}`,
     '- Use layered verbosity: compress the same grounded result rather than becoming more rambling.',
     '- Structure responses using these sections when applicable: Executive Summary, Findings, Graph Updates, Evidence, Uncertainty, Recommended Next Step, Raw Trace.',
+    '- In Evidence sections, prefer semantic anchors (entity names, workflow steps, ADR ids, file paths, stable excerpts). If line numbers are shown, mark them as approximate drift-prone hints rather than canonical references.',
     mode === 'quiet'
       ? '- Quiet mode: show only what started, what finished, key result counts, blocking failures, the visible pass counters when active, and the next suggested step.'
       : mode === 'standard'

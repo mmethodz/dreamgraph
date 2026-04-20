@@ -389,42 +389,13 @@ export async function stopDaemonCommand(
 /*  Command: Inspect Context (§3.6)                                   */
 /* ------------------------------------------------------------------ */
 
-export function inspectContextCommand(svc: CommandServices): void {
-  // Build a snapshot of the current editor context envelope
-  const editor = vscode.window.activeTextEditor;
-  const workspaceRoot = getWorkspaceFolderPath() ?? "";
-  const instance = svc.getInstance();
-
-  const envelope = {
-    workspaceRoot,
-    instanceId: instance?.uuid ?? null,
-    activeFile: editor
-      ? {
-          path: vscode.workspace.asRelativePath(editor.document.uri),
-          languageId: editor.document.languageId,
-          lineCount: editor.document.lineCount,
-          cursorLine: editor.selection.active.line + 1,
-          cursorColumn: editor.selection.active.character + 1,
-          selection: editor.selection.isEmpty
-            ? null
-            : {
-                startLine: editor.selection.start.line + 1,
-                endLine: editor.selection.end.line + 1,
-                text: editor.document.getText(editor.selection),
-              },
-        }
-      : null,
-    visibleFiles: vscode.window.visibleTextEditors.map((e) =>
-      vscode.workspace.asRelativePath(e.document.uri),
-    ),
-    changedFiles: vscode.workspace.textDocuments
-      .filter((d) => d.isDirty)
-      .map((d) => vscode.workspace.asRelativePath(d.uri)),
-    pinnedFiles: [] as string[], // M2+: user-pinned files
-    graphContext: null,
-    intentMode: "manual" as const,
-    intentConfidence: 1.0,
-  };
+export async function inspectContextCommand(
+  svc: CommandServices,
+): Promise<void> {
+  const envelope = await svc.contextBuilder.buildEnvelope(
+    undefined,
+    "inspectContext",
+  );
 
   svc.contextInspector.logEnvelope(envelope);
   svc.contextInspector.showContextChannel();
@@ -515,22 +486,16 @@ export async function explainFileCommand(svc: CommandServices): Promise<void> {
       cancellable: false,
     },
     async () => {
-      // Build context envelope (mode: active_file via command source)
       const envelope = await svc.contextBuilder.buildEnvelope(
         undefined,
         "explainFile",
       );
-      const fileContent = svc.contextBuilder.readActiveFileContent();
+      const packet = await svc.contextBuilder.buildReasoningPacket(envelope, {
+        commandSource: "explainFile",
+      });
+      const renderedPacket = svc.contextBuilder.renderReasoningPacket(packet);
 
-      // Assemble context block with token budget
-      const contextBlock = svc.contextBuilder.assembleContextBlock(
-        envelope,
-        fileContent,
-        new Map(),
-      );
-
-      // Assemble prompt
-      const { system } = assemblePrompt("explain", envelope, contextBlock.text);
+      const { system } = assemblePrompt("explain", envelope, renderedPacket.text);
 
       const filePath = vscode.workspace.asRelativePath(editor.document.uri);
       const messages: ArchitectMessage[] = [
@@ -544,7 +509,6 @@ export async function explainFileCommand(svc: CommandServices): Promise<void> {
       try {
         const response = await svc.architectLlm.call(messages);
 
-        // Output destination rule: if chat is visible, render there; otherwise output channel
         if (svc.chatPanel.isVisible) {
           svc.chatPanel.addExternalMessage(
             "user",
@@ -553,7 +517,7 @@ export async function explainFileCommand(svc: CommandServices): Promise<void> {
           svc.chatPanel.addExternalMessage("assistant", response.content);
         } else {
           svc.contextInspector.showRawOutput(
-            `--- Explain: ${filePath} ---\n\n${response.content}\n\n[${response.promptTokens} prompt + ${response.completionTokens} completion tokens, ${response.durationMs}ms]`,
+            `--- Explain: ${filePath} ---\n\n${response.content}\n\n[packet ${packet.tokenUsage.used}/${packet.tokenUsage.budget} tokens, ${response.promptTokens} prompt + ${response.completionTokens} completion tokens, ${response.durationMs}ms]`,
           );
         }
       } catch (err) {
@@ -592,22 +556,16 @@ export async function checkAdrComplianceCommand(
       cancellable: false,
     },
     async () => {
-      // Build context envelope
       const envelope = await svc.contextBuilder.buildEnvelope(
         undefined,
         "checkAdrCompliance",
       );
-      const fileContent = svc.contextBuilder.readActiveFileContent();
+      const packet = await svc.contextBuilder.buildReasoningPacket(envelope, {
+        commandSource: "checkAdrCompliance",
+      });
+      const renderedPacket = svc.contextBuilder.renderReasoningPacket(packet);
 
-      // Assemble context block
-      const contextBlock = svc.contextBuilder.assembleContextBlock(
-        envelope,
-        fileContent,
-        new Map(),
-      );
-
-      // Assemble prompt with validate overlay
-      const { system } = assemblePrompt("validate", envelope, contextBlock.text);
+      const { system } = assemblePrompt("validate", envelope, renderedPacket.text);
 
       const filePath = vscode.workspace.asRelativePath(editor.document.uri);
       const messages: ArchitectMessage[] = [
@@ -621,7 +579,6 @@ export async function checkAdrComplianceCommand(
       try {
         const response = await svc.architectLlm.call(messages);
 
-        // Output destination rule
         if (svc.chatPanel.isVisible) {
           svc.chatPanel.addExternalMessage(
             "user",
@@ -630,7 +587,7 @@ export async function checkAdrComplianceCommand(
           svc.chatPanel.addExternalMessage("assistant", response.content);
         } else {
           svc.contextInspector.showRawOutput(
-            `--- ADR Compliance: ${filePath} ---\n\n${response.content}\n\n[${response.promptTokens} prompt + ${response.completionTokens} completion tokens, ${response.durationMs}ms]`,
+            `--- ADR Compliance: ${filePath} ---\n\n${response.content}\n\n[packet ${packet.tokenUsage.used}/${packet.tokenUsage.budget} tokens, ${response.promptTokens} prompt + ${response.completionTokens} completion tokens, ${response.durationMs}ms]`,
           );
         }
       } catch (err) {

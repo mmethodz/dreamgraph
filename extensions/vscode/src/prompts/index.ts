@@ -59,12 +59,15 @@ function formatContextBlock(envelope: EditorContextEnvelope): string {
   // Active file
   if (envelope.activeFile) {
     const af = envelope.activeFile;
+    const locationHint = af.selection?.summary
+      ? `selection anchor: ${af.selection.summary}`
+      : `cursor anchor near the current focus point (approximate only; may drift)`;
     parts.push(
-      `- **Active file:** \`${af.path}\` (${af.languageId}, ${af.lineCount} lines, cursor at L${af.cursorLine}:C${af.cursorColumn})`,
+      `- **Active file:** \`${af.path}\` (${af.languageId}, ${af.lineCount} lines, ${locationHint})`,
     );
     if (af.selection) {
       parts.push(
-        `- **Selection:** lines ${af.selection.startLine}–${af.selection.endLine}`,
+        `- **Selection anchor:** ${af.selection.summary}`,
       );
     }
   }
@@ -99,11 +102,6 @@ function formatContextBlock(envelope: EditorContextEnvelope): string {
     if (gc.apiSurface) {
       parts.push(`- **API surface:** available`);
     }
-
-    // ---- Deep Graph Signals ----
-    // These are the knowledge edges that make DreamGraph superior to generic AI.
-    // The Architect starts the conversation already knowing the tensions,
-    // insights, and causal relationships around the current code.
 
     if (gc.tensions && gc.tensions.length > 0) {
       parts.push("");

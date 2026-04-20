@@ -64,7 +64,13 @@ class ContextInspector {
         const ts = new Date().toISOString();
         this._contextChannel.appendLine(`[${ts}] Intent: ${envelope.intentMode} (confidence: ${envelope.intentConfidence.toFixed(2)})`);
         if (envelope.activeFile) {
-            this._contextChannel.appendLine(`[${ts}] Active file: ${envelope.activeFile.path} (${envelope.activeFile.languageId}, line ${envelope.activeFile.cursorLine})`);
+            const anchorHint = envelope.activeFile.selection?.summary
+                ? `selection anchor: ${envelope.activeFile.selection.summary}`
+                : `cursor anchor near the current focus point in ${envelope.activeFile.path} (approximate only; may drift)`;
+            this._contextChannel.appendLine(`[${ts}] Active file: ${envelope.activeFile.path} (${envelope.activeFile.languageId}; ${anchorHint})`);
+            if (envelope.activeFile.selection?.summary) {
+                this._contextChannel.appendLine(`[${ts}] Selection anchor: ${envelope.activeFile.selection.summary}`);
+            }
         }
         else {
             this._contextChannel.appendLine(`[${ts}] Active file: (none)`);

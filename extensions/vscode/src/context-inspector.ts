@@ -47,9 +47,17 @@ export class ContextInspector implements vscode.Disposable {
     );
 
     if (envelope.activeFile) {
+      const anchorHint = envelope.activeFile.selection?.summary
+        ? `selection anchor: ${envelope.activeFile.selection.summary}`
+        : `cursor anchor near the current focus point in ${envelope.activeFile.path} (approximate only; may drift)`;
       this._contextChannel.appendLine(
-        `[${ts}] Active file: ${envelope.activeFile.path} (${envelope.activeFile.languageId}, line ${envelope.activeFile.cursorLine})`,
+        `[${ts}] Active file: ${envelope.activeFile.path} (${envelope.activeFile.languageId}; ${anchorHint})`,
       );
+      if (envelope.activeFile.selection?.summary) {
+        this._contextChannel.appendLine(
+          `[${ts}] Selection anchor: ${envelope.activeFile.selection.summary}`,
+        );
+      }
     } else {
       this._contextChannel.appendLine(`[${ts}] Active file: (none)`);
     }

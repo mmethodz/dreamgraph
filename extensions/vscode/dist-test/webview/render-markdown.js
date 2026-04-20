@@ -30,6 +30,10 @@ function getRenderScript() {
         typographer: false,
       });
 
+      if (typeof window.registerCardFencePlugin === 'function') {
+        window.registerCardFencePlugin(md);
+      }
+
       // Override link_open to add target="_blank" and rel="noopener noreferrer"
       const defaultLinkOpen = md.renderer.rules.link_open || function(tokens, idx, options, _env, self) {
         return self.renderToken(tokens, idx, options);
@@ -57,7 +61,7 @@ function getRenderScript() {
        */
       window.renderMarkdown = function(content) {
         const raw = md.render(content);
-        const clean = DOMPurify.sanitize(raw, {
+        var clean = DOMPurify.sanitize(raw, {
           ALLOWED_TAGS: [
             'h1','h2','h3','h4','h5','h6',
             'p','br','strong','em','code',
@@ -65,9 +69,10 @@ function getRenderScript() {
             'ul','ol','li',
             'table','thead','tbody','tr','th','td',
             'a','img','span','div','hr',
+            'details','summary','button',
           ],
-          ALLOWED_ATTR: ['href','src','alt','class','target','rel'],
-          ALLOW_DATA_ATTR: false,
+          ALLOWED_ATTR: ['href','src','alt','class','target','rel','open','title'],
+          ALLOW_DATA_ATTR: true,
           ADD_ATTR: ['target'],
         });
         return clean;

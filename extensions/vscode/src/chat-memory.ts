@@ -14,6 +14,7 @@ export interface PersistedMessage {
   timestamp: string;
   verdict?: { level: string; summary: string };
   toolTrace?: { tool: string; argsSummary: string; filesAffected: string[]; durationMs: number; status: string }[];
+  anchor?: import('./types.js').SemanticAnchor;
 }
 
 interface PersistedChatState {

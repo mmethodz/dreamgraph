@@ -1,7 +1,7 @@
 "use strict";
 /**
  * Prompt Assembler — composes the Architect system prompt from
- * core identity + task overlay + context block.
+ * core identity + task overlay + context block + autonomy/reporting contracts.
  *
  * @see TDD §7.5 (Prompt Architecture), §7.4 (Chat Flow)
  */
@@ -13,6 +13,9 @@ const architect_explain_js_1 = require("./architect-explain.js");
 const architect_validate_js_1 = require("./architect-validate.js");
 const architect_patch_js_1 = require("./architect-patch.js");
 const architect_suggest_js_1 = require("./architect-suggest.js");
+const autonomy_js_1 = require("../autonomy.js");
+const autonomy_contract_js_1 = require("../autonomy-contract.js");
+const reporting_js_1 = require("../reporting.js");
 /* ------------------------------------------------------------------ */
 /*  Overlay selection                                                 */
 /* ------------------------------------------------------------------ */
@@ -41,9 +44,12 @@ function formatContextBlock(envelope) {
     // Active file
     if (envelope.activeFile) {
         const af = envelope.activeFile;
-        parts.push(`- **Active file:** \`${af.path}\` (${af.languageId}, ${af.lineCount} lines, cursor at L${af.cursorLine}:C${af.cursorColumn})`);
+        const locationHint = af.selection?.summary
+            ? `selection anchor: ${af.selection.summary}`
+            : `cursor anchor near the current focus point (approximate only; may drift)`;
+        parts.push(`- **Active file:** \`${af.path}\` (${af.languageId}, ${af.lineCount} lines, ${locationHint})`);
         if (af.selection) {
-            parts.push(`- **Selection:** lines ${af.selection.startLine}–${af.selection.endLine}`);
+            parts.push(`- **Selection anchor:** ${af.selection.summary}`);
         }
     }
     // Visible & changed files
@@ -74,10 +80,6 @@ function formatContextBlock(envelope) {
         if (gc.apiSurface) {
             parts.push(`- **API surface:** available`);
         }
-        // ---- Deep Graph Signals ----
-        // These are the knowledge edges that make DreamGraph superior to generic AI.
-        // The Architect starts the conversation already knowing the tensions,
-        // insights, and causal relationships around the current code.
         if (gc.tensions && gc.tensions.length > 0) {
             parts.push("");
             parts.push("### Active Tensions");
@@ -132,8 +134,10 @@ function formatContextBlock(envelope) {
  * @param envelope - Editor context envelope (may be null for config-only calls)
  * @param contextText - Optional assembled context text (from ContextBuilder.assembleContextBlock)
  * @param additionalInstructions - Optional additional instructions appended after the context
+ * @param autonomyState - Optional autonomy state to inject policy/contract blocks
+ * @param provider - Optional LLM provider name to inject provider-specific discipline
  */
-function assemblePrompt(task, envelope, contextText, additionalInstructions) {
+function assemblePrompt(task, envelope, contextText, additionalInstructions, autonomyState, provider) {
     const parts = [architect_core_js_1.ARCHITECT_CORE];
     // Task overlay
     const overlay = TASK_OVERLAYS[task];
@@ -147,6 +151,20 @@ function assemblePrompt(task, envelope, contextText, additionalInstructions) {
     // Assembled context text (file content, ADRs, etc.)
     if (contextText) {
         parts.push(contextText);
+    }
+    // Reporting contract (always injected so model knows verbosity expectations)
+    parts.push((0, reporting_js_1.getReportingInstructionBlock)());
+    // Autonomy contract (injected when autonomy is enabled)
+    const autonomyBlock = (0, autonomy_js_1.getAutonomyInstructionBlock)(autonomyState);
+    if (autonomyBlock) {
+        parts.push(autonomyBlock);
+        parts.push((0, autonomy_contract_js_1.getStructuredResponseContractBlock)());
+    }
+    // Provider-specific discipline — Anthropic models (Claude) tend to execute
+    // many tool calls without pausing, which corrupts code on large tasks.
+    // This block enforces a surgical, slice-based work pattern.
+    if (provider === 'anthropic') {
+        parts.push(getAnthropicDisciplineBlock());
     }
     // Additional instructions
     if (additionalInstructions) {
@@ -185,5 +203,41 @@ function inferTask(intentMode, commandSource) {
         default:
             return "chat";
     }
+}
+/* ------------------------------------------------------------------ */
+/*  Anthropic Pacing Discipline                                       */
+/* ------------------------------------------------------------------ */
+/**
+ * Returns an instruction block that constrains Anthropic (Claude) models
+ * to work in short, surgical passes instead of attempting to rewrite
+ * entire files or fire many tool calls without pausing.
+ *
+ * This prevents two classes of corruption:
+ * 1. Racing modify_entity calls on the same file (now also guarded by mutex)
+ * 2. Whole-class replacement that drops unrelated members
+ */
+function getAnthropicDisciplineBlock() {
+    return `## Tool Discipline (CRITICAL — enforced by the system)
+
+### Surgical Edits — Never Replace Entire Large Entities
+- When editing a class, interface, or module with many members, target the SPECIFIC member using \`parentEntity\`.
+  Example: \`{ "entity": "SaveCommand", "parentEntity": "EntryViewModel" }\`
+- NEVER regenerate an entire class just to change one method. The tool will REJECT replacements that drop unrelated members.
+- If you need to change multiple members in the same class, make separate \`modify_entity\` calls for each member.
+
+### One File At A Time — Breathe Between Passes
+- Complete all edits to one file before moving to the next.
+- After modifying a file, call \`run_command\` to verify it compiles before editing the next file.
+- Do NOT fire multiple \`modify_entity\` calls targeting the same file in parallel — they are serialised by a mutex and the second call will see stale symbol positions if the first changed line counts.
+
+### Slice-Based Work Pattern
+- Break large tasks into slices of 1–3 files each.
+- After each slice: verify (build/test), report what changed, then assess next steps.
+- If a slice fails verification, fix it before starting the next slice.
+- Present recommended next actions after each slice so the user can steer.
+
+### Read Before Write
+- Always \`read_local_file\` the target entity/section BEFORE calling \`modify_entity\`.
+- This ensures you have the current content, not a cached/stale version from earlier in the conversation.`;
 }
 //# sourceMappingURL=index.js.map

@@ -45,11 +45,13 @@ export declare function showStatusCommand(svc: CommandServices): void;
 export declare function openDashboardCommand(_svc: CommandServices): Promise<void>;
 export declare function startDaemonCommand(svc: CommandServices): Promise<void>;
 export declare function stopDaemonCommand(svc: CommandServices): Promise<void>;
-export declare function inspectContextCommand(svc: CommandServices): void;
+export declare function inspectContextCommand(svc: CommandServices): Promise<void>;
 export declare function statusQuickPickCommand(svc: CommandServices): Promise<void>;
 export declare function explainFileCommand(svc: CommandServices): Promise<void>;
 export declare function checkAdrComplianceCommand(svc: CommandServices): Promise<void>;
 export declare function openChatCommand(svc: CommandServices): void;
 export declare function setArchitectApiKeyCommand(svc: CommandServices): Promise<void>;
 export declare function showGraphSignalCommand(svc: CommandServices): Promise<void>;
+export declare function setAutonomyModeCommand(svc: CommandServices): Promise<void>;
+export declare function resetAutonomyCommand(svc: CommandServices): void;
 //# sourceMappingURL=commands.d.ts.map

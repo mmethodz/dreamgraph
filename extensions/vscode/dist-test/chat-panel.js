@@ -49,9 +49,15 @@ const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
 const styles_js_1 = require("./webview/styles.js");
 const render_markdown_js_1 = require("./webview/render-markdown.js");
+const entity_links_js_1 = require("./webview/entity-links.js");
+const card_renderer_js_1 = require("./webview/card-renderer.js");
 const architect_llm_1 = require("./architect-llm");
 const local_tools_js_1 = require("./local-tools.js");
 const index_js_1 = require("./prompts/index.js");
+const autonomy_js_1 = require("./autonomy.js");
+const autonomy_loop_js_1 = require("./autonomy-loop.js");
+const autonomy_structured_js_1 = require("./autonomy-structured.js");
+const reporting_js_1 = require("./reporting.js");
 class ChatPanel {
     context;
     static viewType = 'dreamgraph.chatView';
@@ -63,6 +69,7 @@ class ChatPanel {
     architectLlm;
     contextBuilder;
     mcpClient;
+    _restoringAnchors = false;
     changedFilesView;
     currentInstanceId = 'default';
     streaming = false;
@@ -77,6 +84,24 @@ class ChatPanel {
     _markdownItSource = null;
     /** Cached browser build of DOMPurify. Loaded once at first getHtml() call. */
     _domPurifySource = null;
+    /** Cached URI to bundled webview runtime for Slice 3 Option C migration. */
+    _webviewBundleUri = null;
+    _lastToolTrace = [];
+    _lastVerdict = null;
+    _actionLog = [];
+    _actionStateByMessage = new Map();
+    _hoverActionStateByMessage = new Map();
+    /** Autonomy session state — tracks mode, pass budget, and continuation policy. */
+    _autonomyState = (0, autonomy_js_1.createAutonomyState)((0, reporting_js_1.getAutonomyMode)(), (0, reporting_js_1.getAutonomyPassBudget)());
+    /** Whether autonomy continuation is actively enabled for this session. */
+    _autonomyEnabled = (0, reporting_js_1.getAutonomyMode)() !== 'cautious' || ((0, reporting_js_1.getAutonomyPassBudget)() ?? 0) > 0;
+    /** The last set of recommended actions from a pass analysis. */
+    _lastRecommendedActions = [];
+    /** Whether an autonomy continuation loop is currently running. */
+    _autonomyContinuing = false;
+    static MAX_RENDERED_MESSAGE_CHARS = 100_000;
+    static MAX_ENTITY_LINKS_PER_MESSAGE = 100;
+    static ACTION_ALLOWLIST = new Set(['tool', 'show_full']);
     static MAX_TEXT_ATTACHMENT_BYTES = 100_000;
     static MAX_IMAGE_ATTACHMENT_BYTES = 5 * 1024 * 1024;
     /** Hard timeout per LLM provider request (ms). Prevents infinite hangs. */
@@ -134,10 +159,10 @@ class ChatPanel {
     }
     get isVisible() { return this.view?.visible ?? false; }
     addExternalMessage(role, content) {
-        const msg = { role, content, timestamp: new Date().toISOString() };
+        const msg = { id: this._createMessageId(), role, content, timestamp: new Date().toISOString(), instanceId: this.currentInstanceId };
         this.messages.push(msg);
         void this.persistMessages();
-        void this.postMessage({ type: 'addMessage', message: msg });
+        void this.postMessage({ type: 'addMessage', message: msg, actions: this._buildMessageActions(msg), roleMeta: this._roleMetaFor(msg), contextFooter: this._contextFooterFor(msg) });
     }
     open() { void vscode.commands.executeCommand('dreamgraph.chatView.focus'); }
     async resolveWebviewView(webviewView, _context, _token) {
@@ -155,6 +180,7 @@ class ChatPanel {
         webviewView.webview.onDidReceiveMessage(async (message) => {
             switch (message.type) {
                 case 'ready':
+                    this._syncAutonomyFromSettings();
                     await this.rehydrateWebview();
                     this._sendModelUpdate();
                     this._checkApiKeyWarning();
@@ -224,6 +250,115 @@ class ChatPanel {
                     }
                     break;
                 }
+                case 'navigateEntity': {
+                    // Slice 2 — entity URI navigation. Delegate to VS Code command if registered,
+                    // or fall back to opening a graph query for the referenced entity.
+                    const uri = message.uri;
+                    if (typeof uri === 'string' && /^[a-z-]+:\/\//.test(uri)) {
+                        const [scheme, rawName = ''] = uri.split('://');
+                        const name = decodeURIComponent(rawName);
+                        // file:// URIs open the file directly in the editor
+                        if (scheme === 'file') {
+                            const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
+                            const absPath = path.isAbsolute(name) ? name : path.resolve(ws, name);
+                            let opened = false;
+                            try {
+                                const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(absPath));
+                                await vscode.window.showTextDocument(doc, { preview: true });
+                                opened = true;
+                            }
+                            catch {
+                                // Direct path failed — search workspace for the filename
+                            }
+                            if (!opened) {
+                                const basename = name.includes('/') ? name : `**/${name}`;
+                                const matches = await vscode.workspace.findFiles(basename, '**/node_modules/**', 5);
+                                if (matches.length === 1) {
+                                    const doc = await vscode.workspace.openTextDocument(matches[0]);
+                                    await vscode.window.showTextDocument(doc, { preview: true });
+                                }
+                                else if (matches.length > 1) {
+                                    const picked = await vscode.window.showQuickPick(matches.map((m) => ({ label: vscode.workspace.asRelativePath(m), uri: m })), { placeHolder: `Multiple matches for ${name}` });
+                                    if (picked) {
+                                        const doc = await vscode.workspace.openTextDocument(picked.uri);
+                                        await vscode.window.showTextDocument(doc, { preview: true });
+                                    }
+                                }
+                                else {
+                                    void vscode.window.showWarningMessage(`Could not open file: ${name}`);
+                                }
+                            }
+                            break;
+                        }
+                        vscode.commands.executeCommand('dreamgraph.navigateEntity', uri).then(undefined, async () => {
+                            const query = scheme === 'data-model'
+                                ? `Search data model for ${name}`
+                                : `Explain ${uri} in system context`;
+                            await this.handleUserMessage(query);
+                        });
+                    }
+                    break;
+                }
+                case 'verifyEntities': {
+                    const { requestId, names } = message;
+                    const results = await this._verifyEntities(names);
+                    await this.postMessage({ type: 'entityStatus', requestId, results });
+                    break;
+                }
+                case 'runMessageAction': {
+                    await this._runMessageAction(message.messageId, message.actionId);
+                    break;
+                }
+                case 'retryMessage': {
+                    const original = this.messages.find((m) => m.id === message.messageId && m.role === 'user');
+                    if (original)
+                        await this.handleUserMessage(original.content);
+                    break;
+                }
+                case 'copyMessage': {
+                    await this._copyMessage(message.messageId);
+                    break;
+                }
+                case 'pinMessage': {
+                    await this._pinMessage(message.messageId);
+                    break;
+                }
+                case 'selectRecommendedAction': {
+                    const actionMsg = message;
+                    await this._executeRecommendedAction(actionMsg.actionId);
+                    break;
+                }
+                case 'doAllRecommendedActions': {
+                    await this._executeAllRecommendedActions();
+                    break;
+                }
+                case 'envelopeAction': {
+                    const envMsg = message;
+                    if (envMsg.label)
+                        await this.handleUserMessage(envMsg.label);
+                    break;
+                }
+                case 'envelopeDoAll': {
+                    const envAllMsg = message;
+                    const labels = Array.isArray(envAllMsg.labels) ? envAllMsg.labels : [];
+                    if (labels.length === 1) {
+                        await this.handleUserMessage(labels[0]);
+                    }
+                    else if (labels.length > 1) {
+                        const combined = `Execute these steps sequentially:\n${labels.map((l, i) => `${i + 1}. ${l}`).join('\n')}`;
+                        await this.handleUserMessage(combined);
+                    }
+                    break;
+                }
+                case 'setAutonomyMode': {
+                    const modeMsg = message;
+                    this._setAutonomyMode(modeMsg.mode);
+                    break;
+                }
+                case 'resetAutonomy': {
+                    this._resetAutonomy();
+                    break;
+                }
             }
         }, null, this.disposables);
         await this.rehydrateWebview();
@@ -238,34 +373,49 @@ class ChatPanel {
             this.disposables.pop()?.dispose();
     }
     async handleUserMessage(text) {
+        // Detect and apply autonomy mode requests from user text
+        this._detectAutonomyRequest(text);
         const attachmentSummary = this._attachmentSummaryForUserMessage();
+        const envelope = this.contextBuilder ? await this.contextBuilder.buildEnvelope(text) : null;
+        const liveAnchor = envelope?.activeFile?.selection?.anchor ?? envelope?.activeFile?.cursorAnchor;
         const userMessage = {
+            id: this._createMessageId(),
             role: 'user',
             content: attachmentSummary ? `${text}\n\n${attachmentSummary}` : text,
             timestamp: new Date().toISOString(),
+            instanceId: this.currentInstanceId,
+            anchor: liveAnchor,
         };
         this.messages.push(userMessage);
-        await this.persistMessages();
-        await this.postMessage({ type: 'addMessage', message: userMessage });
+        await this._persistMessagesWithCanonicalAnchorRefresh(envelope);
+        await this.postMessage({ type: 'addMessage', message: userMessage, actions: this._buildMessageActions(userMessage), roleMeta: this._roleMetaFor(userMessage), contextFooter: this._contextFooterFor(userMessage) });
         if (!this.architectLlm || !this.architectLlm.isConfigured) {
             const errMsg = {
+                id: this._createMessageId(),
                 role: 'system',
                 content: 'Architect LLM is not configured. Select provider and model in the header dropdowns, then set your API key.',
                 timestamp: new Date().toISOString(),
+                instanceId: this.currentInstanceId,
             };
             this.messages.push(errMsg);
             await this.persistMessages();
-            await this.postMessage({ type: 'addMessage', message: errMsg });
+            await this.postMessage({ type: 'addMessage', message: errMsg, actions: this._buildMessageActions(errMsg), roleMeta: this._roleMetaFor(errMsg), contextFooter: this._contextFooterFor(errMsg) });
             return;
         }
+        let assistantMessage;
         try {
             this.streaming = true;
             this.streamingContent = '';
             this.steeringQueue = [];
+            this._lastToolTrace = [];
+            this._lastVerdict = null;
             this.abortController = new AbortController();
-            const envelope = this.contextBuilder ? await this.contextBuilder.buildEnvelope(text) : null;
             const task = (0, index_js_1.inferTask)(envelope?.intentMode ?? 'ask_dreamgraph');
-            const { system } = (0, index_js_1.assemblePrompt)(task, envelope);
+            const autonomyInstruction = this._autonomyEnabled
+                ? { ...this._autonomyState, enabled: true }
+                : undefined;
+            const provider = this.architectLlm?.provider ?? undefined;
+            const { system } = (0, index_js_1.assemblePrompt)(task, envelope, undefined, undefined, autonomyInstruction, provider);
             const llmMessages = [{ role: 'system', content: system }];
             const recentMessages = this.messages.slice(-20);
             for (const msg of recentMessages) {
@@ -301,32 +451,63 @@ class ChatPanel {
                 const req = this._createRequestSignal();
                 try {
                     await this.architectLlm.stream(llmMessages, (chunk) => {
-                        fullContent += chunk;
-                        this.streamingContent += chunk;
-                        void this.postMessage({ type: 'stream-chunk', chunk });
+                        const safeChunk = this._redactSecrets(chunk);
+                        fullContent += safeChunk;
+                        this.streamingContent += safeChunk;
+                        void this.postMessage({ type: 'stream-chunk', chunk: safeChunk });
                     }, req.signal);
                 }
                 finally {
                     req.dispose();
                 }
             }
-            const assistantMessage = { role: 'assistant', content: fullContent, timestamp: new Date().toISOString() };
+            const redactedFullContent = this._redactSecrets(fullContent);
+            this._lastVerdict = this._deriveVerdict(redactedFullContent, this._lastToolTrace);
+            const finalContent = this._applyRenderLimits(redactedFullContent);
+            const implicitEntities = this._detectImplicitEntities(redactedFullContent);
+            const implicitEntityNotice = implicitEntities.names.length > 0
+                ? this._formatImplicitEntityNotice(implicitEntities)
+                : undefined;
+            assistantMessage = {
+                id: this._createMessageId(),
+                role: 'assistant',
+                content: finalContent.content,
+                fullContent: redactedFullContent,
+                implicitEntityNotice,
+                timestamp: new Date().toISOString(),
+                instanceId: this.currentInstanceId,
+                verdict: this._lastVerdict ?? undefined,
+                toolTrace: this._lastToolTrace.length > 0 ? [...this._lastToolTrace] : undefined,
+            };
             this.messages.push(assistantMessage);
             await this.persistMessages();
             this.attachments = [];
             await this._syncAttachments();
+            // Autonomy: analyze the pass and decide whether to continue
+            if (this._autonomyEnabled) {
+                await this._handleAutonomyPassComplete(redactedFullContent, assistantMessage.id ?? '', llmMessages, tools);
+            }
         }
         catch (err) {
             const errorText = err instanceof Error ? err.message : String(err);
             const isAbort = err instanceof DOMException && err.name === 'AbortError';
             const displayText = isAbort ? 'Generation stopped.' : `Error: ${errorText}`;
-            const errMsg = { role: 'system', content: displayText, timestamp: new Date().toISOString() };
+            const errMsg = { id: this._createMessageId(), role: 'system', content: displayText, timestamp: new Date().toISOString(), instanceId: this.currentInstanceId };
             this.messages.push(errMsg);
             await this.persistMessages();
-            await this.postMessage({ type: 'addMessage', message: errMsg });
+            await this.postMessage({ type: 'addMessage', message: errMsg, actions: this._buildMessageActions(errMsg), roleMeta: this._roleMetaFor(errMsg), contextFooter: this._contextFooterFor(errMsg) });
         }
         finally {
             this.resetStreamState();
+            if (assistantMessage) {
+                void this.postMessage({
+                    type: 'addMessage',
+                    message: assistantMessage,
+                    actions: this._buildMessageActions(assistantMessage),
+                    roleMeta: this._roleMetaFor(assistantMessage),
+                    contextFooter: this._contextFooterFor(assistantMessage),
+                });
+            }
         }
     }
     _buildUserContentBlocks(text) {
@@ -505,6 +686,10 @@ class ChatPanel {
         this.steeringQueue = [];
         this.abortController = null;
         void this.postMessage({ type: 'stream-thinking', active: false });
+        if (this._lastVerdict) {
+            void this.postMessage({ type: 'verdict', verdict: this._lastVerdict });
+        }
+        void this.postMessage({ type: 'toolTrace', calls: this._lastToolTrace });
         void this.postMessage({ type: 'stream-end', done: true });
     }
     async rehydrateWebview() {
@@ -512,9 +697,199 @@ class ChatPanel {
         if (this.draftText)
             await this.postMessage({ type: 'restoreDraft', text: this.draftText });
         await this._syncAttachments();
+        if (this._autonomyEnabled)
+            this._broadcastAutonomyStatus();
     }
     async postState() {
         await this.postMessage({ type: 'state', state: { messages: this.messages } });
+    }
+    getActionLogForTest() {
+        return this._actionLog;
+    }
+    _createMessageId() {
+        return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    }
+    _roleMetaFor(message) {
+        if (message.role === 'assistant') {
+            return { title: 'DreamGraph Architect', subtitle: 'Graph-grounded assistant' };
+        }
+        if (message.role === 'user') {
+            return { title: 'You' };
+        }
+        return { title: 'System' };
+    }
+    _formatAnchorFooterStatus(anchor) {
+        const status = anchor.migrationStatus ?? 'native';
+        const label = anchor.canonicalId
+            ? `${anchor.canonicalKind ?? 'entity'}:${anchor.canonicalId}`
+            : anchor.symbolPath ?? anchor.label;
+        // Embed a sentinel token that renderContextFooter() in the webview
+        // will parse into a styled badge. Format: [anchor-status:STATE:LABEL]
+        // The sentinel is kept at the end so the human-readable prefix still
+        // renders correctly in any context that doesn't strip it.
+        const sentinel = `[anchor-status:${status}:${label ?? ''}]`;
+        switch (status) {
+            case 'promoted':
+                return `Anchor: promoted to ${label} ${sentinel}`;
+            case 'rebound':
+                return `Anchor: rebound to ${label} ${sentinel}`;
+            case 'drifted':
+                return `Anchor: drifted near ${label} ${sentinel}`;
+            case 'archived':
+                return `Anchor: archived (${label}) ${sentinel}`;
+            case 'native':
+            default:
+                return anchor.canonicalId
+                    ? `Anchor: canonical ${label} ${sentinel}`
+                    : `Anchor: native ${label} ${sentinel}`;
+        }
+    }
+    _contextFooterFor(message) {
+        const scope = message.instanceId ?? this.currentInstanceId;
+        const anchor = message.anchor;
+        const anchorStatus = anchor ? this._formatAnchorFooterStatus(anchor) : undefined;
+        if (message.role === 'assistant') {
+            return `Instance: ${scope} • Actions require explicit click • Trace reflects real tool execution`;
+        }
+        if (message.role === 'user') {
+            return anchorStatus ? `Instance: ${scope} • ${anchorStatus}` : `Instance: ${scope}`;
+        }
+        return `Instance: ${scope} • System message`;
+    }
+    _applyRenderLimits(content) {
+        if (content.length <= ChatPanel.MAX_RENDERED_MESSAGE_CHARS) {
+            return { content, truncated: false };
+        }
+        const clipped = content.slice(0, ChatPanel.MAX_RENDERED_MESSAGE_CHARS);
+        return {
+            content: `${clipped}\n\n[Response truncated]`,
+            truncated: true,
+        };
+    }
+    _buildMessageActions(message) {
+        const actions = [];
+        if (message.role === 'assistant') {
+            if (message.content.includes('[Response truncated]')) {
+                actions.push({ id: 'show-full', label: 'Show full', kind: 'primary', actionType: 'show_full' });
+            }
+            if (this._lastToolTrace.length > 0) {
+                actions.push({
+                    id: 'show-trace',
+                    label: 'Show tool trace',
+                    kind: 'secondary',
+                    actionType: 'tool',
+                    toolName: 'query_self_metrics',
+                    toolArgs: { flush_to_disk: false },
+                });
+            }
+        }
+        return actions;
+    }
+    _detectImplicitEntities(content) {
+        const explicitUris = new Set(Array.from(content.matchAll(/\b[a-z-]+:\/\/([A-Za-z0-9._/-]+)/g)).map((match) => match[1]));
+        const candidates = Array.from(content.matchAll(/\b(?:feature|workflow|ADR|tension|entity|data model)\s+([A-Z][A-Za-z0-9._-]{1,80})\b/g))
+            .map((match) => match[1])
+            .filter((name) => !explicitUris.has(name));
+        const deduped = Array.from(new Set(candidates));
+        return {
+            names: deduped.slice(0, ChatPanel.MAX_ENTITY_LINKS_PER_MESSAGE),
+            truncated: deduped.length > ChatPanel.MAX_ENTITY_LINKS_PER_MESSAGE,
+        };
+    }
+    _formatImplicitEntityNotice(result) {
+        if (result.names.length === 0) {
+            return '';
+        }
+        const prefix = 'Implicit entity references detected: ';
+        const body = result.names.join(', ');
+        const suffix = result.truncated ? ' … [Entity link cap reached]' : '';
+        return `${prefix}${body}${suffix}`;
+    }
+    async _copyMessage(messageId) {
+        const message = this.messages.find((entry) => entry.id === messageId);
+        if (!message) {
+            return;
+        }
+        await vscode.env.clipboard.writeText(message.fullContent ?? message.content);
+        this._hoverActionStateByMessage.set(messageId, {
+            ...(this._hoverActionStateByMessage.get(messageId) ?? {}),
+            copied: true,
+        });
+    }
+    async _pinMessage(messageId) {
+        const message = this.messages.find((entry) => entry.id === messageId);
+        if (!message) {
+            return;
+        }
+        message.pinned = !message.pinned;
+        this._hoverActionStateByMessage.set(messageId, {
+            ...(this._hoverActionStateByMessage.get(messageId) ?? {}),
+            pinned: Boolean(message.pinned),
+        });
+        await this.persistMessages();
+        await this.postState();
+    }
+    async _runMessageAction(messageId, actionId) {
+        const message = this.messages.find((m) => m.id === messageId);
+        const action = message ? this._buildMessageActions(message).find((a) => a.id === actionId) : undefined;
+        if (!message || !action || !ChatPanel.ACTION_ALLOWLIST.has(action.actionType)) {
+            void vscode.window.showErrorMessage('Action unavailable.');
+            this._actionLog.push({ timestamp: new Date().toISOString(), actionType: actionId, sourceMessageId: messageId, outcome: 'failed', detail: 'unavailable' });
+            return;
+        }
+        await this.postMessage({ type: 'messageActionState', messageId, actionId, status: 'loading' });
+        if (action.destructive) {
+            const choice = await vscode.window.showWarningMessage(`Run destructive action "${action.label}"?`, { modal: true }, 'Run');
+            if (choice !== 'Run') {
+                this._actionLog.push({ timestamp: new Date().toISOString(), actionType: action.actionType, sourceMessageId: messageId, outcome: 'cancelled', detail: action.id });
+                await this.postMessage({ type: 'messageActionState', messageId, actionId, status: 'failed', error: 'Cancelled' });
+                return;
+            }
+        }
+        try {
+            if (action.actionType === 'show_full') {
+                if (!message.fullContent || message.fullContent === message.content) {
+                    throw new Error('Full response is not available for this message.');
+                }
+                message.content = message.fullContent;
+                const implicitEntities = this._detectImplicitEntities(message.fullContent);
+                message.implicitEntityNotice = implicitEntities.names.length > 0
+                    ? this._formatImplicitEntityNotice(implicitEntities)
+                    : undefined;
+                await this.persistMessages();
+                await this.postState();
+                this._actionLog.push({ timestamp: new Date().toISOString(), actionType: action.actionType, sourceMessageId: messageId, outcome: 'completed', detail: action.id });
+                await this.postMessage({ type: 'messageActionState', messageId, actionId, status: 'completed' });
+                return;
+            }
+            if (action.actionType === 'tool') {
+                if (!action.toolName) {
+                    throw new Error('Tool action is missing a tool name.');
+                }
+                const result = await this._executeMessageActionTool(action.toolName, action.toolArgs ?? {});
+                const resultText = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+                const toolMessage = {
+                    id: this._createMessageId(),
+                    role: 'system',
+                    content: `Action result (${action.label})\n\n${this._redactSecrets(resultText)}`,
+                    timestamp: new Date().toISOString(),
+                    instanceId: this.currentInstanceId,
+                };
+                this.messages.push(toolMessage);
+                await this.persistMessages();
+                await this.postMessage({ type: 'addMessage', message: toolMessage, actions: this._buildMessageActions(toolMessage), roleMeta: this._roleMetaFor(toolMessage), contextFooter: this._contextFooterFor(toolMessage) });
+                this._actionLog.push({ timestamp: new Date().toISOString(), actionType: action.actionType, sourceMessageId: messageId, outcome: 'completed', detail: action.toolName });
+                await this.postMessage({ type: 'messageActionState', messageId, actionId, status: 'completed' });
+                return;
+            }
+            throw new Error('Unsupported action type.');
+        }
+        catch (error) {
+            const messageText = error instanceof Error ? error.message : String(error);
+            this._actionLog.push({ timestamp: new Date().toISOString(), actionType: action.actionType, sourceMessageId: messageId, outcome: 'failed', detail: messageText });
+            await this.postMessage({ type: 'messageActionState', messageId, actionId, status: 'failed', error: messageText });
+            void vscode.window.showErrorMessage(messageText);
+        }
     }
     /**
      * Post a message to the webview. If the webview is currently hidden or
@@ -550,11 +925,81 @@ class ChatPanel {
             return;
         await this.memory.save(this.currentInstanceId, this.messages);
     }
+    async _persistMessagesWithCanonicalAnchorRefresh(envelope) {
+        if (!this.memory)
+            return;
+        const canonicalAnchor = envelope?.activeFile?.selection?.anchor ?? envelope?.activeFile?.cursorAnchor;
+        if (canonicalAnchor?.canonicalId) {
+            for (let index = this.messages.length - 1; index >= 0; index -= 1) {
+                const message = this.messages[index];
+                if (message.role !== 'user' || !message.anchor)
+                    continue;
+                if (message.instanceId && message.instanceId !== this.currentInstanceId)
+                    continue;
+                if (message.anchor.canonicalId)
+                    break;
+                if (message.anchor.path !== canonicalAnchor.path)
+                    continue;
+                this.messages[index] = {
+                    ...message,
+                    anchor: {
+                        ...message.anchor,
+                        canonicalId: canonicalAnchor.canonicalId,
+                        canonicalKind: canonicalAnchor.canonicalKind,
+                        migrationStatus: canonicalAnchor.migrationStatus ?? message.anchor.migrationStatus ?? 'promoted',
+                        confidence: Math.max(message.anchor.confidence ?? 0, canonicalAnchor.confidence ?? 0),
+                        label: canonicalAnchor.label,
+                    },
+                };
+                break;
+            }
+        }
+        await this.persistMessages();
+    }
     async restoreMessages() {
         if (!this.memory)
             return;
         const saved = await this.memory.load(this.currentInstanceId);
-        this.messages.splice(0, this.messages.length, ...saved);
+        let scoped = saved.filter((message) => !message.instanceId || message.instanceId === this.currentInstanceId);
+        if (this.contextBuilder && !this._restoringAnchors) {
+            this._restoringAnchors = true;
+            try {
+                const graphContext = await this.contextBuilder.resolveGraphContext({
+                    workspaceRoot: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '',
+                    instanceId: this.currentInstanceId,
+                    activeFile: null,
+                    visibleFiles: [],
+                    changedFiles: [],
+                    pinnedFiles: [],
+                    graphContext: null,
+                    intentMode: 'manual',
+                    intentConfidence: 0,
+                }, {
+                    intentMode: 'manual',
+                    taskSummary: 'Rehydrate stored chat anchors',
+                    primaryAnchor: undefined,
+                    secondaryAnchors: [],
+                    requiredEvidence: [],
+                    optionalEvidence: ['feature', 'workflow', 'adr', 'ui'],
+                    codeReadPlan: [],
+                    budgetPolicy: {
+                        maxTokens: 0,
+                        reserveTokens: 0,
+                        allowFullActiveFile: false,
+                        includeOptionalEvidence: true,
+                    },
+                });
+                scoped = await this.contextBuilder.rehydrateStoredAnchors(scoped, graphContext);
+            }
+            catch {
+                // Rehydration is best-effort; keep stored anchors unchanged on failure
+            }
+            finally {
+                this._restoringAnchors = false;
+            }
+        }
+        this.messages.splice(0, this.messages.length, ...scoped.map((message) => ({ ...message, instanceId: message.instanceId ?? this.currentInstanceId })));
+        this._hoverActionStateByMessage.clear();
         await this.postState();
     }
     _sendModelUpdate() {
@@ -615,6 +1060,269 @@ class ChatPanel {
     }
     static MAX_TOOL_ITERATIONS = 32;
     static MAX_RETRIES = 3;
+    static MAX_VERIFICATION_BATCH_SIZE = 50;
+    static VERIFICATION_TIMEOUT_MS = 5_000;
+    /** Maximum number of autonomous continuation passes to prevent runaway loops. */
+    static MAX_AUTONOMY_PASSES = 20;
+    /* ------------------------------------------------------------------ */
+    /*  Autonomy — session state & continuation loop                      */
+    /* ------------------------------------------------------------------ */
+    /** Re-read autonomy settings from VS Code configuration and apply. */
+    _syncAutonomyFromSettings() {
+        const mode = (0, reporting_js_1.getAutonomyMode)();
+        const budget = (0, reporting_js_1.getAutonomyPassBudget)();
+        this._autonomyState = (0, autonomy_js_1.createAutonomyState)(mode, budget);
+        this._autonomyEnabled = mode !== 'cautious' || (budget ?? 0) > 0;
+        if (this._autonomyEnabled)
+            this._broadcastAutonomyStatus();
+    }
+    /** Called from extension.ts when configuration changes. */
+    applyAutonomySettings() {
+        this._syncAutonomyFromSettings();
+    }
+    _detectAutonomyRequest(text) {
+        const lower = text.toLowerCase();
+        const hasAutonomyKeyword = /\b(autonomous|eager|conscientious|cautious)\b/.test(lower)
+            || /next\s+\d+\s+passes|for\s+\d+\s+passes/.test(lower)
+            || /\bautonomous(ly)?\b/.test(lower)
+            || /\bstay\s+cautious\b/.test(lower);
+        if (!hasAutonomyKeyword)
+            return;
+        const parsed = (0, reporting_js_1.parseAutonomyRequest)(text, this._autonomyState);
+        this._autonomyState = {
+            mode: parsed.mode,
+            remainingAutoPasses: parsed.remainingAutoPasses,
+            completedAutoPasses: parsed.completedAutoPasses,
+            totalAuthorizedPasses: parsed.totalAuthorizedPasses,
+        };
+        this._autonomyEnabled = true;
+        this._broadcastAutonomyStatus();
+    }
+    _setAutonomyMode(mode) {
+        const valid = ['cautious', 'conscientious', 'eager', 'autonomous'];
+        const m = valid.find((v) => v === mode);
+        if (!m)
+            return;
+        this._autonomyState = { ...this._autonomyState, mode: m };
+        this._autonomyEnabled = true;
+        this._broadcastAutonomyStatus();
+    }
+    _resetAutonomy() {
+        this._autonomyState = (0, autonomy_js_1.createAutonomyState)('cautious');
+        this._autonomyEnabled = false;
+        this._autonomyContinuing = false;
+        this._lastRecommendedActions = [];
+        this._broadcastAutonomyStatus();
+    }
+    _broadcastAutonomyStatus() {
+        const status = (0, autonomy_js_1.deriveAutonomyStatusView)(this._autonomyState);
+        void this.postMessage({
+            type: 'autonomyStatus',
+            status: {
+                mode: status.mode,
+                countingActive: status.countingActive,
+                completed: status.completed,
+                remaining: status.remaining,
+                totalAuthorized: status.totalAuthorized,
+                summary: status.summary,
+            },
+        });
+    }
+    async _handleAutonomyPassComplete(content, messageId, llmMessages, tools) {
+        // Extract structured envelope and build recommended actions
+        const envelope = (0, autonomy_structured_js_1.extractStructuredPassEnvelope)(content);
+        const actions = envelope.nextSteps;
+        this._lastRecommendedActions = actions;
+        // Run pass analysis to get continuation decision
+        const result = (0, autonomy_loop_js_1.analyzePass)(this._autonomyState, { content, actions });
+        // Broadcast actions to webview
+        if (result.actionSet.actions.length > 0) {
+            void this.postMessage({
+                type: 'recommendedActions',
+                messageId,
+                actions: result.actionSet.actions.map((a) => ({ id: a.id, label: a.label, rationale: a.rationale })),
+                doAllEligible: result.actionSet.doAllEligible,
+            });
+        }
+        if (result.decision.shouldContinue && !this.abortController?.signal.aborted) {
+            // Advance state and continue
+            this._autonomyState = (0, autonomy_loop_js_1.advanceAutonomyStateIfContinued)(this._autonomyState, result.decision);
+            this._broadcastAutonomyStatus();
+            // Safety: cap autonomous continuation
+            if (this._autonomyState.completedAutoPasses >= ChatPanel.MAX_AUTONOMY_PASSES) {
+                const stopMsg = {
+                    id: this._createMessageId(),
+                    role: 'system',
+                    content: `Autonomy safety limit reached (${ChatPanel.MAX_AUTONOMY_PASSES} passes). ${result.decision.reason}`,
+                    timestamp: new Date().toISOString(),
+                    instanceId: this.currentInstanceId,
+                };
+                this.messages.push(stopMsg);
+                await this.persistMessages();
+                await this.postMessage({ type: 'addMessage', message: stopMsg, actions: [], roleMeta: this._roleMetaFor(stopMsg), contextFooter: undefined });
+                return;
+            }
+            // Post continuation notice
+            const selectedAction = result.actionSet.actions.find((a) => a.id === result.selectedActionId);
+            const statusView = (0, autonomy_js_1.deriveAutonomyStatusView)(this._autonomyState);
+            const noticeText = `*${result.decision.reason}*${selectedAction ? ` Next: ${selectedAction.label}.` : ''} ${statusView.countingActive ? `[${statusView.summary}]` : ''}`;
+            const notice = {
+                id: this._createMessageId(),
+                role: 'system',
+                content: noticeText,
+                timestamp: new Date().toISOString(),
+                instanceId: this.currentInstanceId,
+            };
+            this.messages.push(notice);
+            await this.persistMessages();
+            await this.postMessage({ type: 'addMessage', message: notice, actions: [], roleMeta: this._roleMetaFor(notice), contextFooter: undefined });
+            // Trigger next pass
+            const continuationPrompt = result.nextPrompt ?? (0, autonomy_loop_js_1.buildContinuationPrompt)(selectedAction?.label);
+            await this._runAutonomyContinuationPass(continuationPrompt, llmMessages, tools);
+        }
+        else {
+            // Stopped — update status and show reason
+            this._broadcastAutonomyStatus();
+            if (result.decision.reason) {
+                const statusView = (0, autonomy_js_1.deriveAutonomyStatusView)(this._autonomyState);
+                const stopText = `*${result.decision.reason}* ${statusView.countingActive ? `[${statusView.summary}]` : ''}`;
+                const stopMsg = {
+                    id: this._createMessageId(),
+                    role: 'system',
+                    content: stopText,
+                    timestamp: new Date().toISOString(),
+                    instanceId: this.currentInstanceId,
+                };
+                this.messages.push(stopMsg);
+                await this.persistMessages();
+                await this.postMessage({ type: 'addMessage', message: stopMsg, actions: [], roleMeta: this._roleMetaFor(stopMsg), contextFooter: undefined });
+            }
+        }
+    }
+    async _runAutonomyContinuationPass(prompt, baseLlmMessages, tools) {
+        if (this._autonomyContinuing)
+            return; // prevent re-entrancy
+        this._autonomyContinuing = true;
+        try {
+            // Build continuation message
+            const envelope = this.contextBuilder ? await this.contextBuilder.buildEnvelope(prompt) : null;
+            const liveAnchor = envelope?.activeFile?.selection?.anchor ?? envelope?.activeFile?.cursorAnchor;
+            const userMessage = {
+                id: this._createMessageId(),
+                role: 'user',
+                content: prompt,
+                timestamp: new Date().toISOString(),
+                instanceId: this.currentInstanceId,
+                anchor: liveAnchor,
+            };
+            this.messages.push(userMessage);
+            await this._persistMessagesWithCanonicalAnchorRefresh(envelope);
+            this.streaming = true;
+            this.streamingContent = '';
+            this._lastToolTrace = [];
+            this._lastVerdict = null;
+            this.abortController = new AbortController();
+            const task = (0, index_js_1.inferTask)(envelope?.intentMode ?? 'ask_dreamgraph');
+            const autonomyInstruction = { ...this._autonomyState, enabled: true };
+            const provider = this.architectLlm?.provider ?? undefined;
+            const { system } = (0, index_js_1.assemblePrompt)(task, envelope, undefined, undefined, autonomyInstruction, provider);
+            const llmMessages = [{ role: 'system', content: system }];
+            const recentMessages = this.messages.slice(-20);
+            for (const msg of recentMessages) {
+                if (msg.role === 'user' || msg.role === 'assistant')
+                    llmMessages.push({ role: msg.role, content: msg.content });
+            }
+            await this.postMessage({ type: 'stream-start' });
+            let fullContent = '';
+            if (tools.length > 0) {
+                fullContent = await this.runAgenticLoop(llmMessages, tools);
+            }
+            else {
+                const req = this._createRequestSignal();
+                try {
+                    await this.architectLlm.stream(llmMessages, (chunk) => {
+                        const safeChunk = this._redactSecrets(chunk);
+                        fullContent += safeChunk;
+                        this.streamingContent += safeChunk;
+                        void this.postMessage({ type: 'stream-chunk', chunk: safeChunk });
+                    }, req.signal);
+                }
+                finally {
+                    req.dispose();
+                }
+            }
+            const redactedFullContent = this._redactSecrets(fullContent);
+            this._lastVerdict = this._deriveVerdict(redactedFullContent, this._lastToolTrace);
+            const finalContent = this._applyRenderLimits(redactedFullContent);
+            const implicitEntities = this._detectImplicitEntities(redactedFullContent);
+            const implicitEntityNotice = implicitEntities.names.length > 0
+                ? this._formatImplicitEntityNotice(implicitEntities)
+                : undefined;
+            const assistantMessage = {
+                id: this._createMessageId(),
+                role: 'assistant',
+                content: finalContent.content,
+                fullContent: redactedFullContent,
+                implicitEntityNotice,
+                timestamp: new Date().toISOString(),
+                instanceId: this.currentInstanceId,
+                verdict: this._lastVerdict ?? undefined,
+                toolTrace: this._lastToolTrace.length > 0 ? [...this._lastToolTrace] : undefined,
+            };
+            this.messages.push(assistantMessage);
+            await this.persistMessages();
+            await this.postMessage({ type: 'stream-end', done: true });
+            if (this._lastVerdict) {
+                await this.postMessage({ type: 'verdict', verdict: this._lastVerdict });
+            }
+            if (this._lastToolTrace.length > 0) {
+                await this.postMessage({ type: 'toolTrace', calls: [...this._lastToolTrace] });
+            }
+            await this.postMessage({
+                type: 'addMessage',
+                message: assistantMessage,
+                actions: this._buildMessageActions(assistantMessage),
+                roleMeta: this._roleMetaFor(assistantMessage),
+                contextFooter: this._contextFooterFor(assistantMessage),
+            });
+            // Recursively analyze the new pass
+            this._autonomyContinuing = false;
+            await this._handleAutonomyPassComplete(redactedFullContent, assistantMessage.id ?? '', llmMessages, tools);
+        }
+        catch (err) {
+            const errorText = err instanceof Error ? err.message : String(err);
+            const isAbort = err instanceof DOMException && err.name === 'AbortError';
+            const displayText = isAbort ? 'Autonomous continuation stopped.' : `Error during continuation: ${errorText}`;
+            const errMsg = { id: this._createMessageId(), role: 'system', content: displayText, timestamp: new Date().toISOString(), instanceId: this.currentInstanceId };
+            this.messages.push(errMsg);
+            await this.persistMessages();
+            await this.postMessage({ type: 'addMessage', message: errMsg, actions: [], roleMeta: this._roleMetaFor(errMsg), contextFooter: undefined });
+        }
+        finally {
+            this._autonomyContinuing = false;
+            this.resetStreamState();
+        }
+    }
+    async _executeRecommendedAction(actionId) {
+        const action = this._lastRecommendedActions.find((a) => a.id === actionId);
+        if (!action)
+            return;
+        await this.handleUserMessage(action.label);
+    }
+    async _executeAllRecommendedActions() {
+        const labels = this._lastRecommendedActions
+            .filter((a) => a.eligible && a.withinScope)
+            .map((a) => a.label);
+        if (labels.length === 0)
+            return;
+        const combined = `Execute these steps sequentially:\n${labels.map((l, i) => `${i + 1}. ${l}`).join('\n')}`;
+        await this.handleUserMessage(combined);
+    }
+    static SECRET_PATTERNS = [
+        /(?:api[_-]?key|secret|token|password|passwd|auth)\s*[:=]\s*\S+/gi,
+        /(?:sk-|pk-|ghp_|gho_|github_pat_)\S+/g,
+        /-----BEGIN (?:RSA |EC )?PRIVATE KEY-----[\s\S]*?-----END/g,
+    ];
     /** Cap on accumulated streaming content to prevent context window overflow
      *  when the agent runs many iterations. Content beyond this is still executed
      *  but not accumulated into streamingContent (the webview already received it). */
@@ -677,14 +1385,15 @@ class ChatPanel {
             void this.postMessage({ type: 'stream-thinking', active: false });
             // Stream any text content to the webview
             if (response.content) {
-                fullContent += response.content;
+                const safeContent = this._redactSecrets(response.content);
+                fullContent += safeContent;
                 // Guard: cap streamingContent to prevent unbounded memory growth across
                 // many tool iterations. The webview receives each chunk regardless — only
                 // the in-memory accumulator is capped.
                 if (this.streamingContent.length < ChatPanel.MAX_STREAMING_CONTENT_CHARS) {
-                    this.streamingContent += response.content;
+                    this.streamingContent += safeContent;
                 }
-                void this.postMessage({ type: 'stream-chunk', chunk: response.content });
+                void this.postMessage({ type: 'stream-chunk', chunk: safeContent });
             }
             // If no tool calls, we're done
             if (response.stopReason !== 'tool_use' || response.toolCalls.length === 0) {
@@ -710,7 +1419,9 @@ class ChatPanel {
                 void this.postMessage({ type: 'stream-chunk', chunk: statusChunk });
                 void this.postMessage({ type: 'tool-progress', tool: tc.name, message: 'started' });
                 const toolTimeout = ChatPanel._toolTimeoutMs(tc.name);
+                const startedAt = Date.now();
                 let result;
+                let status = 'completed';
                 try {
                     if ((0, local_tools_js_1.isLocalTool)(tc.name)) {
                         // Wrap local tool with per-tool timeout (P5)
@@ -729,11 +1440,20 @@ class ChatPanel {
                     }
                     else {
                         result = JSON.stringify({ error: `Tool "${tc.name}" is not available — MCP client is not connected.` });
+                        status = 'failed';
                     }
                 }
                 catch (err) {
+                    status = 'failed';
                     result = JSON.stringify({ error: err instanceof Error ? err.message : String(err) });
                 }
+                this._lastToolTrace.push({
+                    tool: tc.name,
+                    argsSummary: this._summarizeToolArgs(tc.input),
+                    filesAffected: this._extractFilesAffected(tc.input, result),
+                    durationMs: Date.now() - startedAt,
+                    status,
+                });
                 // Show tool completion (P4)
                 const doneChunk = `✓ \`${tc.name}\` done\n`;
                 fullContent += doneChunk;
@@ -745,7 +1465,7 @@ class ChatPanel {
                 toolResultBlocks.push({
                     type: 'tool_result',
                     tool_use_id: tc.id,
-                    content: result,
+                    content: this._redactSecrets(result),
                 });
             }
             // Build rawMessages for the next iteration.
@@ -767,7 +1487,8 @@ class ChatPanel {
      * are missing (e.g. corrupt .vsix or dev environment without npm install).
      */
     _loadLibrarySources() {
-        if (this._markdownItSource !== null && this._domPurifySource !== null)
+        if (this._markdownItSource !== null &&
+            this._domPurifySource !== null)
             return;
         const extPath = this.context.extensionPath;
         const libs = [
@@ -784,7 +1505,6 @@ class ChatPanel {
                     this._domPurifySource = src;
             }
             catch (err) {
-                // Log to output channel if available, else console
                 console.error(`[DreamGraph] Failed to load ${lib.name} browser build — falling back to plaintext rendering. ${err instanceof Error ? err.message : String(err)}`);
                 if (lib.key === 'md')
                     this._markdownItSource = '';
@@ -793,371 +1513,860 @@ class ChatPanel {
             }
         }
     }
-    getHtml(_webview) {
+    _getWebviewBundleUri(webview) {
+        if (this._webviewBundleUri !== null)
+            return this._webviewBundleUri;
+        try {
+            const bundlePath = vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.js');
+            this._webviewBundleUri = webview.asWebviewUri(bundlePath).toString();
+        }
+        catch (err) {
+            console.error(`[DreamGraph] Failed to resolve webview bundle URI — falling back to inline scripts. ${err instanceof Error ? err.message : String(err)}`);
+            this._webviewBundleUri = '';
+        }
+        return this._webviewBundleUri;
+    }
+    _redactSecrets(content) {
+        return ChatPanel.SECRET_PATTERNS.reduce((text, pattern) => text.replace(pattern, (match) => {
+            const sepMatch = match.match(/[:=]\s*/);
+            if (sepMatch && typeof sepMatch.index === 'number') {
+                return match.slice(0, sepMatch.index + sepMatch[0].length) + '****';
+            }
+            return match.slice(0, 8) + '****';
+        }), content);
+    }
+    async _executeMessageActionTool(toolName, input) {
+        const startedAt = Date.now();
+        let status = 'completed';
+        try {
+            if ((0, local_tools_js_1.isLocalTool)(toolName)) {
+                return await (0, local_tools_js_1.executeLocalTool)(toolName, input);
+            }
+            if (!this.mcpClient?.isConnected) {
+                throw new Error(`Tool "${toolName}" is not available — MCP client is not connected.`);
+            }
+            return await this.mcpClient.callTool(toolName, input, ChatPanel._toolTimeoutMs(toolName));
+        }
+        catch (error) {
+            status = 'failed';
+            throw error;
+        }
+        finally {
+            this._lastToolTrace.push({
+                tool: toolName,
+                argsSummary: this._summarizeToolArgs(input),
+                filesAffected: this._extractFilesAffected(input, ''),
+                durationMs: Date.now() - startedAt,
+                status,
+            });
+        }
+    }
+    _summarizeToolArgs(input) {
+        if (!input || typeof input !== 'object')
+            return 'no args';
+        const keys = Object.keys(input).slice(0, 4);
+        return keys.length > 0 ? keys.join(', ') : 'no args';
+    }
+    _deriveVerdict(content, trace) {
+        const normalized = content.toLowerCase();
+        const failedCount = trace.filter((t) => t.status === 'failed').length;
+        if (normalized.includes('verified:') || normalized.includes('confirmed:') || (trace.length > 0 && failedCount === 0)) {
+            return {
+                level: 'verified',
+                summary: failedCount === 0 && trace.length > 0
+                    ? `Verified with ${trace.length} executed tool call${trace.length === 1 ? '' : 's'}.`
+                    : 'Verified based on explicit evidence in the response.',
+            };
+        }
+        if (failedCount > 0 || normalized.includes('likely') || normalized.includes('partial')) {
+            return {
+                level: 'partial',
+                summary: failedCount > 0
+                    ? `Partial confidence: ${failedCount} tool call${failedCount === 1 ? '' : 's'} failed during evidence gathering.`
+                    : 'Partial confidence: the response includes uncertainty or incomplete evidence.',
+            };
+        }
+        return {
+            level: 'speculative',
+            summary: 'Speculative synthesis: no strong verification signals were detected.',
+        };
+    }
+    _extractFilesAffected(input, result) {
+        const found = new Set();
+        const visit = (value) => {
+            if (typeof value === 'string') {
+                if (/^[A-Za-z]:\\|^\.|^src\/|^extensions\//.test(value) || /\.(ts|tsx|js|jsx|json|md|css|html)$/i.test(value)) {
+                    found.add(value);
+                }
+                return;
+            }
+            if (Array.isArray(value)) {
+                value.forEach(visit);
+                return;
+            }
+            if (value && typeof value === 'object') {
+                Object.values(value).forEach(visit);
+            }
+        };
+        visit(input);
+        if (found.size === 0)
+            visit(result);
+        return Array.from(found).slice(0, 5);
+    }
+    async _verifyEntities(names) {
+        if (!this.mcpClient?.isConnected || !Array.isArray(names) || names.length === 0) {
+            return {};
+        }
+        const unique = Array.from(new Set(names.map((n) => String(n || '').trim()).filter(Boolean))).slice(0, 100);
+        const results = {};
+        for (let i = 0; i < unique.length; i += ChatPanel.MAX_VERIFICATION_BATCH_SIZE) {
+            const batch = unique.slice(i, i + ChatPanel.MAX_VERIFICATION_BATCH_SIZE);
+            try {
+                const [featuresRaw, workflowsRaw, dataModelRaw, tensionsRaw, dreamsRaw] = await Promise.all([
+                    this.mcpClient.callTool('query_resource', { uri: 'system://features' }, ChatPanel.VERIFICATION_TIMEOUT_MS),
+                    this.mcpClient.callTool('query_resource', { uri: 'system://workflows' }, ChatPanel.VERIFICATION_TIMEOUT_MS),
+                    this.mcpClient.callTool('query_resource', { uri: 'system://data-model' }, ChatPanel.VERIFICATION_TIMEOUT_MS),
+                    this.mcpClient.callTool('query_resource', { uri: 'dream://tensions' }, ChatPanel.VERIFICATION_TIMEOUT_MS).catch(() => null),
+                    this.mcpClient.callTool('query_dreams', { type: 'all', status: 'latent', min_confidence: 0.4 }, ChatPanel.VERIFICATION_TIMEOUT_MS).catch(() => null),
+                ]);
+                const indexes = [featuresRaw, workflowsRaw, dataModelRaw].map((payload) => JSON.stringify(payload).toLowerCase());
+                const tensionIndex = tensionsRaw ? JSON.stringify(tensionsRaw).toLowerCase() : '';
+                const dreamIndex = dreamsRaw ? JSON.stringify(dreamsRaw).toLowerCase() : '';
+                for (const name of batch) {
+                    const key = name.toLowerCase();
+                    if (tensionIndex && tensionIndex.includes(key)) {
+                        results[name] = { status: 'tension', confidence: 0.85 };
+                        continue;
+                    }
+                    if (indexes.some((index) => index.includes(key))) {
+                        results[name] = { status: 'verified', confidence: 0.8 };
+                        continue;
+                    }
+                    if (dreamIndex && dreamIndex.includes(key)) {
+                        results[name] = { status: 'latent', confidence: 0.5 };
+                        continue;
+                    }
+                    results[name] = { status: 'unverified', confidence: 0 };
+                }
+            }
+            catch {
+                return {};
+            }
+        }
+        return results;
+    }
+    getHtml(webview) {
+        const nonce = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
         this._loadLibrarySources();
-        const nonce = String(Date.now());
-        const markdownReady = this._markdownItSource && this._domPurifySource;
-        // Inline library scripts only when both loaded successfully.
-        // If either is missing, webview falls back to plaintext (textContent) rendering.
-        const libraryScripts = markdownReady
-            ? `<script nonce="${nonce}">${this._markdownItSource}</script>\n  <script nonce="${nonce}">${this._domPurifySource}</script>\n  <script nonce="${nonce}">${(0, render_markdown_js_1.getRenderScript)()}</script>`
+        const markdownItScript = this._markdownItSource
+            ? `<script nonce="${nonce}">${this._markdownItSource}</script>`
+            : '';
+        const domPurifyScript = this._domPurifySource
+            ? `<script nonce="${nonce}">${this._domPurifySource}</script>`
+            : '';
+        const cardRendererScript = `<script nonce="${nonce}">${(0, card_renderer_js_1.getCardRendererScript)()}</script>`;
+        const renderScript = `<script nonce="${nonce}">${(0, render_markdown_js_1.getRenderScript)()}</script>`;
+        const entityLinkScript = `<script nonce="${nonce}">${(0, entity_links_js_1.getEntityLinksScript)()}</script>`;
+        const webviewBundleScript = this._webviewBundleUri
+            ? `<script nonce="${nonce}" src="${this._webviewBundleUri}"></script>`
             : '';
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} https: data:; style-src 'unsafe-inline' ${webview.cspSource}; script-src 'nonce-${nonce}' ${webview.cspSource};">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <style>${(0, styles_js_1.getStyles)()}</style>
 </head>
 <body>
   <div class="header">
-    <select id="providerSelect" title="Provider">
-      <option value="">Provider…</option>
-      <option value="anthropic">Anthropic</option>
-      <option value="openai">OpenAI</option>
-      <option value="ollama">Ollama</option>
-    </select>
-    <select id="modelSelect" title="Model">
-      <option value="">Model…</option>
-    </select>
+    <select id="provider-select" title="Provider"></select>
+    <select id="model-select" title="Model"></select>
+    <button id="set-api-key-btn" class="icon-btn" title="Set API key" aria-label="Set API key">🔑</button>
+    <button id="clear-btn" class="icon-btn" title="Clear conversation" aria-label="Clear conversation">🗑️</button>
   </div>
+  <div id="autonomy-bar" style="display:none">
+    <span id="autonomy-mode-label"></span>
+    <span id="autonomy-counter"></span>
+    <button id="autonomy-reset-btn" class="icon-btn" title="Reset autonomy" aria-label="Reset autonomy" style="display:none">✕</button>
+  </div>
+
   <div id="messages"></div>
+  <div id="empty-state">
+    <div class="empty-logo">🌙</div>
+    <h2>DreamGraph Architect</h2>
+    <p>Ask about features, workflows, data models, ADRs, tensions, or request changes.</p>
+    <div class="example-prompts">
+      <button class="example-prompt-btn" data-example="Explain the active file in system context">Explain the active file</button>
+      <button class="example-prompt-btn" data-example="What architectural tensions exist?">Show tensions</button>
+      <button class="example-prompt-btn" data-example="Scan the project and enrich the graph">Scan project</button>
+    </div>
+  </div>
+  <div id="thinking-indicator" style="display:none">
+    <span class="thinking-dots"><span></span><span></span><span></span></span>
+    <span id="thinking-label">Dreaming…</span>
+    <div id="tool-progress-list"></div>
+  </div>
   <div id="attachments"></div>
-  <form id="composer">
-    <button id="attachBtn" class="icon-btn" type="button" title="Attach files or images">
-      <svg viewBox="0 0 24 24"><path d="M16.5 6v11.5a4 4 0 0 1-8 0V5a2.5 2.5 0 0 1 5 0v10.5a1 1 0 0 1-2 0V6h-1.5v9.5a2.5 2.5 0 0 0 5 0V5a4 4 0 0 0-8 0v12.5a5.5 5.5 0 0 0 11 0V6H16.5z"/></svg>
-    </button>
-    <textarea id="prompt" rows="1" placeholder="Ask DreamGraph…" autocomplete="off"></textarea>
-    <button id="sendBtn" class="icon-btn primary" type="submit" title="Send message">
-      <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
-    </button>
-    <button id="stopBtn" class="icon-btn danger" type="button" title="Stop generation" style="display:none">
-      <svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
-    </button>
-    <button id="clear" class="icon-btn" type="button" title="Clear conversation">
-      <svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
-    </button>
-  </form>
-  ${libraryScripts}
+  <div id="composer">
+    <button id="attach-btn" class="icon-btn" title="Attach files" aria-label="Attach files">📎</button>
+    <textarea id="prompt" rows="1" placeholder="Ask DreamGraph Architect…"></textarea>
+    <button id="send-btn" class="icon-btn primary" title="Send" aria-label="Send">➤</button>
+    <button id="stop-btn" class="icon-btn danger" title="Stop" aria-label="Stop" style="display:none">■</button>
+  </div>
+
+  ${markdownItScript}
+  ${domPurifyScript}
+  ${webviewBundleScript}
+  ${!this._webviewBundleUri ? cardRendererScript : ''}
+  ${!this._webviewBundleUri ? renderScript : ''}
+  ${!this._webviewBundleUri ? entityLinkScript : ''}
   <script nonce="${nonce}">
-    (function() {
-      const vscode = acquireVsCodeApi();
-      const messagesEl = document.getElementById('messages');
-      const attachmentsEl = document.getElementById('attachments');
-      const form = document.getElementById('composer');
-      const promptEl = document.getElementById('prompt');
-      const attachBtn = document.getElementById('attachBtn');
-      const sendBtn = document.getElementById('sendBtn');
-      const stopBtn = document.getElementById('stopBtn');
-      const clearEl = document.getElementById('clear');
-      const providerSelect = document.getElementById('providerSelect');
-      const modelSelect = document.getElementById('modelSelect');
+    const vscode = acquireVsCodeApi();
+    const messagesEl = document.getElementById('messages');
+    const emptyStateEl = document.getElementById('empty-state');
+    const promptEl = document.getElementById('prompt');
+    const sendBtn = document.getElementById('send-btn');
+    const stopBtn = document.getElementById('stop-btn');
+    const clearBtn = document.getElementById('clear-btn');
+    const attachBtn = document.getElementById('attach-btn');
+    const attachmentsEl = document.getElementById('attachments');
+    const providerSelect = document.getElementById('provider-select');
+    const modelSelect = document.getElementById('model-select');
+    const setApiKeyBtn = document.getElementById('set-api-key-btn');
+    const thinkingEl = document.getElementById('thinking-indicator');
+    const thinkingLabel = document.getElementById('thinking-label');
+    const toolProgressListEl = document.getElementById('tool-progress-list');
 
-      // Markdown rendering availability flag
-      const markdownEnabled = typeof window.renderMarkdown === 'function';
+    let draftSaveTimer = null;
+    let lastToolTrace = [];
+    let lastVerdict = null;
+    let streamingBubble = null;
+    let streamingMarkdownEl = null;
+    let streamingRaw = '';
+    let verifyTimer = null;
+    const pendingVerification = new Map();
+    const actionStates = new Map();
 
-      let streamingEl = null;
-      let streamingContent = '';
-      let renderTimer = null;
-      let promptHistory = [];
-      let historyIndex = -1;
-      let historyDraft = '';
-      let attachmentState = [];
-      let currentCapabilities = { textAttachments: false, imageAttachments: false };
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
 
-      function scrollToBottom() { messagesEl.scrollTop = messagesEl.scrollHeight; }
+    function setEmptyStateVisible(visible) {
+      emptyStateEl.style.display = visible ? 'flex' : 'none';
+      messagesEl.style.display = visible ? 'none' : 'flex';
+    }
 
-      function autoResize() { promptEl.style.height = 'auto'; promptEl.style.height = Math.min(promptEl.scrollHeight, 200) + 'px'; }
+    function autoresize() {
+      promptEl.style.height = 'auto';
+      promptEl.style.height = Math.min(promptEl.scrollHeight, 200) + 'px';
+    }
 
-      /** Create a message bubble. Renders markdown for assistant messages. */
-      function createBubble(role, content) {
-        const div = document.createElement('div');
-        div.className = 'message ' + role;
-        if (role === 'assistant' && markdownEnabled) {
-          div.classList.add('markdown-body');
-          window.renderCompletedMessage(div, content);
-        } else {
-          div.textContent = content;
-        }
-        return div;
+    function queueDraftSave() {
+      if (draftSaveTimer) clearTimeout(draftSaveTimer);
+      draftSaveTimer = setTimeout(() => {
+        vscode.postMessage({ type: 'saveDraft', text: promptEl.value });
+      }, 250);
+    }
+
+    function createRoleHeader(roleMeta, messageId) {
+      const header = document.createElement('div');
+      header.className = 'message-header';
+      const left = document.createElement('div');
+      const title = document.createElement('div');
+      title.className = 'message-role-title';
+      title.textContent = roleMeta?.title || 'Message';
+      left.appendChild(title);
+      if (roleMeta?.subtitle) {
+        const subtitle = document.createElement('div');
+        subtitle.className = 'message-role-subtitle';
+        subtitle.textContent = roleMeta.subtitle;
+        left.appendChild(subtitle);
       }
+      const hoverActions = document.createElement('div');
+      hoverActions.className = 'message-actions-hover';
+      [['Copy','copyMessage'],['Retry','retryMessage'],['Pin','pinMessage']].forEach(([label, type]) => {
+        const btn = document.createElement('button');
+        btn.className = 'message-mini-btn';
+        btn.textContent = label;
+        btn.addEventListener('click', () => vscode.postMessage({ type, messageId }));
+        hoverActions.appendChild(btn);
+      });
+      header.appendChild(left);
+      header.appendChild(hoverActions);
+      return header;
+    }
 
-      /** Re-render all messages from state (after clear, hydrate, etc.) */
-      function render(messages) {
-        messagesEl.innerHTML = '';
-        streamingEl = null;
-        for (const message of messages) {
-          messagesEl.appendChild(createBubble(message.role, message.content));
-        }
-        scrollToBottom();
-      }
+    function renderVerdictBanner(verdict) {
+      if (!verdict) return null;
+      const banner = document.createElement('div');
+      banner.className = 'verdict-banner verdict-' + verdict.level;
+      const label = document.createElement('span');
+      label.className = 'verdict-label';
+      label.textContent = verdict.level;
+      const summary = document.createElement('span');
+      summary.textContent = verdict.summary;
+      banner.appendChild(label);
+      banner.appendChild(summary);
+      return banner;
+    }
 
-      function showThinking() {
-        if (document.getElementById('thinking-indicator')) return;
-        const el = document.createElement('div');
-        el.id = 'thinking-indicator';
-        el.textContent = '💭 Thinking';
-        messagesEl.appendChild(el);
-        scrollToBottom();
+    function renderToolTrace(trace) {
+      if (!Array.isArray(trace) || trace.length === 0) return null;
+      const details = document.createElement('details');
+      details.className = 'tool-trace';
+      const summary = document.createElement('summary');
+      summary.textContent = 'Tool trace (' + trace.length + ')';
+      details.appendChild(summary);
+      const list = document.createElement('div');
+      list.className = 'tool-trace-list';
+      for (const entry of trace) {
+        const item = document.createElement('div');
+        item.className = 'tool-trace-item';
+        const head = document.createElement('div');
+        head.className = 'tool-trace-head';
+        head.innerHTML = '<span>' + escapeHtml(entry.tool || 'tool') + '</span><span>' + escapeHtml(entry.status || '') + '</span>';
+        const meta = document.createElement('div');
+        meta.className = 'tool-trace-meta';
+        meta.textContent = (entry.argsSummary || '') + (entry.filesAffected?.length ? ' • ' + entry.filesAffected.join(', ') : '') + (Number.isFinite(entry.durationMs) ? ' • ' + entry.durationMs + 'ms' : '');
+        item.appendChild(head);
+        item.appendChild(meta);
+        list.appendChild(item);
       }
-      function hideThinking() {
-        const el = document.getElementById('thinking-indicator');
-        if (el) el.remove();
-      }
+      details.appendChild(list);
+      return details;
+    }
 
-      /** Mirror of server-side resetStreamState — ensures UI never stays stuck. */
-      function resetStreamUI() {
-        if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
-        // Final render of any remaining streamed content
-        if (streamingEl && streamingContent && markdownEnabled) {
-          streamingEl.innerHTML = window.renderMarkdown(streamingContent);
-          window.addCopyButtons(streamingEl);
-        }
-        streamingEl = null;
-        streamingContent = '';
-        hideThinking();
-        promptEl.disabled = false;
-        promptEl.placeholder = 'Ask DreamGraph…';
-        stopBtn.style.display = 'none';
-      }
+    function renderProvenance(message, trace) {
+      const div = document.createElement('div');
+      div.className = 'message-provenance';
+      div.textContent = trace && trace.length > 0
+        ? 'Provenance: grounded in executed tools and rendered output.'
+        : 'Provenance: rendered output without executed tool trace.';
+      return div;
+    }
 
-      function renderAttachments(items) {
-        attachmentState = items || [];
-        attachmentsEl.innerHTML = '';
-        for (const item of attachmentState) {
-          const chip = document.createElement('div');
-          chip.className = 'attachment-chip';
-          const icon = document.createElement('span');
-          icon.className = 'chip-icon';
-          icon.textContent = item.kind === 'image' ? '🖼' : '📄';
-          chip.appendChild(icon);
-          const label = document.createElement('span');
-          label.textContent = item.name + (item.note ? ' (' + item.note + ')' : '');
-          chip.appendChild(label);
-          const remove = document.createElement('button');
-          remove.type = 'button';
-          remove.className = 'attachment-remove';
-          remove.textContent = '×';
-          remove.title = 'Remove attachment';
-          remove.addEventListener('click', () => vscode.postMessage({ type: 'removeAttachment', id: item.id }));
-          chip.appendChild(remove);
-          attachmentsEl.appendChild(chip);
-        }
-      }
+    function renderContextFooter(text) {
+      if (!text) return null;
+      const div = document.createElement('div');
+      div.className = 'message-context-footer';
 
-      function updateModels(_providers, models, current, capabilities) {
-        currentCapabilities = capabilities || { textAttachments: false, imageAttachments: false };
-        if (current.provider) { providerSelect.value = current.provider; }
-        modelSelect.innerHTML = '';
-        if (models.length === 0) {
-          const opt = document.createElement('option'); opt.value = ''; opt.textContent = 'Model…'; modelSelect.appendChild(opt);
-        }
-        models.forEach(function(m) {
-          const opt = document.createElement('option'); opt.value = m; opt.textContent = m; modelSelect.appendChild(opt);
+      // Parse optional anchor-status sentinel: [anchor-status:STATE:LABEL]
+      // If found, strip sentinel from display text and append a styled badge.
+      const sentinelRe = /\s*\[anchor-status:([a-z]+):([^\]]*)\]\s*$/;
+      const match = text.match(sentinelRe);
+      if (match) {
+        const anchorState = match[1]; // promoted|rebound|drifted|archived|native|canonical
+        const anchorLabel = match[2];
+        const cleanText = text.replace(sentinelRe, '').trimEnd();
+        // Render prefix (e.g. "Instance: xxx • ") as plain text
+        const prefix = document.createTextNode(cleanText);
+        div.appendChild(prefix);
+        // Render the badge
+        const badge = document.createElement('span');
+        badge.className = 'anchor-state-badge anchor-state-' + anchorState;
+        badge.textContent = anchorLabel ? anchorState + ': ' + anchorLabel : anchorState;
+        badge.title = 'Semantic anchor migration state';
+        div.appendChild(badge);
+      } else {
+        div.textContent = text;
+      }
+      return div;
+    }
+
+    function renderImplicitEntityNotice(text) {
+      if (!text) return null;
+      const div = document.createElement('div');
+      div.className = 'implicit-entity-notice';
+      div.textContent = text;
+      return div;
+    }
+
+    function getActionState(messageId, actionId) {
+      return actionStates.get(messageId + ':' + actionId) || { status: 'idle', error: '' };
+    }
+
+    function renderMessageActions(message, actions) {
+      if (!Array.isArray(actions) || actions.length === 0) return null;
+      const wrap = document.createElement('div');
+      wrap.className = 'message-actions';
+      for (const action of actions) {
+        const state = getActionState(message.id, action.id);
+        const btn = document.createElement('button');
+        btn.className = 'message-action-btn ' + (action.kind === 'primary' ? 'primary' : 'secondary') + (state.status === 'loading' ? ' loading' : '');
+        btn.textContent = action.label;
+        btn.disabled = state.status === 'loading';
+        btn.addEventListener('click', () => {
+          if (state.status === 'loading') return;
+          vscode.postMessage({ type: 'runMessageAction', messageId: message.id, actionId: action.id });
         });
-        const customOpt = document.createElement('option');
-        customOpt.value = '__custom__';
-        customOpt.textContent = '+ Custom model…';
-        modelSelect.appendChild(customOpt);
-        if (current.model) {
-          let found = false;
-          for (let i = 0; i < modelSelect.options.length; i++) {
-            if (modelSelect.options[i].value === current.model) { found = true; break; }
-          }
-          if (!found && current.model) {
-            const extraOpt = document.createElement('option');
-            extraOpt.value = current.model;
-            extraOpt.textContent = current.model;
-            modelSelect.insertBefore(extraOpt, modelSelect.querySelector('[value="__custom__"]'));
-          }
-          modelSelect.value = current.model;
+        wrap.appendChild(btn);
+        if (state.status === 'failed' && state.error) {
+          const error = document.createElement('div');
+          error.className = 'message-action-error';
+          error.textContent = state.error;
+          wrap.appendChild(error);
         }
-        attachBtn.disabled = !(capabilities && (capabilities.textAttachments || capabilities.imageAttachments));
-        attachBtn.title = attachBtn.disabled ? 'Selected model does not support attachments' : 'Attach files or images (or paste from clipboard)';
       }
+      return wrap;
+    }
 
-      function showError(message) {
-        const el = document.createElement('div');
-        el.className = 'message error-msg';
-        el.textContent = message;
-        messagesEl.appendChild(el);
-        scrollToBottom();
+    function scheduleVerification(container) {
+      if (!container || typeof window.linkifyEntities !== 'function') return;
+      if (verifyTimer) clearTimeout(verifyTimer);
+      verifyTimer = setTimeout(() => {
+        const names = Array.from(container.querySelectorAll('a.entity-link'))
+          .map((a) => a.getAttribute('data-entity-name') || a.getAttribute('data-uri') || a.textContent || '')
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .slice(0, 100);
+        if (names.length === 0) return;
+        const requestId = 'verify_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+        pendingVerification.set(requestId, container);
+        vscode.postMessage({ type: 'verifyEntities', requestId, names });
+      }, 80);
+    }
+
+    function applyEntityVerification(container, results) {
+      if (!container) return;
+      for (const link of container.querySelectorAll('a.entity-link')) {
+        const name = (link.getAttribute('data-entity-name') || link.getAttribute('data-uri') || link.textContent || '').trim();
+        const status = results?.[name]?.status || 'unverified';
+        link.classList.remove('entity-verified', 'entity-latent', 'entity-tension', 'entity-unverified');
+        link.classList.add('entity-' + status);
       }
+    }
 
-      /* ── Clipboard paste handler for images ── */
-      promptEl.addEventListener('paste', function(e) {
-        const items = (e.clipboardData || {}).items;
-        if (!items) return;
-        for (let i = 0; i < items.length; i++) {
-          if (items[i].type.startsWith('image/')) {
-            e.preventDefault();
-            const file = items[i].getAsFile();
-            if (!file) return;
-            if (!currentCapabilities.imageAttachments) {
-              showError('Current model does not support image attachments.');
-              return;
-            }
-            const reader = new FileReader();
-            reader.onload = function() {
-              const dataUrl = reader.result;
-              const base64 = dataUrl.split(',')[1];
-              const mimeType = file.type || 'image/png';
-              vscode.postMessage({ type: 'pasteImage', dataBase64: base64, mimeType: mimeType });
-            };
-            reader.readAsDataURL(file);
-            return;
-          }
+    function schedulePostRenderWork(node, options) {
+      if (!node) return;
+      const opts = options || {};
+      requestAnimationFrame(() => {
+        if (typeof window.applyEntityLinks === 'function') {
+          window.applyEntityLinks(node);
         }
-      });
-
-      providerSelect.addEventListener('change', function() {
-        vscode.postMessage({ type: 'changeProvider', provider: this.value });
-      });
-      modelSelect.addEventListener('change', function() {
-        vscode.postMessage({ type: 'changeModel', model: this.value });
-      });
-      attachBtn.addEventListener('click', function() {
-        vscode.postMessage({ type: 'pickAttachments' });
-      });
-
-      window.addEventListener('message', function(event) {
-        const message = event.data;
-        switch (message.type) {
-          case 'state':
-            if (message.state) render(message.state.messages || []);
-            break;
-
-          case 'addMessage':
-            if (message.message) {
-              messagesEl.appendChild(createBubble(message.message.role, message.message.content));
-              scrollToBottom();
-            }
-            break;
-
-          case 'stream-start':
-            streamingEl = document.createElement('div');
-            streamingEl.className = 'message assistant' + (markdownEnabled ? ' markdown-body' : '');
-            streamingContent = '';
-            messagesEl.appendChild(streamingEl);
-            scrollToBottom();
-            promptEl.placeholder = 'Steer the conversation…';
-            stopBtn.style.display = '';
-            break;
-
-          case 'stream-chunk':
-            if (streamingEl && message.chunk) {
-              hideThinking();
-              streamingContent += message.chunk;
-              // Debounced rerender — ~80ms interval, no copy buttons during streaming
-              if (renderTimer) clearTimeout(renderTimer);
-              if (markdownEnabled) {
-                renderTimer = setTimeout(function() {
-                  if (!streamingEl) return;
-                  const atBottom = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 40;
-                  streamingEl.innerHTML = window.renderMarkdown(streamingContent);
-                  if (atBottom) scrollToBottom();
-                }, 80);
-              } else {
-                // Plaintext fallback
-                streamingEl.textContent = streamingContent;
-                scrollToBottom();
+        // DOM-based envelope replacement: find <pre><code> containing JSON envelopes
+        if (typeof window.renderEnvelope === 'function') {
+          node.querySelectorAll('pre').forEach((pre) => {
+            const code = pre.querySelector('code');
+            if (!code) return;
+            try {
+              const text = code.textContent || '';
+              const obj = JSON.parse(text);
+              if (obj && typeof obj === 'object' && typeof obj.summary === 'string' &&
+                  ('goal_status' in obj || 'recommended_next_steps' in obj)) {
+                const wrapper = document.createElement('div');
+                wrapper.innerHTML = window.renderEnvelope(obj);
+                const rendered = wrapper.firstElementChild;
+                if (rendered) pre.replaceWith(rendered);
               }
-            }
-            break;
-
-          case 'stream-thinking':
-            message.active ? showThinking() : hideThinking();
-            break;
-
-          case 'stream-end':
-            resetStreamUI();
-            promptEl.focus();
-            break;
-
-          case 'tool-progress':
-            // Visual progress already handled via stream-chunk; structured events available for future use
-            break;
-
-          case 'updateModels':
-            updateModels(message.providers, message.models, message.current, message.capabilities);
-            break;
-
-          case 'setAttachments':
-            renderAttachments(message.attachments || []);
-            break;
-
-          case 'error':
-            if (message.error) showError(message.error);
-            break;
-
-          case 'restoreDraft':
-            if (message.text) {
-              promptEl.value = message.text;
-              vscode.setState(Object.assign({}, vscode.getState() || {}, { draft: message.text }));
-              autoResize();
-            }
-            break;
+            } catch(_e) {}
+          });
+        }
+        // Wire envelope action chip clicks
+        node.querySelectorAll('.dg-envelope-action:not([data-wired])').forEach((btn) => {
+          btn.setAttribute('data-wired', '1');
+          btn.addEventListener('click', () => {
+            const actionId = btn.getAttribute('data-action-id') || '';
+            const label = btn.textContent || actionId;
+            if (label) vscode.postMessage({ type: 'envelopeAction', label: label });
+          });
+        });
+        node.querySelectorAll('.dg-envelope-do-all:not([data-wired])').forEach((btn) => {
+          btn.setAttribute('data-wired', '1');
+          btn.addEventListener('click', () => {
+            const labels = [];
+            node.querySelectorAll('.dg-envelope-action').forEach((a) => {
+              if (a.textContent) labels.push(a.textContent);
+            });
+            if (labels.length > 0) vscode.postMessage({ type: 'envelopeDoAll', labels: labels });
+          });
+        });
+        if (opts.verify !== false) {
+          scheduleVerification(node);
+        }
+        if (opts.stickToBottom !== false) {
+          messagesEl.scrollTop = messagesEl.scrollHeight;
         }
       });
+    }
 
-      function sendPrompt() {
+    function renderAssistantBody(message) {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'markdown-body';
+      const renderMarkdown = window.renderMarkdown || ((s) => escapeHtml(s));
+      let html = renderMarkdown(message.content || '');
+      if (typeof window.linkifyEntities === 'function') {
+        html = window.linkifyEntities(html) || html;
+      }
+      wrapper.innerHTML = html;
+      return wrapper;
+    }
+
+    function createMessageNode(message, actions, roleMeta, contextFooter, uiState) {
+      const bubble = document.createElement('div');
+      bubble.className = 'message ' + message.role;
+      bubble.dataset.messageId = message.id || '';
+      if (roleMeta) bubble.appendChild(createRoleHeader(roleMeta, message.id));
+
+      if (message.role === 'assistant') {
+        const state = uiState || {};
+        const body = renderAssistantBody(message);
+        bubble.appendChild(body);
+        const verdict = renderVerdictBanner(state.verdict || null);
+        if (verdict) bubble.appendChild(verdict);
+        const implicit = renderImplicitEntityNotice(message.implicitEntityNotice);
+        if (implicit) bubble.appendChild(implicit);
+        const trace = renderToolTrace(state.toolTrace || []);
+        if (trace) bubble.appendChild(trace);
+        bubble.appendChild(renderProvenance(message, state.toolTrace || []));
+        const actionBlock = renderMessageActions(message, actions);
+        if (actionBlock) bubble.appendChild(actionBlock);
+        const footer = renderContextFooter(contextFooter);
+        if (footer) bubble.appendChild(footer);
+        schedulePostRenderWork(body);
+      } else {
+        if (roleMeta) {
+          const body = document.createElement('div');
+          body.className = 'message-text';
+          body.textContent = message.content || '';
+          bubble.appendChild(body);
+        } else {
+          bubble.textContent = message.content || '';
+        }
+        const footer = renderContextFooter(contextFooter);
+        if (footer) bubble.appendChild(footer);
+      }
+      return bubble;
+    }
+
+    function addMessage(message, actions, roleMeta, contextFooter, uiState) {
+      setEmptyStateVisible(false);
+      const node = createMessageNode(message, actions, roleMeta, contextFooter, uiState);
+      messagesEl.appendChild(node);
+      requestAnimationFrame(() => {
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+      });
+    }
+
+    function rerenderMessageActions(messageId) {
+      const bubble = messagesEl.querySelector('.message[data-message-id="' + messageId + '"]');
+      if (!bubble) return;
+      const state = vscode.getState() || {};
+      const messages = state.messages || [];
+      const entry = messages.find((m) => m.message?.id === messageId);
+      if (!entry) return;
+      bubble.remove();
+      addMessage(entry.message, entry.actions, entry.roleMeta, entry.contextFooter, entry.uiState || { toolTrace: [], verdict: null });
+    }
+
+    function startStreaming() {
+      setEmptyStateVisible(false);
+      streamingRaw = '';
+      streamingBubble = document.createElement('div');
+      streamingBubble.className = 'message assistant';
+      streamingMarkdownEl = document.createElement('div');
+      streamingMarkdownEl.className = 'markdown-body';
+      streamingBubble.appendChild(streamingMarkdownEl);
+      messagesEl.appendChild(streamingBubble);
+      schedulePostRenderWork(streamingMarkdownEl, { verify: false });
+      sendBtn.style.display = 'none';
+      stopBtn.style.display = 'inline-flex';
+      thinkingEl.style.display = 'flex';
+    }
+
+    function updateStreaming(chunk) {
+      if (!streamingBubble || !streamingMarkdownEl) return;
+      streamingRaw += chunk;
+      const renderMarkdown = window.renderMarkdown || ((s) => escapeHtml(s));
+      let html = renderMarkdown(streamingRaw);
+      if (typeof window.linkifyEntities === 'function') {
+        html = window.linkifyEntities(html) || html;
+      }
+      streamingMarkdownEl.innerHTML = html;
+      schedulePostRenderWork(streamingMarkdownEl, { verify: false });
+    }
+
+    function endStreaming() {
+      if (streamingBubble) streamingBubble.remove();
+      streamingBubble = null;
+      streamingMarkdownEl = null;
+      streamingRaw = '';
+      sendBtn.style.display = 'inline-flex';
+      stopBtn.style.display = 'none';
+      thinkingEl.style.display = 'none';
+      toolProgressListEl.innerHTML = '';
+    }
+
+    function restoreState(payload) {
+      const entries = (payload?.messages || []).map((message) => ({
+        message,
+        actions: [],
+        roleMeta: message.role === 'assistant'
+          ? { title: 'DreamGraph Architect', subtitle: 'Graph-grounded assistant' }
+          : message.role === 'user'
+            ? { title: 'You' }
+            : { title: 'System' },
+        contextFooter: message.role === 'assistant'
+          ? 'Instance: ' + (message.instanceId || 'default') + ' • Actions require explicit click • Trace reflects real tool execution'
+          : message.role === 'user'
+            ? (() => {
+                const anchor = message.anchor;
+                if (!anchor) return 'Instance: ' + (message.instanceId || 'default');
+                const status = anchor.migrationStatus || 'native';
+                const label = anchor.canonicalId
+                  ? ((anchor.canonicalKind || 'entity') + ':' + anchor.canonicalId)
+                  : (anchor.symbolPath || anchor.label);
+                const anchorText = status === 'promoted'
+                  ? 'Anchor: promoted to ' + label
+                  : status === 'rebound'
+                    ? 'Anchor: rebound to ' + label
+                    : status === 'drifted'
+                      ? 'Anchor: drifted near ' + label
+                      : status === 'archived'
+                        ? 'Anchor: archived (' + label + ')'
+                        : (anchor.canonicalId ? 'Anchor: canonical ' + label : 'Anchor: native ' + label);
+                return 'Instance: ' + (message.instanceId || 'default') + ' • ' + anchorText;
+              })()
+            : 'Instance: ' + (message.instanceId || 'default') + ' • System message',
+        uiState: {
+          toolTrace: Array.isArray(message.toolTrace) ? message.toolTrace : [],
+          verdict: message.verdict || null,
+        },
+      }));
+      vscode.setState({ ...(vscode.getState() || {}), messages: entries });
+      messagesEl.innerHTML = '';
+      if (entries.length === 0) {
+        setEmptyStateVisible(true);
+        return;
+      }
+      setEmptyStateVisible(false);
+      for (const entry of entries) {
+        addMessage(entry.message, entry.actions, entry.roleMeta, entry.contextFooter, entry.uiState);
+      }
+    }
+
+    promptEl.addEventListener('input', () => {
+      autoresize();
+      queueDraftSave();
+    });
+    promptEl.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
         const text = promptEl.value.trim();
         if (!text) return;
-        if (promptHistory.length === 0 || promptHistory[promptHistory.length - 1] !== text) promptHistory.push(text);
-        historyIndex = -1; historyDraft = '';
         vscode.postMessage({ type: 'send', text });
-        promptEl.value = ''; promptEl.style.height = 'auto';
-        vscode.setState(Object.assign({}, vscode.getState() || {}, { draft: '' }));
-        vscode.postMessage({ type: 'saveDraft', text: '' });
+        promptEl.value = '';
+        autoresize();
+        queueDraftSave();
       }
+    });
+    sendBtn.addEventListener('click', () => {
+      const text = promptEl.value.trim();
+      if (!text) return;
+      vscode.postMessage({ type: 'send', text });
+      promptEl.value = '';
+      autoresize();
+      queueDraftSave();
+    });
+    stopBtn.addEventListener('click', () => vscode.postMessage({ type: 'stop' }));
+    clearBtn.addEventListener('click', () => vscode.postMessage({ type: 'clear' }));
+    attachBtn.addEventListener('click', () => vscode.postMessage({ type: 'pickAttachments' }));
+    const autonomyResetBtn = document.getElementById('autonomy-reset-btn');
+    if (autonomyResetBtn) autonomyResetBtn.addEventListener('click', () => vscode.postMessage({ type: 'resetAutonomy' }));
+    providerSelect.addEventListener('change', () => vscode.postMessage({ type: 'changeProvider', provider: providerSelect.value }));
+    modelSelect.addEventListener('change', () => vscode.postMessage({ type: 'changeModel', model: modelSelect.value }));
+    setApiKeyBtn.addEventListener('click', () => vscode.postMessage({ type: 'setApiKey' }));
+    document.querySelectorAll('.example-prompt-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        promptEl.value = btn.getAttribute('data-example') || '';
+        autoresize();
+        promptEl.focus();
+      });
+    });
 
-      promptEl.addEventListener('keydown', function(e) {
-        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendPrompt(); return; }
-        if (e.key === 'ArrowUp') {
-          var cursorAtStart = promptEl.selectionStart === 0 && promptEl.selectionEnd === 0;
-          var textBeforeCursor = promptEl.value.substring(0, promptEl.selectionStart);
-          if (cursorAtStart || !textBeforeCursor.includes('\\n')) {
-            if (promptHistory.length > 0) {
-              if (historyIndex === -1) { historyDraft = promptEl.value; historyIndex = promptHistory.length - 1; }
-              else if (historyIndex > 0) historyIndex--; else return;
-              e.preventDefault(); promptEl.value = promptHistory[historyIndex]; autoResize(); promptEl.setSelectionRange(0,0);
+    // Clipboard image paste — intercept paste events on the prompt area
+    // and forward image data to the extension host for attachment.
+    promptEl.addEventListener('paste', (event) => {
+      const items = event.clipboardData?.items;
+      if (!items) return;
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.type.startsWith('image/')) {
+          event.preventDefault();
+          const blob = item.getAsFile();
+          if (!blob) return;
+          const reader = new FileReader();
+          reader.onload = () => {
+            const dataUrl = reader.result;
+            if (typeof dataUrl !== 'string') return;
+            // dataUrl format: "data:image/png;base64,iVBOR..."
+            const commaIdx = dataUrl.indexOf(',');
+            if (commaIdx < 0) return;
+            const dataBase64 = dataUrl.slice(commaIdx + 1);
+            const mimeType = item.type || 'image/png';
+            vscode.postMessage({ type: 'pasteImage', dataBase64, mimeType });
+          };
+          reader.readAsDataURL(blob);
+          return; // handle only the first image
+        }
+      }
+    });
+
+    window.addEventListener('message', (event) => {
+      const msg = event.data;
+      switch (msg.type) {
+        case 'state':
+          restoreState(msg.state);
+          break;
+        case 'restoreDraft':
+          promptEl.value = msg.text || '';
+          autoresize();
+          break;
+        case 'stream-start':
+          startStreaming();
+          break;
+        case 'stream-chunk':
+          updateStreaming(msg.chunk || '');
+          break;
+        case 'stream-thinking':
+          thinkingEl.style.display = msg.active ? 'flex' : 'none';
+          break;
+        case 'stream-end':
+          endStreaming();
+          break;
+        case 'tool-progress': {
+          const row = document.createElement('div');
+          row.className = 'tool-row';
+          row.innerHTML = '<span class="tool-name">' + escapeHtml(msg.tool || 'tool') + '</span><span>' + escapeHtml(msg.message || '') + '</span>';
+          toolProgressListEl.appendChild(row);
+          break;
+        }
+        case 'addMessage': {
+          const uiState = { toolTrace: [...lastToolTrace], verdict: lastVerdict };
+          const state = vscode.getState() || {};
+          const entries = [...(state.messages || []), {
+            message: msg.message,
+            actions: msg.actions || [],
+            roleMeta: msg.roleMeta,
+            contextFooter: msg.contextFooter,
+            uiState: uiState,
+          }];
+          vscode.setState({ ...state, messages: entries });
+          addMessage(msg.message, msg.actions || [], msg.roleMeta, msg.contextFooter, uiState);
+          break;
+        }
+        case 'messageActionState': {
+          actionStates.set(msg.messageId + ':' + msg.actionId, { status: msg.status, error: msg.error || '' });
+          rerenderMessageActions(msg.messageId);
+          break;
+        }
+        case 'entityStatus': {
+          const container = pendingVerification.get(msg.requestId);
+          if (container) {
+            applyEntityVerification(container, msg.results || {});
+            pendingVerification.delete(msg.requestId);
+          }
+          break;
+        }
+        case 'toolTrace':
+          lastToolTrace = Array.isArray(msg.calls) ? msg.calls : [];
+          break;
+        case 'verdict':
+          lastVerdict = msg.verdict || null;
+          break;
+        case 'updateModels': {
+          providerSelect.innerHTML = '';
+          for (const p of msg.providers || []) {
+            const opt = document.createElement('option');
+            opt.value = p;
+            opt.textContent = p;
+            if (p === msg.current?.provider) opt.selected = true;
+            providerSelect.appendChild(opt);
+          }
+          modelSelect.innerHTML = '';
+          for (const m of msg.models || []) {
+            const opt = document.createElement('option');
+            opt.value = m;
+            opt.textContent = m;
+            if (m === msg.current?.model) opt.selected = true;
+            modelSelect.appendChild(opt);
+          }
+          const customOpt = document.createElement('option');
+          customOpt.value = '__custom__';
+          customOpt.textContent = '+ Custom model…';
+          modelSelect.appendChild(customOpt);
+          break;
+        }
+        case 'setAttachments': {
+          attachmentsEl.innerHTML = '';
+          for (const attachment of msg.attachments || []) {
+            const chip = document.createElement('div');
+            chip.className = 'attachment-chip';
+            chip.innerHTML = '<span class="chip-icon">' + (attachment.kind === 'image' ? '🖼️' : '📄') + '</span><span>' + escapeHtml(attachment.name) + '</span>';
+            const remove = document.createElement('button');
+            remove.className = 'attachment-remove';
+            remove.textContent = '×';
+            remove.addEventListener('click', () => vscode.postMessage({ type: 'removeAttachment', id: attachment.id }));
+            chip.appendChild(remove);
+            attachmentsEl.appendChild(chip);
+          }
+          break;
+        }
+        case 'error':
+          console.error(msg.error);
+          break;
+        case 'autonomyStatus': {
+          const bar = document.getElementById('autonomy-bar');
+          const label = document.getElementById('autonomy-mode-label');
+          const counter = document.getElementById('autonomy-counter');
+          const resetBtn = document.getElementById('autonomy-reset-btn');
+          if (bar && label && counter && resetBtn) {
+            const s = msg.status;
+            bar.style.display = 'flex';
+            label.textContent = s.mode.charAt(0).toUpperCase() + s.mode.slice(1);
+            label.className = 'autonomy-mode autonomy-mode-' + s.mode;
+            counter.textContent = s.countingActive ? s.summary : '';
+            resetBtn.style.display = s.mode !== 'cautious' || s.countingActive ? 'inline-flex' : 'none';
+          }
+          break;
+        }
+        case 'recommendedActions': {
+          const targetBubble = messagesEl.querySelector('.message[data-message-id="' + msg.messageId + '"]');
+          if (targetBubble) {
+            const existing = targetBubble.querySelector('.recommended-actions');
+            if (existing) existing.remove();
+            const wrapper = document.createElement('div');
+            wrapper.className = 'recommended-actions';
+            for (const action of msg.actions || []) {
+              const chip = document.createElement('button');
+              chip.className = 'action-chip';
+              chip.textContent = action.label;
+              if (action.rationale) chip.title = action.rationale;
+              chip.addEventListener('click', () => vscode.postMessage({ type: 'selectRecommendedAction', actionId: action.id }));
+              wrapper.appendChild(chip);
             }
+            if (msg.doAllEligible && (msg.actions || []).length > 1) {
+              const doAll = document.createElement('button');
+              doAll.className = 'action-chip action-chip-all';
+              doAll.textContent = 'Do all';
+              doAll.addEventListener('click', () => vscode.postMessage({ type: 'doAllRecommendedActions' }));
+              wrapper.appendChild(doAll);
+            }
+            targetBubble.appendChild(wrapper);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
           }
-          return;
+          break;
         }
-        if (e.key === 'ArrowDown') {
-          if (historyIndex === -1) return;
-          var textAfterCursor = promptEl.value.substring(promptEl.selectionEnd);
-          var cursorAtEnd = promptEl.selectionEnd === promptEl.value.length;
-          if (cursorAtEnd || !textAfterCursor.includes('\\n')) {
-            if (historyIndex < promptHistory.length - 1) { historyIndex++; e.preventDefault(); promptEl.value = promptHistory[historyIndex]; }
-            else { historyIndex = -1; e.preventDefault(); promptEl.value = historyDraft; }
-            autoResize(); var len = promptEl.value.length; promptEl.setSelectionRange(len, len);
-          }
-        }
-      });
-
-      form.addEventListener('submit', function(event) { event.preventDefault(); sendPrompt(); });
-      stopBtn.addEventListener('click', function() { vscode.postMessage({ type: 'stop' }); });
-      clearEl.addEventListener('click', function() { vscode.postMessage({ type: 'clear' }); });
-
-      var savedState = vscode.getState();
-      if (savedState && savedState.draft) { promptEl.value = savedState.draft; autoResize(); }
-      promptEl.addEventListener('input', function() {
-        autoResize();
-        var draft = promptEl.value;
-        vscode.setState(Object.assign({}, vscode.getState() || {}, { draft: draft }));
-        vscode.postMessage({ type: 'saveDraft', text: draft });
-      });
-
-      // Init link interceptor (Slice 1 — routes http(s) links via extension host)
-      if (markdownEnabled && typeof window.initLinkInterceptor === 'function') {
-        window.initLinkInterceptor();
       }
+    });
 
-      vscode.postMessage({ type: 'ready' });
-    })();
+    autoresize();
+    vscode.postMessage({ type: 'ready' });
   </script>
 </body>
 </html>`;

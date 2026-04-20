@@ -60,6 +60,8 @@ exports.checkAdrComplianceCommand = checkAdrComplianceCommand;
 exports.openChatCommand = openChatCommand;
 exports.setArchitectApiKeyCommand = setArchitectApiKeyCommand;
 exports.showGraphSignalCommand = showGraphSignalCommand;
+exports.setAutonomyModeCommand = setAutonomyModeCommand;
+exports.resetAutonomyCommand = resetAutonomyCommand;
 const vscode = __importStar(require("vscode"));
 const cp = __importStar(require("node:child_process"));
 const instance_resolver_js_1 = require("./instance-resolver.js");
@@ -310,39 +312,8 @@ async function stopDaemonCommand(svc) {
 /* ------------------------------------------------------------------ */
 /*  Command: Inspect Context (§3.6)                                   */
 /* ------------------------------------------------------------------ */
-function inspectContextCommand(svc) {
-    // Build a snapshot of the current editor context envelope
-    const editor = vscode.window.activeTextEditor;
-    const workspaceRoot = getWorkspaceFolderPath() ?? "";
-    const instance = svc.getInstance();
-    const envelope = {
-        workspaceRoot,
-        instanceId: instance?.uuid ?? null,
-        activeFile: editor
-            ? {
-                path: vscode.workspace.asRelativePath(editor.document.uri),
-                languageId: editor.document.languageId,
-                lineCount: editor.document.lineCount,
-                cursorLine: editor.selection.active.line + 1,
-                cursorColumn: editor.selection.active.character + 1,
-                selection: editor.selection.isEmpty
-                    ? null
-                    : {
-                        startLine: editor.selection.start.line + 1,
-                        endLine: editor.selection.end.line + 1,
-                        text: editor.document.getText(editor.selection),
-                    },
-            }
-            : null,
-        visibleFiles: vscode.window.visibleTextEditors.map((e) => vscode.workspace.asRelativePath(e.document.uri)),
-        changedFiles: vscode.workspace.textDocuments
-            .filter((d) => d.isDirty)
-            .map((d) => vscode.workspace.asRelativePath(d.uri)),
-        pinnedFiles: [], // M2+: user-pinned files
-        graphContext: null,
-        intentMode: "manual",
-        intentConfidence: 1.0,
-    };
+async function inspectContextCommand(svc) {
+    const envelope = await svc.contextBuilder.buildEnvelope(undefined, "inspectContext");
     svc.contextInspector.logEnvelope(envelope);
     svc.contextInspector.showContextChannel();
 }
@@ -417,13 +388,12 @@ async function explainFileCommand(svc) {
         title: "DreamGraph: Explaining file…",
         cancellable: false,
     }, async () => {
-        // Build context envelope (mode: active_file via command source)
         const envelope = await svc.contextBuilder.buildEnvelope(undefined, "explainFile");
-        const fileContent = svc.contextBuilder.readActiveFileContent();
-        // Assemble context block with token budget
-        const contextBlock = svc.contextBuilder.assembleContextBlock(envelope, fileContent, new Map());
-        // Assemble prompt
-        const { system } = (0, index_js_1.assemblePrompt)("explain", envelope, contextBlock.text);
+        const packet = await svc.contextBuilder.buildReasoningPacket(envelope, {
+            commandSource: "explainFile",
+        });
+        const renderedPacket = svc.contextBuilder.renderReasoningPacket(packet);
+        const { system } = (0, index_js_1.assemblePrompt)("explain", envelope, renderedPacket.text);
         const filePath = vscode.workspace.asRelativePath(editor.document.uri);
         const messages = [
             { role: "system", content: system },
@@ -434,13 +404,12 @@ async function explainFileCommand(svc) {
         ];
         try {
             const response = await svc.architectLlm.call(messages);
-            // Output destination rule: if chat is visible, render there; otherwise output channel
             if (svc.chatPanel.isVisible) {
                 svc.chatPanel.addExternalMessage("user", `Explain file: ${filePath}`);
                 svc.chatPanel.addExternalMessage("assistant", response.content);
             }
             else {
-                svc.contextInspector.showRawOutput(`--- Explain: ${filePath} ---\n\n${response.content}\n\n[${response.promptTokens} prompt + ${response.completionTokens} completion tokens, ${response.durationMs}ms]`);
+                svc.contextInspector.showRawOutput(`--- Explain: ${filePath} ---\n\n${response.content}\n\n[packet ${packet.tokenUsage.used}/${packet.tokenUsage.budget} tokens, ${response.promptTokens} prompt + ${response.completionTokens} completion tokens, ${response.durationMs}ms]`);
             }
         }
         catch (err) {
@@ -466,13 +435,12 @@ async function checkAdrComplianceCommand(svc) {
         title: "DreamGraph: Checking ADR compliance…",
         cancellable: false,
     }, async () => {
-        // Build context envelope
         const envelope = await svc.contextBuilder.buildEnvelope(undefined, "checkAdrCompliance");
-        const fileContent = svc.contextBuilder.readActiveFileContent();
-        // Assemble context block
-        const contextBlock = svc.contextBuilder.assembleContextBlock(envelope, fileContent, new Map());
-        // Assemble prompt with validate overlay
-        const { system } = (0, index_js_1.assemblePrompt)("validate", envelope, contextBlock.text);
+        const packet = await svc.contextBuilder.buildReasoningPacket(envelope, {
+            commandSource: "checkAdrCompliance",
+        });
+        const renderedPacket = svc.contextBuilder.renderReasoningPacket(packet);
+        const { system } = (0, index_js_1.assemblePrompt)("validate", envelope, renderedPacket.text);
         const filePath = vscode.workspace.asRelativePath(editor.document.uri);
         const messages = [
             { role: "system", content: system },
@@ -483,13 +451,12 @@ async function checkAdrComplianceCommand(svc) {
         ];
         try {
             const response = await svc.architectLlm.call(messages);
-            // Output destination rule
             if (svc.chatPanel.isVisible) {
                 svc.chatPanel.addExternalMessage("user", `Check ADR compliance: ${filePath}`);
                 svc.chatPanel.addExternalMessage("assistant", response.content);
             }
             else {
-                svc.contextInspector.showRawOutput(`--- ADR Compliance: ${filePath} ---\n\n${response.content}\n\n[${response.promptTokens} prompt + ${response.completionTokens} completion tokens, ${response.durationMs}ms]`);
+                svc.contextInspector.showRawOutput(`--- ADR Compliance: ${filePath} ---\n\n${response.content}\n\n[packet ${packet.tokenUsage.used}/${packet.tokenUsage.budget} tokens, ${response.promptTokens} prompt + ${response.completionTokens} completion tokens, ${response.durationMs}ms]`);
             }
         }
         catch (err) {
@@ -644,5 +611,20 @@ async function showGraphSignalCommand(svc) {
     if (choice === "Open Chat") {
         svc.chatPanel.open();
     }
+}
+/* ================================================================== */
+/*  AUTONOMY COMMANDS                                                 */
+/* ================================================================== */
+async function setAutonomyModeCommand(svc) {
+    const modes = ["cautious", "conscientious", "eager", "autonomous"];
+    const picked = await vscode.window.showQuickPick(modes.map((m) => ({ label: m, description: m === "cautious" ? "(default)" : undefined })), { placeHolder: "Select autonomy mode" });
+    if (!picked)
+        return;
+    const config = vscode.workspace.getConfiguration("dreamgraph.architect");
+    await config.update("autonomyMode", picked.label, vscode.ConfigurationTarget.Workspace);
+    // applyAutonomySettings is called via onDidChangeConfiguration listener
+}
+function resetAutonomyCommand(svc) {
+    svc.chatPanel.applyAutonomySettings();
 }
 //# sourceMappingURL=commands.js.map

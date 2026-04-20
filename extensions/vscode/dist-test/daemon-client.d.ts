@@ -25,28 +25,37 @@ export interface GraphContextResponse {
     features: Array<{
         id: string;
         name: string;
-        description: string;
+        description?: string;
+        relevance?: number;
     }>;
     workflows: Array<{
         id: string;
         name: string;
+        relevance?: number;
     }>;
     adrs: Array<{
         id: string;
         title: string;
         status: string;
+        summary?: string;
+        relevance?: number;
     }>;
     ui_elements: Array<{
         id: string;
         name: string;
         element_type: string;
+        relevance?: number;
     }>;
     api_surface: object | null;
     tensions: Array<{
         id: string;
-        description: string;
-        severity: string;
+        description?: string;
+        summary?: string;
+        severity?: string;
+        urgency?: number;
+        relevance?: number;
     }>;
+    cognitive_state?: string;
 }
 export declare class DaemonClient {
     private _host;

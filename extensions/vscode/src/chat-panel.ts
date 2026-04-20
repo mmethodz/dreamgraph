@@ -58,6 +58,7 @@ interface ChatMessage {
   sourceMessageId?: string;
   verdict?: VerdictBanner;
   toolTrace?: ToolTraceEntry[];
+  anchor?: import('./types.js').SemanticAnchor;
 }
 
 interface MessageAction {
@@ -204,6 +205,7 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
   private architectLlm?: ArchitectLlm;
   private contextBuilder?: ContextBuilder;
   private mcpClient?: McpClient;
+  private _restoringAnchors = false;
   private changedFilesView?: ChangedFilesView;
   private currentInstanceId = 'default';
   private streaming = false;
@@ -530,16 +532,19 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
     this._detectAutonomyRequest(text);
 
     const attachmentSummary = this._attachmentSummaryForUserMessage();
+    const envelope = this.contextBuilder ? await this.contextBuilder.buildEnvelope(text) : null;
+    const liveAnchor = envelope?.activeFile?.selection?.anchor ?? envelope?.activeFile?.cursorAnchor;
     const userMessage: ChatMessage = {
       id: this._createMessageId(),
       role: 'user',
       content: attachmentSummary ? `${text}\n\n${attachmentSummary}` : text,
       timestamp: new Date().toISOString(),
       instanceId: this.currentInstanceId,
+      anchor: liveAnchor,
     };
 
     this.messages.push(userMessage);
-    await this.persistMessages();
+    await this._persistMessagesWithCanonicalAnchorRefresh(envelope);
     await this.postMessage({ type: 'addMessage', message: userMessage, actions: this._buildMessageActions(userMessage), roleMeta: this._roleMetaFor(userMessage), contextFooter: this._contextFooterFor(userMessage) });
 
     if (!this.architectLlm || !this.architectLlm.isConfigured) {
@@ -565,7 +570,6 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       this._lastVerdict = null;
       this.abortController = new AbortController();
 
-      const envelope = this.contextBuilder ? await this.contextBuilder.buildEnvelope(text) : null;
       const task = inferTask(envelope?.intentMode ?? 'ask_dreamgraph');
       const autonomyInstruction: AutonomyInstructionState | undefined = this._autonomyEnabled
         ? { ...this._autonomyState, enabled: true }
@@ -891,13 +895,46 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
     return { title: 'System' };
   }
 
-  private _contextFooterFor(message: ChatMessage): string {
+    private _formatAnchorFooterStatus(anchor: import('./types.js').SemanticAnchor): string {
+    const status = anchor.migrationStatus ?? 'native';
+    const label = anchor.canonicalId
+      ? `${anchor.canonicalKind ?? 'entity'}:${anchor.canonicalId}`
+      : anchor.symbolPath ?? anchor.label;
+
+    // Embed a sentinel token that renderContextFooter() in the webview
+    // will parse into a styled badge. Format: [anchor-status:STATE:LABEL]
+    // The sentinel is kept at the end so the human-readable prefix still
+    // renders correctly in any context that doesn't strip it.
+    const sentinel = `[anchor-status:${status}:${label ?? ''}]`;
+
+    switch (status) {
+      case 'promoted':
+        return `Anchor: promoted to ${label} ${sentinel}`;
+      case 'rebound':
+        return `Anchor: rebound to ${label} ${sentinel}`;
+      case 'drifted':
+        return `Anchor: drifted near ${label} ${sentinel}`;
+      case 'archived':
+        return `Anchor: archived (${label}) ${sentinel}`;
+      case 'native':
+      default:
+        return anchor.canonicalId
+          ? `Anchor: canonical ${label} ${sentinel}`
+          : `Anchor: native ${label} ${sentinel}`;
+    }
+  }
+
+    private _contextFooterFor(message: ChatMessage): string {
     const scope = message.instanceId ?? this.currentInstanceId;
+    const anchor = message.anchor;
+
+    const anchorStatus = anchor ? this._formatAnchorFooterStatus(anchor) : undefined;
+
     if (message.role === 'assistant') {
       return `Instance: ${scope} • Actions require explicit click • Trace reflects real tool execution`;
     }
     if (message.role === 'user') {
-      return `Instance: ${scope}`;
+      return anchorStatus ? `Instance: ${scope} • ${anchorStatus}` : `Instance: ${scope}`;
     }
     return `Instance: ${scope} • System message`;
   }
@@ -1083,10 +1120,81 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
     await this.memory.save(this.currentInstanceId, this.messages as PersistedMessage[]);
   }
 
+  private async _persistMessagesWithCanonicalAnchorRefresh(
+    envelope: import('./types.js').EditorContextEnvelope | null,
+  ): Promise<void> {
+    if (!this.memory) return;
+
+    const canonicalAnchor = envelope?.activeFile?.selection?.anchor ?? envelope?.activeFile?.cursorAnchor;
+    if (canonicalAnchor?.canonicalId) {
+      for (let index = this.messages.length - 1; index >= 0; index -= 1) {
+        const message = this.messages[index];
+        if (message.role !== 'user' || !message.anchor) continue;
+        if (message.instanceId && message.instanceId !== this.currentInstanceId) continue;
+        if (message.anchor.canonicalId) break;
+        if (message.anchor.path !== canonicalAnchor.path) continue;
+        this.messages[index] = {
+          ...message,
+          anchor: {
+            ...message.anchor,
+            canonicalId: canonicalAnchor.canonicalId,
+            canonicalKind: canonicalAnchor.canonicalKind,
+            migrationStatus: canonicalAnchor.migrationStatus ?? message.anchor.migrationStatus ?? 'promoted',
+            confidence: Math.max(message.anchor.confidence ?? 0, canonicalAnchor.confidence ?? 0),
+            label: canonicalAnchor.label,
+          },
+        };
+        break;
+      }
+    }
+
+    await this.persistMessages();
+  }
+
   private async restoreMessages(): Promise<void> {
     if (!this.memory) return;
     const saved = await this.memory.load(this.currentInstanceId);
-    const scoped = (saved as ChatMessage[]).filter((message) => !message.instanceId || message.instanceId === this.currentInstanceId);
+    let scoped = (saved as ChatMessage[]).filter((message) => !message.instanceId || message.instanceId === this.currentInstanceId);
+
+    if (this.contextBuilder && !this._restoringAnchors) {
+      this._restoringAnchors = true;
+      try {
+        const graphContext = await this.contextBuilder.resolveGraphContext(
+          {
+            workspaceRoot: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '',
+            instanceId: this.currentInstanceId,
+            activeFile: null,
+            visibleFiles: [],
+            changedFiles: [],
+            pinnedFiles: [],
+            graphContext: null,
+            intentMode: 'manual',
+            intentConfidence: 0,
+          },
+          {
+            intentMode: 'manual',
+            taskSummary: 'Rehydrate stored chat anchors',
+            primaryAnchor: undefined,
+            secondaryAnchors: [],
+            requiredEvidence: [],
+            optionalEvidence: ['feature', 'workflow', 'adr', 'ui'],
+            codeReadPlan: [],
+            budgetPolicy: {
+              maxTokens: 0,
+              reserveTokens: 0,
+              allowFullActiveFile: false,
+              includeOptionalEvidence: true,
+            },
+          },
+        );
+        scoped = await this.contextBuilder.rehydrateStoredAnchors(scoped, graphContext);
+      } catch {
+        // Rehydration is best-effort; keep stored anchors unchanged on failure
+      } finally {
+        this._restoringAnchors = false;
+      }
+    }
+
     this.messages.splice(0, this.messages.length, ...scoped.map((message) => ({ ...message, instanceId: message.instanceId ?? this.currentInstanceId })));
     this._hoverActionStateByMessage.clear();
     await this.postState();
@@ -1320,15 +1428,18 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
 
     try {
       // Build continuation message
+      const envelope = this.contextBuilder ? await this.contextBuilder.buildEnvelope(prompt) : null;
+      const liveAnchor = envelope?.activeFile?.selection?.anchor ?? envelope?.activeFile?.cursorAnchor;
       const userMessage: ChatMessage = {
         id: this._createMessageId(),
         role: 'user',
         content: prompt,
         timestamp: new Date().toISOString(),
         instanceId: this.currentInstanceId,
+        anchor: liveAnchor,
       };
       this.messages.push(userMessage);
-      await this.persistMessages();
+      await this._persistMessagesWithCanonicalAnchorRefresh(envelope);
 
       this.streaming = true;
       this.streamingContent = '';
@@ -1336,7 +1447,6 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       this._lastVerdict = null;
       this.abortController = new AbortController();
 
-      const envelope = this.contextBuilder ? await this.contextBuilder.buildEnvelope(prompt) : null;
       const task = inferTask(envelope?.intentMode ?? 'ask_dreamgraph');
       const autonomyInstruction: AutonomyInstructionState = { ...this._autonomyState, enabled: true };
       const provider = this.architectLlm?.provider ?? undefined;
@@ -2004,7 +2114,27 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       if (!text) return null;
       const div = document.createElement('div');
       div.className = 'message-context-footer';
-      div.textContent = text;
+
+      // Parse optional anchor-status sentinel: [anchor-status:STATE:LABEL]
+      // If found, strip sentinel from display text and append a styled badge.
+      const sentinelRe = /\s*\[anchor-status:([a-z]+):([^\]]*)\]\s*$/;
+      const match = text.match(sentinelRe);
+      if (match) {
+        const anchorState = match[1]; // promoted|rebound|drifted|archived|native|canonical
+        const anchorLabel = match[2];
+        const cleanText = text.replace(sentinelRe, '').trimEnd();
+        // Render prefix (e.g. "Instance: xxx • ") as plain text
+        const prefix = document.createTextNode(cleanText);
+        div.appendChild(prefix);
+        // Render the badge
+        const badge = document.createElement('span');
+        badge.className = 'anchor-state-badge anchor-state-' + anchorState;
+        badge.textContent = anchorLabel ? anchorState + ': ' + anchorLabel : anchorState;
+        badge.title = 'Semantic anchor migration state';
+        div.appendChild(badge);
+      } else {
+        div.textContent = text;
+      }
       return div;
     }
 
@@ -2243,7 +2373,24 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
         contextFooter: message.role === 'assistant'
           ? 'Instance: ' + (message.instanceId || 'default') + ' • Actions require explicit click • Trace reflects real tool execution'
           : message.role === 'user'
-            ? 'Instance: ' + (message.instanceId || 'default')
+            ? (() => {
+                const anchor = message.anchor;
+                if (!anchor) return 'Instance: ' + (message.instanceId || 'default');
+                const status = anchor.migrationStatus || 'native';
+                const label = anchor.canonicalId
+                  ? ((anchor.canonicalKind || 'entity') + ':' + anchor.canonicalId)
+                  : (anchor.symbolPath || anchor.label);
+                const anchorText = status === 'promoted'
+                  ? 'Anchor: promoted to ' + label
+                  : status === 'rebound'
+                    ? 'Anchor: rebound to ' + label
+                    : status === 'drifted'
+                      ? 'Anchor: drifted near ' + label
+                      : status === 'archived'
+                        ? 'Anchor: archived (' + label + ')'
+                        : (anchor.canonicalId ? 'Anchor: canonical ' + label : 'Anchor: native ' + label);
+                return 'Instance: ' + (message.instanceId || 'default') + ' • ' + anchorText;
+              })()
             : 'Instance: ' + (message.instanceId || 'default') + ' • System message',
         uiState: {
           toolTrace: Array.isArray(message.toolTrace) ? message.toolTrace : [],

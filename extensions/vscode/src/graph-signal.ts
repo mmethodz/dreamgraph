@@ -162,8 +162,8 @@ export class GraphSignalProvider implements vscode.Disposable {
         summary: this._buildSummary(result, insights),
         tensions: result.tensions.map((t) => ({
           id: t.id,
-          description: t.description,
-          severity: t.severity,
+          description: t.description ?? t.summary ?? "",
+          severity: t.severity ?? "",
         })),
         insights,
         adrs: result.adrs.map((a) => ({
@@ -226,13 +226,14 @@ export class GraphSignalProvider implements vscode.Disposable {
   /* ---- Summary Builder ---- */
 
   private _buildSummary(
-    result: { features: unknown[]; workflows: unknown[]; adrs: Array<{ id: string; title: string }>; tensions: Array<{ id: string; description: string }> },
+    result: { features: unknown[]; workflows: unknown[]; adrs: Array<{ id: string; title: string }>; tensions: Array<{ id: string; description?: string; summary?: string }> },
     insights: Array<{ type: string; insight: string }>,
   ): string {
     const parts: string[] = [];
 
     if (result.tensions.length > 0) {
-      parts.push(`${result.tensions.length} tension${result.tensions.length > 1 ? "s" : ""}: ${result.tensions[0].description.slice(0, 60)}`);
+      const tensionText = (result.tensions[0].description ?? result.tensions[0].summary ?? "").slice(0, 60);
+      parts.push(`${result.tensions.length} tension${result.tensions.length > 1 ? "s" : ""}: ${tensionText}`);
     }
     if (insights.length > 0) {
       parts.push(`${insights.length} insight${insights.length > 1 ? "s" : ""}: ${insights[0].insight.slice(0, 60)}`);

@@ -43,6 +43,7 @@ exports.ArchitectLlm = exports.OPENAI_MODELS = exports.ANTHROPIC_MODELS = void 0
 const vscode = __importStar(require("vscode"));
 exports.ANTHROPIC_MODELS = [
     "claude-opus-4-6",
+    "claude-opus-4-7",
     "claude-sonnet-4-6",
     "claude-haiku-4-5",
 ];
@@ -100,6 +101,59 @@ class ArchitectLlm {
             default:
                 return { textAttachments: false, imageAttachments: false };
         }
+    }
+    _getAnthropicEffort(model) {
+        const cfg = vscode.workspace.getConfiguration("dreamgraph.architect");
+        const configured = (cfg.get("anthropic.effort") ?? "").trim().toLowerCase();
+        const normalized = configured === "xhigh" || configured === "max" || configured === "high" || configured === "medium" || configured === "low"
+            ? configured
+            : undefined;
+        if (normalized) {
+            if (model.startsWith("claude-opus-4-6") && normalized === "xhigh") {
+                return "high";
+            }
+            return normalized;
+        }
+        return model.startsWith("claude-opus-4-7") ? "xhigh" : "high";
+    }
+    _getAnthropicMaxTokens(model) {
+        return model.startsWith("claude-opus-4-7") ? 65536 : 8192;
+    }
+    _getAnthropicThinking(model) {
+        if (!model.startsWith("claude-opus-4-7")) {
+            return undefined;
+        }
+        const cfg = vscode.workspace.getConfiguration("dreamgraph.architect");
+        const enabled = cfg.get("anthropic.adaptiveThinking") ?? true;
+        if (!enabled) {
+            return undefined;
+        }
+        const summarized = cfg.get("anthropic.showThinkingSummary") ?? true;
+        return summarized ? { type: "adaptive", display: "summarized" } : { type: "adaptive" };
+    }
+    _buildAnthropicMessagesRequest(config, messages, system, tools, stream) {
+        const body = {
+            model: config.model,
+            max_tokens: this._getAnthropicMaxTokens(config.model),
+            messages,
+        };
+        if (system) {
+            body.system = system;
+        }
+        if (stream) {
+            body.stream = true;
+        }
+        if (tools && tools.length > 0) {
+            body.tools = tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.inputSchema }));
+        }
+        if (config.model.startsWith("claude-opus-4-7")) {
+            body.output_config = { effort: this._getAnthropicEffort(config.model) };
+            const thinking = this._getAnthropicThinking(config.model);
+            if (thinking) {
+                body.thinking = thinking;
+            }
+        }
+        return body;
     }
     async loadConfig() {
         const cfg = vscode.workspace.getConfiguration("dreamgraph.architect");
@@ -196,8 +250,8 @@ class ArchitectLlm {
             if (block.type === "text")
                 return { type: "text", text: block.text };
             return {
-                type: "image_url",
-                image_url: { url: `data:${block.mimeType};base64,${block.dataBase64}` },
+                type: "input_image",
+                image_url: `data:${block.mimeType};base64,${block.dataBase64}`,
             };
         });
     }
@@ -272,6 +326,7 @@ class ArchitectLlm {
     }
     async _callAnthropic(config, messages, start, signal) {
         const { system, userMessages } = this._splitSystem(messages);
+        const requestBody = this._buildAnthropicMessagesRequest(config, userMessages.map((m) => ({ role: m.role, content: this._toAnthropicContent(m.content) })), system);
         const res = await fetch(`${config.baseUrl}/messages`, {
             method: "POST",
             headers: {
@@ -279,12 +334,7 @@ class ArchitectLlm {
                 "x-api-key": config.apiKey,
                 "anthropic-version": "2023-06-01",
             },
-            body: JSON.stringify({
-                model: config.model,
-                max_tokens: 8192,
-                ...(system ? { system } : {}),
-                messages: userMessages.map((m) => ({ role: m.role, content: this._toAnthropicContent(m.content) })),
-            }),
+            body: JSON.stringify(requestBody),
             signal,
         });
         if (!res.ok)
@@ -302,6 +352,7 @@ class ArchitectLlm {
         const apiMessages = rawMessages
             ? rawMessages
             : messages.filter((m) => m.role !== "system").map((m) => ({ role: m.role, content: this._toAnthropicContent(m.content) }));
+        const requestBody = this._buildAnthropicMessagesRequest(config, apiMessages, system, tools);
         const res = await fetch(`${config.baseUrl}/messages`, {
             method: "POST",
             headers: {
@@ -309,13 +360,7 @@ class ArchitectLlm {
                 "x-api-key": config.apiKey,
                 "anthropic-version": "2023-06-01",
             },
-            body: JSON.stringify({
-                model: config.model,
-                max_tokens: 8192,
-                ...(system ? { system } : {}),
-                messages: apiMessages,
-                tools: tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.inputSchema })),
-            }),
+            body: JSON.stringify(requestBody),
             signal,
         });
         if (!res.ok)
@@ -377,6 +422,7 @@ class ArchitectLlm {
     }
     async _streamAnthropic(config, messages, onChunk, start, signal) {
         const { system, userMessages } = this._splitSystem(messages);
+        const requestBody = this._buildAnthropicMessagesRequest(config, userMessages.map((m) => ({ role: m.role, content: this._toAnthropicContent(m.content) })), system, undefined, true);
         const res = await fetch(`${config.baseUrl}/messages`, {
             method: "POST",
             headers: {
@@ -384,13 +430,7 @@ class ArchitectLlm {
                 "x-api-key": config.apiKey,
                 "anthropic-version": "2023-06-01",
             },
-            body: JSON.stringify({
-                model: config.model,
-                max_tokens: 8192,
-                stream: true,
-                ...(system ? { system } : {}),
-                messages: userMessages.map((m) => ({ role: m.role, content: this._toAnthropicContent(m.content) })),
-            }),
+            body: JSON.stringify(requestBody),
             signal,
         });
         if (!res.ok)

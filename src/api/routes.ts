@@ -318,37 +318,72 @@ async function handlePostGraphContext(
         : []
       : [];
 
+    // ── Relevance scoring ──────────────────────────────────────────────────────
+    // Score each matched entity so the extension can propagate real graph-distance
+    // values instead of hardcoded constants. Scores are in [0, 1].
+    //
+    //  features:   direct feature_id hit → 1.0; file-path match → 0.85
+    //  workflows:  linked to a matched feature → 0.8; file-path match → 0.75
+    //  adrs:       accepted + all affected entities matched → 1.0;
+    //              partial / status-other → 0.85
+    //  ui_elements: source-file match → 0.85; no source info → 0.7
+    //  tensions:   urgency already numeric (0–1) — use directly; missing → 0.75
+
     json(res, 200, {
       ok: true,
       file_path: filePath,
       features: matchedFeatures.map((f) => ({
         id: f.id,
         name: f.name,
-        relevance: featureIds.includes(f.id) ? "direct" : "file_match",
+        relevance: featureIds.includes(f.id) ? 1.0 : 0.85,
       })),
-      workflows: matchedWorkflows.map((w) => ({
-        id: w.id,
-        name: w.name,
-        step_match: "linked",
-      })),
-      adrs: matchedAdrs.map((a) => ({
-        id: a.id,
-        title: a.title,
-        status: a.status,
-        summary: (a.decision as Record<string, unknown>)?.chosen ?? "",
-      })),
+      workflows: matchedWorkflows.map((w) => {
+        // Prefer file-path match over link-match — file match is more direct
+        const isFilePath =
+          filePath &&
+          Array.isArray(w.source_files) &&
+          (w.source_files as unknown[]).some((sf: unknown) => {
+            const p = typeof sf === "string" ? sf : (sf as Record<string, unknown>)?.path;
+            return typeof p === "string" && p.includes(filePath);
+          });
+        return {
+          id: w.id,
+          name: w.name,
+          relevance: isFilePath ? 0.8 : 0.75,
+        };
+      }),
+      adrs: matchedAdrs.map((a) => {
+        const isAccepted =
+          typeof a.status === "string" && a.status.toLowerCase() === "accepted";
+        const affected = ((a.context as Record<string, unknown>)?.affected_entities as string[]) ?? [];
+        const fullyMatched =
+          affected.length > 0 && affected.every((e) => featureIdSet.has(e));
+        return {
+          id: a.id,
+          title: a.title,
+          status: a.status,
+          summary: (a.decision as Record<string, unknown>)?.chosen ?? "",
+          relevance: isAccepted && fullyMatched ? 1.0 : 0.85,
+        };
+      }),
       ui_elements: matchedUiElements.map((el) => ({
         id: el.id,
         element_type: el.element_type ?? el.type,
         name: el.name,
+        relevance: el.source_file ? 0.85 : 0.7,
       })),
       api_symbols: matchedApiSymbols,
-      tensions: matchedTensions.map((t) => ({
-        id: t.id,
-        domain: t.domain,
-        summary: t.description,
-        urgency: t.urgency,
-      })),
+      tensions: matchedTensions.map((t) => {
+        const urgency = typeof t.urgency === "number" ? t.urgency : 0.75;
+        return {
+          id: t.id,
+          domain: t.domain,
+          description: t.description,
+          severity: t.severity,
+          urgency,
+          relevance: urgency, // urgency IS the relevance signal for tensions
+        };
+      }),
       cognitive_state: cogStatus.current_state,
     });
   } catch (err) {

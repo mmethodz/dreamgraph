@@ -6,6 +6,7 @@
  */
 import * as vscode from "vscode";
 export type ArchitectProvider = "anthropic" | "openai" | "ollama";
+export type AnthropicEffort = "low" | "medium" | "high" | "xhigh" | "max";
 export interface ArchitectConfig {
     provider: ArchitectProvider;
     model: string;
@@ -21,9 +22,20 @@ export type ArchitectContentBlock = {
     dataBase64: string;
     fileName?: string;
 };
+export type ArchitectTextBlock = {
+    type: "text";
+    text: string;
+};
+export type ArchitectImageBlock = {
+    type: "image";
+    mimeType: string;
+    dataBase64: string;
+    fileName?: string;
+};
+export type ArchitectContent = ArchitectTextBlock | ArchitectImageBlock;
 export interface ArchitectMessage {
     role: "system" | "user" | "assistant";
-    content: string | ArchitectContentBlock[];
+    content: string | ArchitectContent[];
 }
 export interface ArchitectModelCapabilities {
     textAttachments: boolean;
@@ -71,6 +83,10 @@ export declare class ArchitectLlm implements vscode.Disposable {
     /** Apply a config directly in memory (skips settings round-trip). */
     applyConfig(config: ArchitectConfig): void;
     getModelCapabilities(provider?: ArchitectProvider | null, model?: string | null): ArchitectModelCapabilities;
+    private _getAnthropicEffort;
+    private _getAnthropicMaxTokens;
+    private _getAnthropicThinking;
+    private _buildAnthropicMessagesRequest;
     loadConfig(): Promise<void>;
     setApiKey(provider: ArchitectProvider, key: string): Promise<void>;
     getApiKey(provider: ArchitectProvider): Promise<string | undefined>;

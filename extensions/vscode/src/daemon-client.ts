@@ -33,12 +33,20 @@ export interface GraphContextRequest {
 }
 
 export interface GraphContextResponse {
-  features: Array<{ id: string; name: string; description: string }>;
-  workflows: Array<{ id: string; name: string }>;
-  adrs: Array<{ id: string; title: string; status: string }>;
-  ui_elements: Array<{ id: string; name: string; element_type: string }>;
+  features: Array<{ id: string; name: string; description?: string; relevance?: number }>;
+  workflows: Array<{ id: string; name: string; relevance?: number }>;
+  adrs: Array<{ id: string; title: string; status: string; summary?: string; relevance?: number }>;
+  ui_elements: Array<{ id: string; name: string; element_type: string; relevance?: number }>;
   api_surface: object | null;
-  tensions: Array<{ id: string; description: string; severity: string }>;
+  tensions: Array<{
+    id: string;
+    description?: string;
+    summary?: string;
+    severity?: string;
+    urgency?: number;
+    relevance?: number;
+  }>;
+  cognitive_state?: string;
 }
 
 /* ------------------------------------------------------------------ */

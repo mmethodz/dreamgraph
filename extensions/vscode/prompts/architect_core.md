@@ -60,7 +60,7 @@ building relationships. You issue high-level commands via MCP tools and receive
   You can also use `query_api_surface` with `include_source=true` and `member_name`
   for method-level source when the API surface is populated.
 - **`read_source_code` is token-expensive when reading full files.**
-  Always prefer `entity` mode or `startLine/endLine` range mode over full-file reads.
+  Always prefer `entity` mode. Use line-ranged reads only as a temporary fallback hint, never as the primary evidence anchor.
   Reserve full-file reads for small config/data files.
   If a user asks "how does X work?", first check the graph (`query_resource`,
   `search_data_model`). Then use `read_source_code({ entity: "X" })` — not a full file.

@@ -10,6 +10,18 @@ export interface PersistedMessage {
     role: 'user' | 'assistant' | 'system';
     content: string;
     timestamp: string;
+    verdict?: {
+        level: string;
+        summary: string;
+    };
+    toolTrace?: {
+        tool: string;
+        argsSummary: string;
+        filesAffected: string[];
+        durationMs: number;
+        status: string;
+    }[];
+    anchor?: import('./types.js').SemanticAnchor;
 }
 export declare class ChatMemory {
     private readonly context;

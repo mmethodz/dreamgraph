@@ -145,55 +145,157 @@ export interface EditorContextEnvelope {
         lineCount: number;
         cursorLine: number;
         cursorColumn: number;
+        cursorSummary: string;
+        cursorAnchor?: SemanticAnchor;
         selection: {
             startLine: number;
             endLine: number;
             text: string;
+            summary: string;
+            anchor?: SemanticAnchor;
         } | null;
     } | null;
     visibleFiles: string[];
     changedFiles: string[];
     pinnedFiles: string[];
     graphContext: {
-        relatedFeatures: string[];
-        relatedWorkflows: string[];
-        applicableAdrs: string[];
-        uiPatterns: string[];
+        relatedFeatures: Array<{
+            id: string;
+            name: string;
+            relevance?: number;
+        }>;
+        relatedWorkflows: Array<{
+            id: string;
+            name: string;
+            relevance?: number;
+        }>;
+        applicableAdrs: Array<{
+            id: string;
+            title: string;
+            relevance?: number;
+        }>;
+        uiPatterns: Array<{
+            id?: string;
+            name: string;
+            relevance?: number;
+        }>;
         activeTensions: number;
         cognitiveState: string;
         apiSurface: object | null;
-        /** Deep graph signals — the knowledge advantage over generic AI */
         tensions: Array<{
             id: string;
             description: string;
             severity: string;
             domain?: string;
+            relevance?: number;
         }>;
         dreamInsights: Array<{
             type: string;
             insight: string;
             confidence: number;
             source?: string;
+            relevance?: number;
         }>;
         causalChains: Array<{
             from: string;
             to: string;
             relationship: string;
             confidence: number;
+            relevance?: number;
         }>;
         temporalPatterns: Array<{
             pattern: string;
             frequency: string;
             last_seen?: string;
+            relevance?: number;
         }>;
         dataModelEntities: Array<{
             id: string;
             name: string;
             storage: string;
+            relevance?: number;
         }>;
     } | null;
     intentMode: IntentMode;
     intentConfidence: number;
+}
+export type ContextEvidenceKind = "task" | "code" | "adr" | "tension" | "api" | "workflow" | "feature" | "ui" | "causal" | "temporal" | "data_model" | "cognitive_status" | "note";
+export interface SemanticAnchor {
+    kind: "selection" | "symbol" | "file" | "workflow" | "feature" | "adr" | "ui";
+    label: string;
+    path?: string;
+    symbolPath?: string;
+    excerpt?: string;
+    approximate?: boolean;
+    source?: "symbol_provider" | "heuristic" | "graph";
+    canonicalId?: string;
+    canonicalKind?: "entity" | "workflow" | "adr" | "ui" | "relationship" | "symbol" | "file";
+    migrationStatus?: "native" | "promoted" | "rebound" | "drifted" | "archived";
+    confidence?: number;
+    historical?: boolean;
+    /**
+     * Zero-based line range of the containing symbol as reported by the language
+     * server (vscode.DocumentSymbol.range). Present only when source is
+     * "symbol_provider". Used by _trimActiveFile to bound the focused excerpt to
+     * the actual symbol body rather than a fixed ±20-line window.
+     */
+    symbolRange?: {
+        startLine: number;
+        endLine: number;
+    };
+}
+export interface CodeReadPlan {
+    scope: "selection" | "focused_excerpt" | "active_file";
+    reason: string;
+    anchorLabel?: string;
+    required: boolean;
+}
+export interface BudgetPolicy {
+    maxTokens: number;
+    reserveTokens: number;
+    allowFullActiveFile: boolean;
+    includeOptionalEvidence: boolean;
+}
+export interface ContextPlan {
+    intentMode: IntentMode;
+    taskSummary: string;
+    primaryAnchor?: SemanticAnchor;
+    secondaryAnchors: SemanticAnchor[];
+    requiredEvidence: ContextEvidenceKind[];
+    optionalEvidence: ContextEvidenceKind[];
+    codeReadPlan: CodeReadPlan[];
+    budgetPolicy: BudgetPolicy;
+}
+export interface EvidenceItem {
+    kind: ContextEvidenceKind;
+    title: string;
+    content: string;
+    relevance: number;
+    confidence?: number;
+    anchor?: string;
+    tokenCost: number;
+    required: boolean;
+}
+export interface ReasoningPacket {
+    task: {
+        intentMode: IntentMode;
+        summary: string;
+        commandSource?: string;
+    };
+    primaryAnchor?: SemanticAnchor;
+    secondaryAnchors: SemanticAnchor[];
+    evidence: EvidenceItem[];
+    omitted: Array<{
+        title: string;
+        reason: string;
+        required: boolean;
+    }>;
+    confidence: number;
+    tokenUsage: {
+        used: number;
+        budget: number;
+        reserved: number;
+    };
 }
 /** Emitted when health state transitions */
 export interface HealthTransitionEvent {

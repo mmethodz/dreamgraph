@@ -81,6 +81,25 @@ export type ExtensionToWebviewMessage = {
     requestId: string;
     success: boolean;
     error?: string;
+} | {
+    type: 'autonomyStatus';
+    status: {
+        mode: string;
+        countingActive: boolean;
+        completed: number;
+        remaining: number;
+        totalAuthorized?: number;
+        summary: string;
+    };
+} | {
+    type: 'recommendedActions';
+    messageId: string;
+    actions: {
+        id: string;
+        label: string;
+        rationale?: string;
+    }[];
+    doAllEligible: boolean;
 };
 export type WebviewToExtensionMessage = {
     type: 'ready';
@@ -129,5 +148,15 @@ export type WebviewToExtensionMessage = {
     requestId: string;
     action: string;
     context: Record<string, unknown>;
+} | {
+    type: 'selectRecommendedAction';
+    actionId: string;
+} | {
+    type: 'doAllRecommendedActions';
+} | {
+    type: 'setAutonomyMode';
+    mode: string;
+} | {
+    type: 'resetAutonomy';
 };
 //# sourceMappingURL=protocol.d.ts.map
