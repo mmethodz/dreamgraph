@@ -4,6 +4,7 @@
 
 **ID:** `ui_metrics_card_grid`  
 **Category:** data_display  
+**Status:** active  
 
 ## Data Contract
 
@@ -21,6 +22,30 @@
 
 - **scan_metrics** — Visually scan key health and status indicators at a glance.
 
+## Visual Semantics
+
+- **Role:** card
+- **Emphasis:** info
+- **Density:** comfortable
+- **Chrome:** panel
+
+### State Styling
+
+- **healthy** — Use neutral or success emphasis for stable metrics.
+- **degraded** — Elevate affected cards with warning emphasis while preserving overall grid readability.
+- **critical** — Promote affected cards with danger emphasis and stronger contrast hierarchy.
+
+## Layout Semantics
+
+- **Pattern:** grid
+- **Alignment:** distributed
+- **Sizing behavior:** fluid
+- **Responsive behavior:** wrap
+
+### Layout Hierarchy
+
+- **metric_cards** — primary
+
 ## Platform Implementations
 
 | Platform | Component | Source File | Notes |
@@ -29,4 +54,4 @@
 
 **Used by features:** feature_dashboard_server, dashboard_server, feature_ui_registry
 
-**Tags:** dashboard, metrics, summary, kpi, health, canonical, visual-meta-v2
+**Tags:** dashboard, metrics, summary, kpi, health, canonical, visual-meta-v3

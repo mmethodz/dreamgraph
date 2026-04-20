@@ -4,6 +4,7 @@
 
 **ID:** `ui_task_report_summary`  
 **Category:** feedback  
+**Status:** active  
 
 ## Data Contract
 
@@ -27,6 +28,32 @@
 - **review_task_outcome** — Read the final structured summary of what changed and what completed.
 - **inspect_relevant_output** — Review filtered diagnostic output chosen for relevance rather than raw verbosity.
 - **audit_graph_updates** — Check whether the task also updated graph state alongside source changes.
+
+## Visual Semantics
+
+- **Role:** card
+- **Emphasis:** secondary
+- **Density:** comfortable
+- **Chrome:** embedded
+
+### State Styling
+
+- **successful** — Use calm completion emphasis with readable structure over celebratory styling.
+- **warning_present** — Escalate specific sections that need review while keeping the overall report scannable.
+- **error_present** — Promote the failure summary and relevant evidence without collapsing detail sections.
+
+## Layout Semantics
+
+- **Pattern:** stack
+- **Alignment:** leading
+- **Sizing behavior:** fill_parent
+- **Responsive behavior:** scroll, collapse
+
+### Layout Hierarchy
+
+- **summary_header** — primary
+- **change_and_graph_sections** — primary
+- **supporting_output** — secondary
 
 ## Platform Implementations
 

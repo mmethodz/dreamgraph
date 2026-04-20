@@ -4,6 +4,7 @@
 
 **ID:** `tool-activity-log`  
 **Category:** feedback  
+**Status:** active  
 
 ## Data Contract
 

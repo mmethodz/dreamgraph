@@ -4,6 +4,7 @@
 
 **ID:** `dashboard-panel`  
 **Category:** layout  
+**Status:** active  
 
 ## Data Contract
 

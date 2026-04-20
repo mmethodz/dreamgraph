@@ -4,6 +4,7 @@
 
 **ID:** `ui-chat-panel`  
 **Category:** composite  
+**Status:** active  
 
 ## Data Contract
 

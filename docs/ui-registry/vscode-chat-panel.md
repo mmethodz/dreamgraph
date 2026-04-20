@@ -4,6 +4,7 @@
 
 **ID:** `vscode_chat_panel`  
 **Category:** composite  
+**Status:** active  
 
 ## Data Contract
 
@@ -28,6 +29,33 @@
 - **inspect_trace** — Review tool calls and progress while work is running
 - **review_result** — Read and act on the final grounded response
 - **follow_up** — Continue the same task with additional prompts or actions
+
+## Visual Semantics
+
+- **Role:** inspector
+- **Emphasis:** primary
+- **Density:** comfortable
+- **Chrome:** panel
+
+### State Styling
+
+- **idle** — Maintain a calm reading-and-authoring workspace with clear hierarchy between history and composer.
+- **streaming** — Promote live progress, tool trace, and in-flight output without destabilizing layout.
+- **action_required** — Elevate follow-up actions and verification prompts with stronger emphasis.
+- **error_or_partial** — Preserve transcript continuity while surfacing warnings and failures with bounded prominence.
+
+## Layout Semantics
+
+- **Pattern:** inspector
+- **Alignment:** leading
+- **Sizing behavior:** fill_parent
+- **Responsive behavior:** scroll, collapse
+
+### Layout Hierarchy
+
+- **conversation_stream** — primary
+- **composer** — primary
+- **tool_trace_and_supporting_panels** — secondary
 
 ## Platform Implementations
 

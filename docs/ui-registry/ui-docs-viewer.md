@@ -4,6 +4,7 @@
 
 **ID:** `ui_docs_viewer`  
 **Category:** composite  
+**Status:** active  
 
 ## Data Contract
 
@@ -25,6 +26,31 @@
 - **browse_docs** — Choose a document from the dashboard docs index.
 - **read_doc** — View the rendered markdown for the selected document.
 
+## Visual Semantics
+
+- **Role:** inspector
+- **Emphasis:** secondary
+- **Density:** comfortable
+- **Chrome:** embedded
+
+### State Styling
+
+- **index_browsing** — Keep the navigation list visually subordinate to the reading surface.
+- **document_open** — Promote readable content hierarchy with calm chrome and clear heading emphasis.
+- **missing_document** — Switch to warning emphasis while preserving reader context and navigation access.
+
+## Layout Semantics
+
+- **Pattern:** split_view
+- **Alignment:** leading
+- **Sizing behavior:** fill_parent
+- **Responsive behavior:** collapse, scroll
+
+### Layout Hierarchy
+
+- **doc_index** — secondary
+- **doc_content** — primary
+
 ## Platform Implementations
 
 | Platform | Component | Source File | Notes |
@@ -33,4 +59,4 @@
 
 **Used by features:** feature_dashboard_server, docs_viewer, feature_ui_registry
 
-**Tags:** docs, markdown, dashboard, viewer, canonical, visual-meta-v2
+**Tags:** docs, markdown, dashboard, viewer, canonical, visual-meta-v3

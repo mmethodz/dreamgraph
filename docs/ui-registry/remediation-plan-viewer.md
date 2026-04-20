@@ -4,6 +4,7 @@
 
 **ID:** `remediation-plan-viewer`  
 **Category:** feedback  
+**Status:** active  
 
 ## Data Contract
 

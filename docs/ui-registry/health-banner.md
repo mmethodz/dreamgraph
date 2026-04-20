@@ -4,6 +4,7 @@
 
 **ID:** `health-banner`  
 **Category:** feedback  
+**Status:** active  
 
 ## Data Contract
 

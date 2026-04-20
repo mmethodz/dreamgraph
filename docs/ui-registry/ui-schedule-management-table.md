@@ -4,6 +4,7 @@
 
 **ID:** `ui_schedule_management_table`  
 **Category:** composite  
+**Status:** active  
 
 ## Data Contract
 
@@ -31,6 +32,32 @@
 - **toggle_enabled** — Pause or resume a schedule.
 - **delete_schedule** — Remove a schedule from the system.
 - **create_schedule** — Submit a new schedule through the dashboard form surface.
+
+## Visual Semantics
+
+- **Role:** inspector
+- **Emphasis:** secondary
+- **Density:** compact
+- **Chrome:** panel
+
+### State Styling
+
+- **normal** — Preserve dense tabular readability with restrained chrome.
+- **active_change** — Emphasize row-level actions and recent updates without obscuring table scanning.
+- **error** — Surface failed schedule actions with warning or danger emphasis near the affected control path.
+
+## Layout Semantics
+
+- **Pattern:** table
+- **Alignment:** leading
+- **Sizing behavior:** fill_parent
+- **Responsive behavior:** scroll, collapse
+
+### Layout Hierarchy
+
+- **schedule_table** — primary
+- **schedule_actions** — secondary
+- **history_or_forms** — auxiliary
 
 ## Platform Implementations
 

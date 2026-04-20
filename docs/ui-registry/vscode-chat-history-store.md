@@ -4,6 +4,7 @@
 
 **ID:** `vscode_chat_history_store`  
 **Category:** feedback  
+**Status:** active  
 
 ## Data Contract
 
@@ -26,6 +27,30 @@
 - **persist_transcript** — Save current chat transcript to VS Code globalState under an instance-specific key.
 - **restore_transcript** — Load stored transcript when the chat panel is created or revealed.
 - **clear_transcript** — Delete persisted transcript for the current instance.
+
+## Visual Semantics
+
+- **Role:** supporting_state
+- **Emphasis:** muted
+- **Density:** compact
+- **Chrome:** minimal
+
+### State Styling
+
+- **restored** — Keep persistence behavior invisible unless it meaningfully affects the user experience.
+- **cleared** — Use subtle confirmation semantics rather than celebratory emphasis.
+- **legacy_shape** — Handle compatibility silently while preserving stability.
+
+## Layout Semantics
+
+- **Pattern:** flow
+- **Alignment:** leading
+- **Sizing behavior:** content_sized
+- **Responsive behavior:** collapse
+
+### Layout Hierarchy
+
+- **background_state** — auxiliary
 
 ## Platform Implementations
 

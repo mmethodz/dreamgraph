@@ -4,6 +4,7 @@
 
 **ID:** `context_inspector`  
 **Category:** data_display  
+**Status:** active  
 
 ## Data Contract
 

@@ -4,6 +4,7 @@
 
 **ID:** `dashboard_view`  
 **Category:** composite  
+**Status:** active  
 
 ## Data Contract
 
@@ -26,6 +27,31 @@
 - **monitor_dashboard** — View the live DreamGraph dashboard inside the VS Code sidebar.
 - **retry_connection** — Use the offline fallback retry button to attempt to reload the embedded dashboard when the daemon is unreachable.
 - **auto_refresh_on_visibility** — Refresh the iframe whenever the view becomes visible again.
+
+## Visual Semantics
+
+- **Role:** shell
+- **Emphasis:** secondary
+- **Density:** comfortable
+- **Chrome:** embedded
+
+### State Styling
+
+- **loading** — Keep the host calm and transitional while embedded content initializes.
+- **connected** — Prioritize the embedded dashboard content over surrounding host chrome.
+- **offline_fallback** — Promote warning feedback while preserving a clear recovery action path.
+
+## Layout Semantics
+
+- **Pattern:** shell
+- **Alignment:** leading
+- **Sizing behavior:** fill_parent
+- **Responsive behavior:** scroll
+
+### Layout Hierarchy
+
+- **embedded_dashboard** — primary
+- **offline_recovery** — auxiliary
 
 ## Platform Implementations
 

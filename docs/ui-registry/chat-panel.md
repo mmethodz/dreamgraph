@@ -4,6 +4,7 @@
 
 **ID:** `chat_panel`  
 **Category:** composite  
+**Status:** active  
 
 ## Data Contract
 

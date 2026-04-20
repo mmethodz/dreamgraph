@@ -4,6 +4,7 @@
 
 **ID:** `ui_status_bar`  
 **Category:** feedback  
+**Status:** active  
 
 ## Data Contract
 
@@ -25,6 +26,32 @@
 
 - **scan_status** — Read the current connection and cognitive state from the status bar text and color treatment.
 - **open_action_picker** — Click the status bar item to launch the DreamGraph quick-pick command surface.
+
+## Visual Semantics
+
+- **Role:** banner
+- **Emphasis:** info
+- **Density:** compact
+- **Chrome:** minimal
+
+### State Styling
+
+- **connected** — Use calm positive emphasis that remains lightweight in editor chrome.
+- **degraded** — Escalate toward warning emphasis without becoming visually dominant.
+- **disconnected** — Surface actionable warning or danger emphasis to encourage reconnection.
+- **connecting** — Use transitional informative emphasis with motion or spinner semantics.
+
+## Layout Semantics
+
+- **Pattern:** toolbar
+- **Alignment:** leading
+- **Sizing behavior:** content_sized
+- **Responsive behavior:** collapse
+
+### Layout Hierarchy
+
+- **status_label** — primary
+- **action_entry** — secondary
 
 ## Platform Implementations
 

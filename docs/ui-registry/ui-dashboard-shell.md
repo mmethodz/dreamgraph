@@ -4,6 +4,7 @@
 
 **ID:** `ui_dashboard_shell`  
 **Category:** layout  
+**Status:** active  
 
 ## Data Contract
 
@@ -24,6 +25,32 @@
 
 - **navigate** — Switch between top-level dashboard sections.
 - **scan_status** — Visually scan summary areas and current system state.
+
+## Visual Semantics
+
+- **Role:** shell
+- **Emphasis:** secondary
+- **Density:** comfortable
+- **Chrome:** full_shell
+
+### State Styling
+
+- **default** — Preserve clear application-level hierarchy between navigation, summary, and current content.
+- **summary_attention** — Elevate high-signal summary regions without destabilizing the shell structure.
+- **embedded_offline** — Promote recovery messaging when embedded dashboard access is degraded.
+
+## Layout Semantics
+
+- **Pattern:** shell
+- **Alignment:** leading
+- **Sizing behavior:** fill_parent
+- **Responsive behavior:** scroll, collapse
+
+### Layout Hierarchy
+
+- **navigation** — secondary
+- **summary** — primary
+- **content** — primary
 
 ## Platform Implementations
 

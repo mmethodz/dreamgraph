@@ -4,6 +4,7 @@
 
 **ID:** `ui_command_action_picker`  
 **Category:** action  
+**Status:** active  
 
 ## Data Contract
 
@@ -24,6 +25,30 @@
 
 - **choose_command** — Pick a DreamGraph action from the quick-pick list.
 - **dismiss** — Close the picker without triggering an action.
+
+## Visual Semantics
+
+- **Role:** dialog
+- **Emphasis:** primary
+- **Density:** compact
+- **Chrome:** panel
+
+### State Styling
+
+- **selection_active** — Highlight the current command target with strong focus emphasis.
+- **dismissed** — Disappear cleanly without leaving residual UI state.
+
+## Layout Semantics
+
+- **Pattern:** stack
+- **Alignment:** leading
+- **Sizing behavior:** content_sized
+- **Responsive behavior:** scroll
+
+### Layout Hierarchy
+
+- **action_list** — primary
+- **context_hint** — secondary
 
 ## Platform Implementations
 

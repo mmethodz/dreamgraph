@@ -4,6 +4,7 @@
 
 **ID:** `ui_graph_signal_summary`  
 **Category:** feedback  
+**Status:** active  
 
 ## Data Contract
 
@@ -24,6 +25,30 @@
 
 - **review_graph_context** — Read the summary and supporting related entities for the current file.
 - **open_chat** — Jump directly into the chat panel for deeper graph-guided assistance.
+
+## Visual Semantics
+
+- **Role:** banner
+- **Emphasis:** info
+- **Density:** compact
+- **Chrome:** minimal
+
+### State Styling
+
+- **informational** — Use calm informational emphasis appropriate for proactive guidance.
+- **tension_present** — Escalate emphasis toward warning when unresolved tensions are included in the summary.
+
+## Layout Semantics
+
+- **Pattern:** stack
+- **Alignment:** leading
+- **Sizing behavior:** content_sized
+- **Responsive behavior:** wrap
+
+### Layout Hierarchy
+
+- **summary_message** — primary
+- **action_affordance** — secondary
 
 ## Platform Implementations
 

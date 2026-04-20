@@ -4,6 +4,7 @@
 
 **ID:** `ui-dashboard-view`  
 **Category:** composite  
+**Status:** active  
 
 ## Data Contract
 

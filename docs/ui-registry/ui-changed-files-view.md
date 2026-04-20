@@ -4,6 +4,7 @@
 
 **ID:** `ui_changed_files_view`  
 **Category:** data_display  
+**Status:** active  
 
 ## Data Contract
 
@@ -29,6 +30,31 @@
 - **copy_file_path** — Copy the selected file path for reuse elsewhere.
 - **reveal_file** — Reveal the selected file in the operating system explorer.
 - **clear_change_list** — Reset the session-scoped changed file list.
+
+## Visual Semantics
+
+- **Role:** navigation
+- **Emphasis:** secondary
+- **Density:** compact
+- **Chrome:** embedded
+
+### State Styling
+
+- **default** — Keep the tree lightweight and scannable for frequent revisits.
+- **recent_activity** — Use subtle recency cues to draw attention without overwhelming the list.
+- **deleted_entry** — De-emphasize unavailable targets while preserving historical visibility.
+
+## Layout Semantics
+
+- **Pattern:** stack
+- **Alignment:** leading
+- **Sizing behavior:** fill_parent
+- **Responsive behavior:** scroll
+
+### Layout Hierarchy
+
+- **change_tree** — primary
+- **secondary_actions** — auxiliary
 
 ## Platform Implementations
 

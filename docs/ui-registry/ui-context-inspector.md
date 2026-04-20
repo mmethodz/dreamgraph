@@ -4,6 +4,7 @@
 
 **ID:** `ui_context_inspector`  
 **Category:** feedback  
+**Status:** active  
 
 ## Data Contract
 
@@ -24,6 +25,31 @@
 - **inspect_context** — Open the DreamGraph Context output channel and review the current context envelope details.
 - **inspect_instance_status** — Open the DreamGraph Instance Status output channel and review resolved instance, daemon, latency, and LLM state.
 - **review_raw_output** — Read non-chat command output emitted to the output channel for transparency and debugging.
+
+## Visual Semantics
+
+- **Role:** inspector
+- **Emphasis:** secondary
+- **Density:** compact
+- **Chrome:** minimal
+
+### State Styling
+
+- **default** — Keep diagnostic output legible and low-chrome for sustained reading.
+- **status_focus** — Promote current health and binding details through clearer section hierarchy.
+- **missing_context** — Use informational empty-state emphasis rather than alarmist error styling.
+
+## Layout Semantics
+
+- **Pattern:** inspector
+- **Alignment:** leading
+- **Sizing behavior:** fill_parent
+- **Responsive behavior:** scroll
+
+### Layout Hierarchy
+
+- **diagnostic_content** — primary
+- **section_headers** — secondary
 
 ## Platform Implementations
 
