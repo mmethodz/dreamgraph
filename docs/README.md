@@ -1,6 +1,6 @@
 # DreamGraph Documentation
 
-> **v7.0.0 "El Alarife"** — Documentation generated from DreamGraph's own knowledge graph.
+> **v7.1.0 "El Alarife"** — Documentation generated from DreamGraph's own knowledge graph.
 
 ---
 

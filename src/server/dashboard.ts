@@ -866,7 +866,6 @@ async function renderConfig(savedSection?: string): Promise<string> {
   </div>
   <script>
     document.getElementById('btn-restart').addEventListener('click', async function() {
-      if (!confirm('Restart the DreamGraph server? The daemon manager will bring it back up automatically.')) return;
       const btn = this;
       btn.disabled = true;
       btn.textContent = 'Restarting…';
@@ -880,7 +879,7 @@ async function renderConfig(savedSection?: string): Promise<string> {
           const r = await fetch('/health');
           if (r.ok) { clearInterval(poll); location.reload(); }
         } catch(e) { /* still restarting */ }
-        if (attempts > 30) { clearInterval(poll); btn.textContent = 'Restart sent — refresh manually'; }
+        if (attempts > 45) { clearInterval(poll); btn.textContent = 'Restart sent — refresh manually'; }
       }, 1000);
     });
   </script>`;
@@ -1201,7 +1200,6 @@ async function renderConfig(savedSection?: string): Promise<string> {
     });
 
     document.getElementById('btn-clear-db').addEventListener('click', async function() {
-      if (!confirm('Clear the saved database connection string from engine.env?')) return;
       const btn = this;
       btn.disabled = true;
       btn.textContent = 'Clearing…';

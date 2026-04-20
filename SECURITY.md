@@ -10,7 +10,7 @@
 
 ## Overview
 
-DreamGraph v7.0.0 "El Alarife" is a **local-first, model-agnostic cognitive layer** for software
+DreamGraph v7.1.0 "El Alarife" is a **local-first, model-agnostic cognitive layer** for software
 development. It runs entirely on the developer's machine. No telemetry is sent. No project data
 leaves the local environment. The knowledge graph, dream cycles, architectural decisions, and
 all cognitive state are stored in local JSON files under the project root.
@@ -86,7 +86,7 @@ These are core capabilities of the architecture, not vulnerabilities.
 
 ## Taint Flow Analysis
 
-SafeSkill reported **14 taint flows** in the v7.0.0 scan. This section documents each category
+SafeSkill reported **14 taint flows** in the v7.1.0 scan. This section documents each category
 based on first-party code review. All 14 flows were reviewed by the DreamGraph cognitive system
 against actual source.
 
@@ -129,7 +129,7 @@ against actual source.
 
 ## Static Analysis Notes
 
-DreamGraph v7.0.0 has been scanned by [SafeSkill](https://github.com/oya-ai/safeskill) with the
+DreamGraph v7.1.0 has been scanned by [SafeSkill](https://github.com/oya-ai/safeskill) with the
 following findings assessed and resolved:
 
 | Finding | File | Assessment |
@@ -150,8 +150,8 @@ The 14 reported taint flows have been individually reviewed — see [Taint Flow 
 
 | Version | Supported |
 |---------|-----------|
-| v7.0.0 "El Alarife" | ✅ Active |
-| < v7.0.0 | ❌ Not supported |
+| v7.1.0 "El Alarife" | ✅ Active |
+| < v7.1.0 | ❌ Not supported |
 
 ---
 
@@ -197,6 +197,6 @@ to you. Your architectural decisions stay local. The cognitive system works for 
 ---
 
 *This document is maintained by the DreamGraph cognitive system — El Alarife.*
-*Last graph sync: v7.0.0 release — taint flow secondary review complete.*
+*Last graph sync: v7.1.0 release — taint flow secondary review complete.*
 *Next sync: automatic on architectural change.*
 *Repository: [https://github.com/mmethodz/dreamgraph](https://github.com/mmethodz/dreamgraph)*

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Dashboard — DreamGraph v7.0.0</title>
+  <title>Dashboard — DreamGraph v7.1.0</title>
   <style>
   :root {
     --bg: #0d1117; --surface: #161b22; --border: #30363d;
@@ -145,7 +145,7 @@
 </head>
 <body>
   <nav class="topbar">
-    <a class="brand" href="/">DreamGraph <span class="version">v7.0.0</span></a>
+    <a class="brand" href="/">DreamGraph <span class="version">v7.1.0</span></a>
     <div class="nav-links">
       <a href="/status"    class="">Status</a>
       <a href="/schedules" class="">Schedules</a>
@@ -183,7 +183,7 @@
       </a>
     </div></main>
   <footer>
-    <span>DreamGraph v7.0.0 "El Alarife"</span>
+    <span>DreamGraph v7.1.0 "El Alarife"</span>
     <span>Instance: ee9ce3b9-0313-4768-b5f1-24b9b3fffc4b</span>
     <span>Generated: 2026-04-15T11:40:07.498Z</span>
   </footer>

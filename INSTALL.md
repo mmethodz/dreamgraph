@@ -1,4 +1,4 @@
-# Installing DreamGraph v7.0.0 "El Alarife"
+# Installing DreamGraph v7.1.0 "El Alarife"
 
 One-command install from source. Builds the MCP server, deploys the `dg` CLI globally, and installs the VS Code extension.
 
@@ -36,7 +36,7 @@ bash scripts/install.sh
 That's it. After install, open a **new terminal** and run:
 
 ```bash
-dg --version          # DreamGraph CLI v7.0.0 (El Alarife)
+dg --version          # DreamGraph CLI v7.1.0 (El Alarife)
 dg --help             # Show all commands
 ```
 
