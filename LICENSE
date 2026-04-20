@@ -24,6 +24,15 @@ For purposes of this license:
 - **"Derivative Work"** means any modified version of the Licensed Work or any work based on the Licensed Work to the extent protected by applicable copyright law.
 - **"Open Source Project"** means a project whose source code is publicly available under an OSI-approved license.
 
+- **"Evaluation Use means ALL of the following:"**
+   - limited duration
+   - limited users
+   - non-production
+   - internal testing only
+   - no customer-facing workloads
+   - no revenue-generating use
+   - no operational dependency
+
 ## 3. Ownership and Reservation of Rights
 
 The Licensed Work is licensed, not sold. The Licensor retains all right, title, and interest in and to the Licensed Work, including all intellectual property rights, except for the limited rights expressly granted under this license.
