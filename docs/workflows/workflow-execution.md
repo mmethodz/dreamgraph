@@ -1,5 +1,7 @@
 # Workflow Execution Process
 
+> Auto-generated primary workflow doc. Canonical structured source: data/workflows.json.
+
 > This process executes defined workflows within the DreamGraph server, coordinating the various steps involved in a workflow. It ensures that workflows are carried out efficiently and correctly.
 
 **Trigger:** User initiates a workflow  

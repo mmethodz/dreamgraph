@@ -1,49 +1,41 @@
 {
   "name": "dreamgraph",
   "version": "7.1.0",
-  "description": "DreamGraph — A cognitive dreaming engine for MCP servers. Builds, explores, and self-heals knowledge graphs through speculative reasoning.",
+  "description": "Graph-first cognitive daemon with MCP tools, CLI, dashboard, and VS Code integration",
+  "license": "SEE LICENSE IN LICENSE",
   "type": "module",
+  "main": "dist/index.js",
   "bin": {
-    "dreamgraph": "./dist/index.js",
-    "dg": "./dist/cli/dg.js"
+    "dg": "dist/cli/dg.js"
   },
   "scripts": {
     "build": "tsc",
-    "dev": "tsc --watch",
     "start": "node dist/index.js",
-    "start:sse": "node dist/index.js --transport http",
-    "prepare": "npm run build",
-    "seed": "node scripts/seed-example.mjs",
+    "dev": "tsx src/index.ts",
+    "cli": "node dist/cli/dg.js",
     "test": "vitest run",
-    "test:watch": "vitest"
-  },
-  "keywords": [
-    "mcp",
-    "cognitive",
-    "dreaming",
-    "knowledge-graph",
-    "ai",
-    "reasoning",
-    "model-context-protocol"
-  ],
-  "author": "",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/mmethodz/dreamgraph.git"
+    "docs:architecture-tree": "node scripts/generate-architecture-tree.mjs",
+    "docs:primary-workflows": "node scripts/generate-primary-workflow-docs.mjs"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.27.1",
-    "cheerio": "^1.2.0",
-    "pg": "^8.20.0",
-    "turndown": "^7.2.2",
-    "zod": "^4.3.6"
+    "chalk": "^5.3.0",
+    "commander": "^12.1.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "fast-glob": "^3.3.3",
+    "jsdom": "^24.1.1",
+    "marked": "^17.0.0",
+    "p-limit": "^6.2.0",
+    "pino": "^9.7.0",
+    "sqlite3": "^5.1.7",
+    "tsx": "^4.20.3",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
-    "@types/node": "^25.5.0",
-    "@types/pg": "^8.20.0",
-    "@types/turndown": "^5.0.6",
+    "@types/express": "^5.0.3",
+    "@types/node": "^24.8.1",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.2"
+    "vitest": "^2.1.8"
   }
 }

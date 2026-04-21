@@ -12,8 +12,17 @@ import * as vscode from "vscode";
 /*  Dashboard View Provider                                           */
 /* ------------------------------------------------------------------ */
 
+/**
+ * DreamGraph Dashboard View — Dockable WebviewView provider.
+ *
+ * Embeds the daemon's web dashboard (served at /status) inside a VS Code
+ * sidebar panel via an iframe. Refreshes on visibility change and when
+ * the daemon connection changes.
+ */
+
 export class DashboardViewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
   public static readonly viewType = "dreamgraph.dashboardView";
+  public static readonly sidebarContainerId = "dreamgraph-sidebar";
 
   private _view: vscode.WebviewView | null = null;
   private _disposables: vscode.Disposable[] = [];
@@ -30,6 +39,10 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider, vscode
   updateDaemonUrl(host: string, port: number): void {
     this._daemonUrl = `http://${host}:${port}/status`;
     this.refresh();
+  }
+
+  get isVisible(): boolean {
+    return this._view?.visible ?? false;
   }
 
   /* ---- WebviewViewProvider ---- */
@@ -80,9 +93,49 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider, vscode
 
   /**
    * Focus the dashboard view in the sidebar.
+   * Also ensures the DreamGraph activity-bar container becomes visible.
    */
-  open(): void {
-    void vscode.commands.executeCommand("dreamgraph.dashboardView.focus");
+  async open(): Promise<void> {
+    await this.ensureContainerVisible();
+    await vscode.commands.executeCommand("dreamgraph.dashboardView.focus");
+  }
+
+  /**
+   * Best-effort repair for the DreamGraph activity bar icon/container.
+   * If the custom container has been hidden or moved, reveal it again.
+   */
+  async ensureContainerVisible(): Promise<void> {
+    try {
+      await vscode.commands.executeCommand(`${DashboardViewProvider.sidebarContainerId}.focus`);
+      return;
+    } catch {
+      // Fall through to repair commands below.
+    }
+
+    try {
+      await vscode.commands.executeCommand("workbench.view.extension.dreamgraph-sidebar");
+      return;
+    } catch {
+      // Continue to broader repair attempts.
+    }
+
+    try {
+      await vscode.commands.executeCommand("workbench.action.resetViewLocations");
+    } catch {
+      // Ignore and continue to the direct focus fallback.
+    }
+
+    try {
+      await vscode.commands.executeCommand(`${DashboardViewProvider.sidebarContainerId}.focus`);
+    } catch {
+      // Last resort below.
+    }
+
+    try {
+      await vscode.commands.executeCommand("dreamgraph.dashboardView.focus");
+    } catch {
+      // Give up silently; caller can still surface UX elsewhere.
+    }
   }
 
   /* ---- Helpers ---- */

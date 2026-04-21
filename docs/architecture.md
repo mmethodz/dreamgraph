@@ -1,386 +1,235 @@
 # DreamGraph Architecture
 
-> *Auto-generated from DreamGraph's own knowledge graph on 2026-04-04.*
+Version: **7.1.0**
+License: **DreamGraph Source-Available Community License v2.0**
 
 ## Overview
 
-DreamGraph is a **cognitive dreaming engine** and **active Architect agent** for MCP (Model Context Protocol) knowledge graphs. The Architect calls MCP tools directly to build and maintain the knowledge graph, while the cognitive engine speculatively discovers hidden connections, validates them against a fact graph, and builds a persistent, evolving understanding of the systems it observes.
+DreamGraph is an instance-scoped, graph-first cognitive daemon for development environments. Its primary architectural rule is that the knowledge graph is authoritative: features, workflows, data models, ADRs, UI elements, and tensions represent the system at a higher semantic level than any individual source file.
 
-**Version:** 7.0.0 "El Alarife"  
-**License:** MIT  
-**Runtime:** Node.js (TypeScript, ES2022, Node16 modules)  
-**Transport:** STDIO (default) or Streamable HTTP (`--transport http`)
+Core architectural surfaces:
 
-## Core Concepts
+- **Daemon runtime** — serves MCP tools, dashboard routes, orchestration, and cognitive workflows
+- **Instance subsystem** — isolates projects and runtime state by UUID-scoped instance boundaries
+- **Knowledge graph** — captures system structure, behavior, decisions, and unresolved tensions
+- **CLI (`dg`)** — lifecycle management, status, scanning, and operational commands
+- **VS Code extension** — dashboard embedding, chat UX, daemon/MCP client integration, changed-files UX
 
-### The Two Graphs
+## Instance Model
 
-DreamGraph maintains two parallel knowledge structures:
+Each DreamGraph instance has its own root directory under the master directory (typically `~/.dreamgraph/<uuid>/`). The instance stores:
 
-1. **Fact Graph** (immutable) — The ground truth. Five JSON files describing the target project's features, workflows, data model, and entity index. Never modified by the cognitive system.
+- `instance.json` — identity and lifecycle metadata
+- `config/` — instance config such as policies and MCP repository bindings
+- `data/` — graph and cognitive JSON state
+- `runtime/` — locks, temp files, and transient runtime state
+- `logs/` — daemon and subsystem logs
+- `exports/` — generated outputs and snapshots
 
-2. **Dream Graph** (speculative) — A living memory of hypothetical connections. Dream edges are generated during REM cycles, scored against the fact graph, and either promoted to validated status or decayed away.
+The instance scope enforces project and repository boundaries. Repository bindings are security-relevant because they expand the set of filesystem paths considered in-bounds.
 
-### Cognitive States
+## Runtime Surfaces
 
-The engine operates as a strict state machine with five states:
+### Daemon
+The daemon hosts:
+- MCP tools
+- dashboard HTTP routes
+- orchestration routes
+- cognitive scheduling and dream-cycle execution
+- project/graph scanning and enrichment
 
-```
-AWAKE ──→ REM ──→ NORMALIZING ──→ AWAKE
-  │                                  ▲
-  ├──→ NIGHTMARE ────────────────────┘
-  └──→ LUCID ───────────────────────┘
-```
+### CLI
+The `dg` CLI is responsible for:
+- creating and starting instances
+- showing status and daemon metadata
+- scanning and operational commands
+- user-facing control flow for local installations
 
-| State | Purpose | What Happens |
-|-------|---------|-------------|
-| **AWAKE** | Idle / query-ready | All MCP tools available, reads/writes fact graph |
-| **REM** | Speculative generation | Dreamer generates hypothetical edges using 10 strategies (incl. LLM dream + PGO wave) |
-| **NORMALIZING** | Validation | Three-outcome classifier: validate, retain, or reject |
-| **NIGHTMARE** | Adversarial scanning | Five security strategies probe for vulnerabilities |
-| **LUCID** | Interactive exploration | Human proposes hypothesis, system explores, co-create validated edges |
-
-### The Promotion Pipeline
-
-```
-Speculative Edge → Normalization → Promotion Gate → Validated Edge
-                      │                                    │
-                      ├─ Latent (retained)                 │
-                      └─ Rejected (discarded)              └─ Knowledge Graph
-```
-
-**Promotion Gate Thresholds:**
-- Combined confidence ≥ 0.62
-- Plausibility ≥ 0.45
-- Evidence ≥ 0.40
-- Evidence count ≥ 2
-- Contradiction ≤ 0.3
-
-## System Architecture Diagram
-
-```mermaid
-graph TB
-    subgraph "Architect Agent"
-        Architect["DreamGraph Architect<br/>Active Tool-Calling LLM"]
-    end
-
-    subgraph "MCP Protocol Layer"
-        Server["MCP Server<br/>STDIO / Streamable HTTP"]
-        Tools["68 Tools"]
-        Resources["26 Resources"]
-    end
-
-    Architect --> Server
-
-    subgraph "Cognitive Core"
-        Engine["Cognitive Engine<br/>State Machine"]
-        Dreamer["Dreamer<br/>10 Strategies"]
-        Normalizer["Normalizer<br/>Truth Filter"]
-        Adversarial["Adversarial<br/>5 Scan Types"]
-    end
-
-    subgraph "Advanced Cognition"
-        Causal["Causal Reasoning<br/>Chain Discovery"]
-        Temporal["Temporal Analysis<br/>Trajectory Prediction"]
-        Intervention["Intervention Planning<br/>Remediation"]
-        Narrator["Narrator<br/>System Autobiography"]
-        Federation["Federation<br/>Cross-Project Learning"]
-        GraphRAG["Graph RAG<br/>Knowledge Retrieval"]
-        Lucid["Lucid Dreaming<br/>Interactive Exploration"]
-    end
-
-    subgraph "v5.1 Capabilities"
-        Metacognition["Metacognitive Self-Tuning<br/>Strategy Optimization"]
-        EventRouter["Event-Driven Dreaming<br/>Reactive Scoping"]
-        ContinuousNarrative["Continuous Narrative<br/>Auto-Chapters"]
-    end
-
-    subgraph "v5.2 Capabilities"
-        Scheduler["Dream Scheduler<br/>Policy-Driven Orchestration"]
-    end
-
-    subgraph "Web Dashboard (v6.2)"
-        Dashboard["SSR HTML Pages<br/>Zero-Dependency"]
-        DashStatus["/status — Cognitive State"]
-        DashSchedules["/schedules — CRUD + History"]
-        DashConfig["/config — Runtime Settings"]
-        DashDocs["/docs — Knowledge Graph"]
-    end
-
-    subgraph "LLM Integration"
-        LLM["LLM Provider<br/>Ollama / OpenAI / Anthropic / Sampling"]
-    end
-
-    subgraph "Senses (External I/O)"
-        Code["Code Senses<br/>File R/W"]
-        Git["Git Senses<br/>History/Blame"]
-        DB["DB Senses<br/>PostgreSQL Schema"]
-        Web["Web Senses<br/>Page Fetcher"]
-        Runtime["Runtime Senses<br/>APM Metrics"]
-    end
-
-    subgraph "Data Layer"
-        FactGraph[("Fact Graph<br/>features, workflows,<br/>data_model, index")]
-        DreamGraph[("Dream Graph<br/>speculative edges")]
-        Validated[("Validated Edges<br/>promoted truth")]
-        Tensions[("Tension Log<br/>active questions")]
-        History[("Dream History<br/>audit trail")]
-        Story[("System Story<br/>auto-narrative")]
-    end
-
-    Server --> Tools
-    Server --> Resources
-    Tools --> Engine
-    Engine --> Dreamer
-    Engine --> Normalizer
-    Engine --> Adversarial
-    Engine --> Causal
-    Engine --> Temporal
-    Engine --> Intervention
-    Engine --> Narrator
-    Engine --> Metacognition
-    Engine --> EventRouter
-    Dreamer --> LLM
-    Engine --> Scheduler
-    Engine --> GraphRAG
-    Engine --> Lucid
-    Narrator --> ContinuousNarrative
-    Scheduler --> Engine
-    Dreamer --> DreamGraph
-    Normalizer --> Validated
-    Engine --> Tensions
-    Engine --> History
-    ContinuousNarrative --> Story
-    Dreamer -.-> FactGraph
-    Normalizer -.-> FactGraph
-    Dashboard --> Engine
-    Dashboard --> Scheduler
-    DashStatus --> Engine
-    DashSchedules --> Scheduler
-    DashConfig --> LLM
-```
-
-## Feature Dependencies
-
-The cognitive engine sits at the center of autonomous dream cycles, while the Architect agent drives interactive operations — calling MCP tools to query, enrich, and evolve the knowledge graph:
-
-```mermaid
-graph LR
-    CE[Cognitive Engine] ==> DC[Dream Cycle]
-    CE ==> SM[Speculative Memory]
-    CE ==> TM[Tension Management]
-    CE ==> CR[Causal Reasoning]
-    CE ==> TA[Temporal Analysis]
-    CE --> IP[Intervention Planning]
-    
-    DC ==> NP[Normalization Pipeline]
-    DC --> CR
-    DC ==> TM
-    SM ==> NP
-    
-    TM ==> DC
-    TM ==> SM
-    
-    TA ==> TM
-    IP ==> TM
-    CR --> DC
-    
-    NG[Narrative Generation] --> History[(Dream History)]
-    NG --> Tensions[(Tension Log)]
-    NG --> Validated[(Validated Edges)]
-    
-    Fed[Federation] --> Validated
-    Fed --> CE
-```
+### VS Code Extension
+The extension integrates DreamGraph into the editor and currently lives under `extensions/vscode/src/`.
 
 ## Source Layout
 
-```
+This section is generated from the repository source tree. It should list all current files under the primary source roots.
+
+```text
 src/
-├── index.ts                 # Entry point — CLI arg parser + transport launcher
-├── api/
-│   └── routes.ts            # REST API endpoints for extension / HTTP clients (§8.1)
-├── server/
-│   ├── server.ts            # McpServer factory
-│   └── dashboard.ts         # Web dashboard — /, /status, /schedules, /config, /docs, /health HTML pages
-├── config/
-│   └── config.ts            # Central configuration + env var parsing
-├── cognitive/
-│   ├── engine.ts            # State machine, tension management, persistence
-│   ├── dreamer.ts           # REM generation — 10 dream strategies (incl. LLM dream + PGO wave)
-│   ├── llm.ts               # LLM provider abstraction — Ollama, OpenAI, Anthropic, MCP Sampling, None
-│   ├── normalizer.ts        # Three-outcome classifier (Truth Filter)
-│   ├── adversarial.ts       # NIGHTMARE state — 5 security scan strategies
-│   ├── causal.ts            # Causal chain discovery via BFS
-│   ├── temporal.ts          # Time-dimension analysis — trajectory, prediction
-│   ├── intervention.ts      # Remediation plan generation
-│   ├── narrator.ts          # System autobiography + continuous narrative (v5.1)
-│   ├── federation.ts        # Cross-project archetype exchange
-│   ├── metacognition.ts     # Metacognitive self-tuning (v5.1)
-│   ├── event-router.ts      # Event-driven dreaming (v5.1)
-│   ├── scheduler.ts         # Dream Scheduler — instance-aware orchestration (v5.2→v6.0)
-│   ├── graph-rag.ts         # Graph RAG Bridge — TF-IDF retrieval, token-budgeted context (v5.2)
-│   ├── lucid.ts             # Lucid Dreaming — interactive hypothesis exploration (v5.2)
-│   ├── types.ts             # All cognitive type definitions
-│   └── register.ts          # Tool/resource registration + post-cycle hooks
-├── discipline/              # Self-imposed execution governance (v6.0 La Catedral)
-│   ├── types.ts             # Phase, tool class, protection, session types
-│   ├── state-machine.ts     # Five-phase state machine with transition rules
-│   ├── protection.ts        # Three-tier data file protection
-│   ├── manifest.ts          # 53-tool classification + phase permissions
-│   ├── register.ts          # discipline://manifest resource + tool registration + barrel exports
-│   ├── session.ts           # Task session lifecycle + disk persistence
-│   ├── prompts.ts           # Phase-specific system prompt templates
-│   ├── tool-proxy.ts        # Runtime tool permission checking + phase filtering
-│   ├── artifacts.ts         # Delta table, plan, verification report generators
-│   └── tools.ts             # 9 discipline MCP tools
-├── instance/                # UUID-scoped instance architecture (v6.0 La Catedral)
-│   ├── types.ts             # Instance identity, registry, policy, config types
-│   ├── scope.ts             # InstanceScope — file-system isolation enforcement
-│   ├── registry.ts          # Master registry CRUD (~/.dreamgraph/instances.json)
-│   ├── lifecycle.ts         # Create, load, resolve, migrate instances
-│   ├── bootstrap.ts         # Bootstrap utilities — ADR discovery, follow-up scheduling (v7.0)
-│   ├── policies.ts          # policies.json parser, validator, runtime queries
-│   └── index.ts             # Barrel re-exports
-├── cli/                     # CLI instance manager — `dg` binary (v6.0 La Catedral)
-│   ├── dg.ts                # Entry point — arg tokenizer + command router
-│   ├── utils/
-│   │   ├── daemon.ts        # Shared daemon utilities (PID, ports, health, locks, logs)
-│   │   └── mcp-call.ts      # MCP tool call helper for CLI → daemon communication
-│   └── commands/
-│       ├── init.ts          # dg init — create new instance
-│       ├── attach.ts        # dg attach / dg detach — project binding
-│       ├── instances.ts     # dg instances list / switch
-│       ├── status.ts        # dg status — cognitive state overview + daemon info
-│       ├── scan.ts          # dg scan — trigger project scan on running daemon
-│       ├── schedule.ts      # dg schedule — manage dream schedules on running daemon
-│       ├── lifecycle-ops.ts # dg archive / dg destroy
-│       ├── export.ts        # dg export — snapshot / docs / archetypes
-│       ├── fork.ts          # dg fork — copy instance with new UUID
-│       ├── migrate.ts       # dg migrate — legacy data/ → UUID instance
-│       ├── start.ts         # dg start — spawn HTTP daemon or foreground server
-│       ├── stop.ts          # dg stop — graceful/forced shutdown
-│       └── restart.ts       # dg restart — atomic stop → start
-├── tools/
-│   ├── register.ts          # General tool registration
-│   ├── code-senses.ts       # list_directory, read_source_code, create_file, edit_file, delete_file, rename_file
-│   ├── git-senses.ts        # Git log/blame
-│   ├── db-senses.ts         # PostgreSQL schema inspector (lazy pg import)
-│   ├── web-senses.ts        # Web page fetcher
-│   ├── runtime-senses.ts    # query_runtime_metrics, query_self_metrics
-│   ├── solidify-insight.ts  # Manual insight injection
-│   ├── enrich-seed-data.ts  # Seed data enrichment (merge/replace)
-│   ├── init-graph.ts        # Bootstrap knowledge graph from source
-│   ├── scan-project.ts      # Automated project scan + LLM enrichment + auto-dream (v7.0)
-│   ├── visual-architect.ts  # Mermaid diagram generation
-│   ├── adr-historian.ts     # Architecture Decision Records
-│   ├── ui-registry.ts       # Semantic UI element registry
-│   ├── living-docs-exporter.ts  # Markdown documentation export
-│   ├── get-workflow.ts      # Workflow query tool
-│   ├── search-data-model.ts # Data model search tool
-│   ├── query-resource.ts    # Generic URI-based query
-│   └── api-surface.ts       # Operational: extract/query API surface + ops://api-surface resource
-├── api/
-│   └── routes.ts            # REST API endpoints for extension / HTTP clients (§8.1)
-├── resources/
-│   └── register.ts          # 7 MCP resources (6 system:// + ops://metrics)
-├── types/
-│   └── index.ts             # Re-exports
-└── utils/
-    ├── atomic-write.ts      # Atomic file writes with temp-file + fsync + rename
-    ├── cache.ts             # In-memory JSON cache + pluggable dataDir resolver
-    ├── engine-env.ts        # Per-instance engine.env loader (KEY=VALUE parser)
-    ├── errors.ts            # Error handling + response factories
-    ├── logger.ts            # Stderr logger (protects STDIO stream)
-    ├── metrics.ts           # Runtime instrumentation counters
-    ├── mutex.ts             # Async file mutex with instance-aware key resolver
-    ├── paths.ts             # Lazy dataPath() utility for instance-aware paths
-    └── senses.ts            # Shared helpers for sense tools (repo resolution, path guards)
+  src/api/routes.ts
+  src/cli/commands/attach.ts
+  src/cli/commands/curate.ts
+  src/cli/commands/enrich.ts
+  src/cli/commands/export.ts
+  src/cli/commands/fork.ts
+  src/cli/commands/init.ts
+  src/cli/commands/instances.ts
+  src/cli/commands/lifecycle-ops.ts
+  src/cli/commands/migrate.ts
+  src/cli/commands/restart.ts
+  src/cli/commands/scan.ts
+  src/cli/commands/schedule.ts
+  src/cli/commands/start.ts
+  src/cli/commands/status.ts
+  src/cli/commands/stop.ts
+  src/cli/dg.ts
+  src/cli/utils/daemon.ts
+  src/cli/utils/mcp-call.ts
+  src/cognitive/adversarial.ts
+  src/cognitive/causal.ts
+  src/cognitive/dreamer.ts
+  src/cognitive/engine.ts
+  src/cognitive/event-router.ts
+  src/cognitive/federation.ts
+  src/cognitive/graph-rag.ts
+  src/cognitive/intervention.ts
+  src/cognitive/llm.ts
+  src/cognitive/lucid.ts
+  src/cognitive/metacognition.ts
+  src/cognitive/narrator.ts
+  src/cognitive/normalizer.ts
+  src/cognitive/register.ts
+  src/cognitive/scheduler.ts
+  src/cognitive/temporal.ts
+  src/cognitive/types.ts
+  src/config/config.ts
+  src/discipline/artifacts.ts
+  src/discipline/manifest.ts
+  src/discipline/prompts.ts
+  src/discipline/protection.ts
+  src/discipline/register.ts
+  src/discipline/session.ts
+  src/discipline/state-machine.ts
+  src/discipline/tool-proxy.ts
+  src/discipline/tools.ts
+  src/discipline/types.ts
+  src/index.ts
+  src/instance/bootstrap.ts
+  src/instance/index.ts
+  src/instance/lifecycle.ts
+  src/instance/policies.ts
+  src/instance/registry.ts
+  src/instance/scope.ts
+  src/instance/types.ts
+  src/resources/register.ts
+  src/server/dashboard.ts
+  src/server/server.ts
+  src/tools/adr-historian.ts
+  src/tools/api-surface.ts
+  src/tools/code-senses.ts
+  src/tools/db-senses.ts
+  src/tools/enrich-seed-data.ts
+  src/tools/get-workflow.ts
+  src/tools/git-senses.ts
+  src/tools/init-graph.ts
+  src/tools/living-docs-exporter.ts
+  src/tools/query-resource.ts
+  src/tools/register.ts
+  src/tools/runtime-senses.ts
+  src/tools/scan-project.ts
+  src/tools/search-data-model.ts
+  src/tools/solidify-insight.ts
+  src/tools/ui-registry.ts
+  src/tools/visual-architect.ts
+  src/tools/web-senses.ts
+  src/types/index.ts
+  src/utils/atomic-write.ts
+  src/utils/cache.ts
+  src/utils/engine-env.ts
+  src/utils/errors.ts
+  src/utils/logger.ts
+  src/utils/metrics.ts
+  src/utils/mutex.ts
+  src/utils/paths.ts
+  src/utils/senses.ts
+extensions/vscode/src/
+  extensions/vscode/src/architect-llm.ts
+  extensions/vscode/src/autonomy-contract.ts
+  extensions/vscode/src/autonomy-loop.ts
+  extensions/vscode/src/autonomy-structured.ts
+  extensions/vscode/src/autonomy.ts
+  extensions/vscode/src/changed-files-view.ts
+  extensions/vscode/src/chat-memory.ts
+  extensions/vscode/src/chat-panel.ts
+  extensions/vscode/src/chat-panel.ts.good
+  extensions/vscode/src/command-runner.ts
+  extensions/vscode/src/commands.ts
+  extensions/vscode/src/context-builder.ts
+  extensions/vscode/src/context-inspector.ts
+  extensions/vscode/src/daemon-client.ts
+  extensions/vscode/src/dashboard-view.ts
+  extensions/vscode/src/extension.ts
+  extensions/vscode/src/graph-signal.ts
+  extensions/vscode/src/health-monitor.ts
+  extensions/vscode/src/instance-resolver.ts
+  extensions/vscode/src/intent-detector.ts
+  extensions/vscode/src/local-tools.ts
+  extensions/vscode/src/mcp-client.ts
+  extensions/vscode/src/prompts/architect-core.ts
+  extensions/vscode/src/prompts/architect-explain.ts
+  extensions/vscode/src/prompts/architect-patch.ts
+  extensions/vscode/src/prompts/architect-suggest.ts
+  extensions/vscode/src/prompts/architect-validate.ts
+  extensions/vscode/src/prompts/index.ts
+  extensions/vscode/src/reporting.ts
+  extensions/vscode/src/status-bar.ts
+  extensions/vscode/src/task-reporter.ts
+  extensions/vscode/src/test/autonomy-actions.test.ts
+  extensions/vscode/src/test/autonomy-contract.test.ts
+  extensions/vscode/src/test/autonomy-loop.test.ts
+  extensions/vscode/src/test/autonomy-prompt.test.ts
+  extensions/vscode/src/test/autonomy-reporting.test.ts
+  extensions/vscode/src/test/autonomy-structured.test.ts
+  extensions/vscode/src/test/autonomy.test.ts
+  extensions/vscode/src/test/card-renderer.test.ts
+  extensions/vscode/src/test/chat-memory.test.ts
+  extensions/vscode/src/test/entity-links.test.ts
+  extensions/vscode/src/test/render-markdown.test.ts
+  extensions/vscode/src/test/slice4-redaction.test.ts
+  extensions/vscode/src/test/slice4-ui.test.ts
+  extensions/vscode/src/test/slice4-verify.test.ts
+  extensions/vscode/src/test/slice5-actions.test.ts
+  extensions/vscode/src/test/slice5-audit.test.ts
+  extensions/vscode/src/test/slice5-next-pass.test.ts
+  extensions/vscode/src/test/slice5-runtime.test.ts
+  extensions/vscode/src/test/slice5-ui.test.ts
+  extensions/vscode/src/test/webview-bundle.test.ts
+  extensions/vscode/src/types.ts
+  extensions/vscode/src/webview/card-renderer.ts
+  extensions/vscode/src/webview/entity-links.ts
+  extensions/vscode/src/webview/index.ts
+  extensions/vscode/src/webview/protocol.ts
+  extensions/vscode/src/webview/render-markdown.ts
+  extensions/vscode/src/webview/styles.ts
 scripts/
-├── install.ps1              # Windows PowerShell global installer
-├── install.sh               # Linux/macOS Bash global installer
-└── enrich-graph.mjs         # Seed graph enrichment helper
-templates/
-└── default/                 # Instance initialization seed data
-    ├── config/
-    │   ├── engine.env       # Default commented engine/env template for new instances
-    │   └── policies.json    # Default discipline policies (strict/balanced/creative)
-    └── *.json               # 19 empty data stubs for new instances
-tests/
-└── instance-isolation.test.ts  # Instance boundary + policy validation tests (vitest)
+  scripts/_codeql_scan.cjs
+  scripts/_codeql_scan.js
+  scripts/_fix_alert3.cjs
+  scripts/_fix_codeql.cjs
+  scripts/_grep_out.txt
+  scripts/_grep.cjs
+  scripts/_grep2.cjs
+  scripts/_insights_out.json
+  scripts/_mcp_call.cjs
+  scripts/_mcp_init.json
+  scripts/_mcp_insights.json
+  scripts/_mcp_root.txt
+  scripts/enrich-graph.mjs
+  scripts/generate-architecture-tree.mjs
+  scripts/install.ps1
+  scripts/install.sh
 ```
 
-## Data Directory
+## Version Semantics
 
-```
-data/                                    # Legacy mode (flat) or <instance>/data/ (UUID mode)
-├── system_overview.json     # Project description
-├── features.json            # Feature entities + cross-links
-├── workflows.json           # Operational workflows
-├── data_model.json          # Data entity definitions
-├── index.json               # Entity ID → URI lookup
-├── capabilities.json        # MCP capability declarations
-├── dream_graph.json         # Active speculative edges
-├── candidate_edges.json     # Normalization audit log
-├── validated_edges.json     # Promoted edges (fact-adjacent)
-├── tension_log.json         # Active + resolved tensions
-├── dream_history.json       # Full cycle audit trail
-├── adr_log.json             # Architecture Decision Records
-├── ui_registry.json         # Semantic UI elements
-├── threat_log.json          # Adversarial scan results (NIGHTMARE)
-├── dream_archetypes.json    # Federated dream archetypes
-├── meta_log.json            # Metacognitive analysis audit trail
-├── event_log.json           # Cognitive event dispatch log
-├── system_story.json        # Auto-generated narrative (v5.1)
-├── schedules.json           # Dream Scheduler persistence (v5.2)
-├── lucid_log.json           # Lucid dream session archive (v5.2)
-└── api_surface.json         # [runtime] Operational API surface (classes, methods, signatures)
-```
+A DreamGraph installation may surface more than one version value:
 
-### Instance Config Directory
+- **Created With** — the version recorded in an instance identity file when the instance was created
+- **Daemon Version** — the version reported by the currently running daemon binary
+- **Package Version** — the repository/package version declared in `package.json`
 
-Each UUID-scoped instance also has a `config/` directory:
+These values can legitimately differ after upgrades or when an older instance continues to run under a newer daemon.
 
-```
-~/.dreamgraph/<uuid>/config/
-├── instance.json            # Instance identity (UUID, name, version, project_root)
-├── mcp.json                 # Repos, transport, daemon settings
-├── policies.json            # Discipline rules (strict/balanced/creative)
-├── schema_version.json      # Data schema version for migrations
-└── engine.env               # LLM provider, API keys, model settings (KEY=VALUE format)
-```
+## Licensing
 
-The `engine.env` file overrides global environment variables with per-instance values, enabling different LLM configurations per project.
+DreamGraph is distributed under the **DreamGraph Source-Available Community License v2.0**. It is source-available and should not be described as OSI-approved open source unless a specific edition is separately released under such a license.
 
-## Configuration
-
-| Env Variable | Default | Description |
-|-------------|---------|-------------|
-| `DREAMGRAPH_DATA_DIR` | `./data` | Path to data directory (legacy mode) |
-| `DREAMGRAPH_INSTANCE_UUID` | — | UUID of the instance to load (enables UUID mode) |
-| `DREAMGRAPH_MASTER_DIR` | `~/.dreamgraph` | Master directory for all instances |
-| `DREAMGRAPH_DEBUG` | `false` | Enable debug logging to stderr |
-| `DREAMGRAPH_FEDERATION` | `false` | Enable cross-project federation |
-| `DREAMGRAPH_EVENTS` | `true` | Enable event-driven dreaming (v5.1) |
-| `DREAMGRAPH_NARRATIVE` | `true` | Enable continuous narrative (v5.1) |
-| `DATABASE_URL` | — | PostgreSQL connection string for DB senses |
-| `DREAMGRAPH_RUNTIME_ENDPOINT` | — | APM metrics endpoint URL |
-| `DREAMGRAPH_RUNTIME_TYPE` | — | Metrics format: `otlp`, `prometheus`, or `custom` |
-| `DREAMGRAPH_REPOS` | `{}` | JSON object mapping repo names to local paths. In instance mode, repos from `mcp.json` are merged automatically and `project_root` is auto-registered as a fallback — this env var becomes optional. |
-| `DREAMGRAPH_SCHEDULER` | `{"enabled":true}` | JSON config for dream scheduler (v5.2): `enabled`, `tick_interval_ms`, `max_runs_per_hour`, `cooldown_ms`, `nightmare_cooldown_ms`, `error_streak_pause_limit` |
-| `DREAMGRAPH_LLM_PROVIDER` | `"ollama"` | LLM provider: `ollama`, `openai`, `anthropic`, `sampling`, `none` |
-| `DREAMGRAPH_LLM_MODEL` | `"qwen3:8b"` | Base model name used unless Dreamer/Normalizer overrides are set |
-| `DREAMGRAPH_LLM_URL` | `http://localhost:11434` | API base URL |
-| `DREAMGRAPH_LLM_API_KEY` | — | API key for OpenAI / Anthropic providers |
-| `DREAMGRAPH_LLM_TEMPERATURE` | `0.7` | Base creativity parameter (0.0–1.0). Recommended: `0.9` for cloud models with Structured Outputs |
-| `DREAMGRAPH_LLM_MAX_TOKENS` | `2048` | Base max response tokens |
-| `DREAMGRAPH_LLM_DREAMER_MODEL` | *(base model)* | Override model for Dreamer component |
-| `DREAMGRAPH_LLM_DREAMER_TEMPERATURE` | *(base temp)* | Override temperature for Dreamer |
-| `DREAMGRAPH_LLM_DREAMER_MAX_TOKENS` | *(base tokens)* | Override max tokens for Dreamer |
-| `DREAMGRAPH_LLM_NORMALIZER_MODEL` | *(base model)* | Override model for Normalizer component |
-| `DREAMGRAPH_LLM_NORMALIZER_TEMPERATURE` | `0.1 if unset` | Override temperature for Normalizer |
-| `DREAMGRAPH_LLM_NORMALIZER_MAX_TOKENS` | *(base tokens)* | Override max tokens for Normalizer |
-
-> **Per-instance override:** Each instance can have a `config/engine.env` file that overrides the global env vars above. `dg init --template <name>` seeds this file from the selected template using this resolution order: `~/.dreamgraph/templates/<name>/config/engine.env` → repository `templates/<name>/config/engine.env` → built-in programmatic scaffold. Users can create additional named templates by copying `~/.dreamgraph/templates/default/` and renaming it (for example `openai` or `anthropic`). This allows different instances to use different LLM providers and models.
-
-> **⚠️ Cost Warning:** Cloud LLM providers (`openai`, `anthropic`) incur API costs on every dream cycle. With scheduled dreaming at 60-second intervals, costs can reach $2–60+/day depending on the model. Use `DREAMGRAPH_SCHEDULER` `max_runs_per_hour` to cap frequency and monitor your billing dashboard. Use `ollama` for free local dreaming or `none` to disable LLM entirely.
+See `LICENSE` for the authoritative license text.

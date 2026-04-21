@@ -26,7 +26,7 @@ Quality scores:
 
 ## Why the rewrite wins
 The rewritten builder consistently outperformed the old runtime in the areas the benchmark was designed to test:
-- **Precision:** narrower, more task-matched context instead of broader file spill
+- **Precision:** narrower, more task-match**** context instead of broader file spill
 - **Graph specificity:** better canonical feature/workflow/ADR grounding
 - **Continuity:** stronger carry-over for follow-up and restored-session reasoning
 - **Efficiency:** materially lower context size while improving answer usefulness
@@ -41,6 +41,24 @@ The smallest relative improvement was in:
 - **P06** — broad architecture explanation from a local anchor
 
 This is still a win, but it confirms that broader prompts naturally require some additional context width even under the rewritten strategy.
+
+## Repeatability addendum
+A separate third take was captured in:
+- `plans/benchmarks/context-third-01.md` through `plans/benchmarks/context-third-10.md`
+- `plans/benchmarks/context-third-summary.md`
+
+The third take serves as a repeatability and stability check rather than a replacement for the main old/new comparison.
+
+Third-take aggregate results:
+- Third average estimated tokens: **1136**
+- Third vs prior new average delta: **-24 tokens (~2%)**
+- Third relevance: **4.7 / 5**
+- Third continuity: **4.1 / 5**
+
+Interpretation:
+- the third take is materially consistent with the prior new-runtime benchmark
+- the same strengths remained dominant, especially **P03**, **P08**, **P09**, and **P10**
+- this increases confidence that the rewritten builder's gains are stable rather than one-off capture noise
 
 ## Architectural reading
 The results align with the intended design direction described in the benchmark plan:
@@ -57,6 +75,7 @@ Recommended action:
 - Keep the rewritten ContextBuilder as the default implementation.
 - Use this benchmark result as release justification for the rewrite.
 - If future regressions are suspected, rerun the same P01–P10 matrix as a standing benchmark.
+- Treat the third take as repeatability confirmation for the rewrite decision.
 
 ## Caveat
 These benchmark artifacts are structured comparative captures and evaluation notes, not low-level serialized internal prompt-packet telemetry exports. They are suitable for planning, comparative validation, and release justification, but should not be presented as raw telemetry.

@@ -21,9 +21,27 @@ import type { ConnectionStatus, HealthState } from "./types.js";
 /*  Status Bar Manager                                                */
 /* ------------------------------------------------------------------ */
 
+/**
+ * DreamGraph Status Bar — Layer 1 (VS Code Integration).
+ *
+ * Displays connection state and instance name in the status bar.
+ *
+ * Formats (§2.5):
+ *   $(check)   DG: my-project ✓   — connected
+ *   $(warning) DG: my-project ⚠   — degraded
+ *   $(error)   DG: disconnected    — no connection
+ *   $(loading~spin) DG: connecting… — connecting
+ *
+ * Click → quick pick with connection commands.
+ *
+ * @see TDD §2.5 (Status Bar)
+ */
+
 export class StatusBarManager implements vscode.Disposable {
   private readonly _item: vscode.StatusBarItem;
+  private readonly _restoreItem: vscode.StatusBarItem;
   private _instanceName: string = "";
+  private _isRestoreVisible = false;
 
   constructor() {
     this._item = vscode.window.createStatusBarItem(
@@ -32,6 +50,17 @@ export class StatusBarManager implements vscode.Disposable {
     );
     this._item.command = "dreamgraph.statusQuickPick";
     this._item.name = "DreamGraph";
+
+    this._restoreItem = vscode.window.createStatusBarItem(
+      vscode.StatusBarAlignment.Left,
+      99,
+    );
+    this._restoreItem.command = "dreamgraph.restoreSidebar";
+    this._restoreItem.name = "DreamGraph Restore Sidebar";
+    this._restoreItem.text = "$(layers-active) DG Sidebar";
+    this._restoreItem.tooltip = "DreamGraph: Restore sidebar icon and reopen the dashboard";
+    this._restoreItem.backgroundColor = undefined;
+
     this._setDisconnected();
     this._item.show();
   }
@@ -62,7 +91,23 @@ export class StatusBarManager implements vscode.Disposable {
     this._setDisconnected();
   }
 
+  /**
+   * Show or hide the explicit sidebar restore fallback button.
+   */
+  setRestoreSidebarVisible(visible: boolean): void {
+    if (visible === this._isRestoreVisible) {
+      return;
+    }
+    this._isRestoreVisible = visible;
+    if (visible) {
+      this._restoreItem.show();
+    } else {
+      this._restoreItem.hide();
+    }
+  }
+
   dispose(): void {
+    this._restoreItem.dispose();
     this._item.dispose();
   }
 

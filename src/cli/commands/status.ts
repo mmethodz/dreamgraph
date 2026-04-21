@@ -33,6 +33,7 @@ export async function cmdStatus(
 ): Promise<void> {
   if (flags.help) {
     console.log(`
+
 dg status — Show instance cognitive state
 
 Usage:
@@ -99,7 +100,7 @@ Options:
       identity: {
         uuid: instance.uuid,
         name: instance.name,
-        version: instance.version,
+        created_with_version: instance.version,
         status: entry.status,
         mode: instance.mode,
         policy: instance.policy_profile,
@@ -152,7 +153,7 @@ Options:
   ────────────────────────────────────────
   UUID:            ${instance.uuid}
   Name:            ${instance.name}
-  Version:         ${instance.version}
+  Created With:    ${instance.version}
   Status:          ${entry.status}
   Mode:            ${instance.mode}
   Policy:          ${instance.policy_profile}

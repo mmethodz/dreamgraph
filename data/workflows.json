@@ -1,47 +1,167 @@
 [
   {
-    "id": "checkout_flow",
-    "name": "Checkout Flow",
-    "description": "End-to-end customer checkout from cart to order confirmation.",
-    "trigger": "Customer clicks 'Proceed to Checkout' from cart page",
-    "source_repo": "bookstore-web",
-    "source_files": ["src/pages/checkout.tsx", "src/services/CheckoutService.ts"],
+    "id": "workflow_dream_cycle",
+    "name": "Dream Cycle",
+    "description": "Primary cognitive workflow that drives speculative discovery and validation across the knowledge graph.",
+    "trigger": "manual_or_scheduled",
+    "source_repo": "dreamgraph",
+    "source_files": ["src/cognitive/engine.ts", "src/cognitive/dream-state-machine.ts"],
     "steps": [
-      { "step": 1, "action": "Validate cart contents", "description": "Check stock availability for all items. Remove unavailable items with user notification." },
-      { "step": 2, "action": "Collect shipping address", "description": "Form with address autocomplete. Save to user profile if checked." },
-      { "step": 3, "action": "Apply discount code", "description": "Optional. Validate code exists, not expired, under max_uses. Calculate discount." },
-      { "step": 4, "action": "Create Stripe Payment Intent", "description": "POST /api/payments/create-intent with order total. Returns client_secret." },
-      { "step": 5, "action": "Confirm payment", "description": "Stripe.js confirmCardPayment with client_secret. Handle 3D Secure if required." },
-      { "step": 6, "action": "Create order record", "description": "Insert order + order_items. Decrement book.stock_count atomically." },
-      { "step": 7, "action": "Send confirmation email", "description": "Transactional email with order summary, estimated delivery, and tracking link." },
-      { "step": 8, "action": "Redirect to confirmation page", "description": "Show order number, items purchased, and estimated delivery date." }
+      { "step": 1, "action": "AWAKE → collect graph seeds and runtime metrics", "description": "Gather current graph state, tensions, and runtime signals needed to start a cognitive cycle." },
+      { "step": 2, "action": "REM → propose speculative edges via LLM", "description": "Generate candidate relationships and hypotheses from the available evidence using model-assisted reasoning." },
+      { "step": 3, "action": "NORMALIZING → validate edges against evidence and ADR guard rails", "description": "Validate proposed edges against available evidence, accepted ADR constraints, and confidence thresholds before solidifying them." }
     ]
   },
   {
-    "id": "review_moderation",
-    "name": "Review Moderation",
-    "description": "Admin workflow for reviewing and approving or rejecting customer book reviews.",
-    "trigger": "New review submitted by customer (approved=false)",
-    "source_repo": "bookstore-api",
-    "source_files": ["src/routes/admin/reviews.ts"],
+    "id": "workflow_execution",
+    "name": "Workflow Execution Process",
+    "description": "This process executes defined workflows within the DreamGraph server, coordinating the various steps involved in a workflow. It ensures that workflows are carried out efficiently and correctly.",
+    "trigger": "User initiates a workflow",
+    "source_repo": "dreamgraph",
+    "source_files": ["src/cognitive/engine.ts", "src/api/routes.ts"],
     "steps": [
-      { "step": 1, "action": "Queue review for moderation", "description": "New review appears in admin dashboard moderation queue." },
-      { "step": 2, "action": "Admin reviews content", "description": "Check for spam, profanity, and relevance to the book." },
-      { "step": 3, "action": "Approve or reject", "description": "Set approved=true (visible) or delete. Optionally flag user." },
-      { "step": 4, "action": "Update book rating average", "description": "Recalculate avg_rating on books table after approval." }
+      { "step": 1, "action": "Receive Workflow Request", "description": "Capture the request to execute a specific workflow." },
+      { "step": 2, "action": "Validate Workflow", "description": "Check if the requested workflow is valid and can be executed." },
+      { "step": 3, "action": "Execute Workflow Steps", "description": "Carry out each step of the workflow in sequence." },
+      { "step": 4, "action": "Return Workflow Result", "description": "Provide the results of the workflow execution back to the user." }
     ]
   },
   {
-    "id": "inventory_reorder",
-    "name": "Inventory Reorder Alert",
-    "description": "Automated alert when book stock drops below reorder threshold.",
-    "trigger": "book.stock_count drops below 10 after order placement",
-    "source_repo": "bookstore-api",
-    "source_files": ["src/services/InventoryService.ts", "src/jobs/reorder-check.ts"],
+    "id": "workflow_project_onboarding",
+    "name": "Project Onboarding and Enrichment",
+    "description": "High-level onboarding workflow that scans the repository, bootstraps or enriches the fact graph, and rebuilds indexable architectural memory for later querying and cognition.",
+    "trigger": "repository onboarding or refresh",
+    "source_repo": "dreamgraph",
+    "source_files": ["src/tools/init-graph.ts", "src/tools/scan-project.ts", "src/tools/enrich-seed-data.ts"],
     "steps": [
-      { "step": 1, "action": "Check stock threshold", "description": "After order_item creation, check if book.stock_count < reorder_threshold." },
-      { "step": 2, "action": "Create reorder alert", "description": "Insert row in reorder_alerts table with book_id and current_stock." },
-      { "step": 3, "action": "Notify admin", "description": "Send email to admin with low-stock book details and suggested reorder quantity." }
+      { "step": 1, "action": "Discover repository files and coarse project structure.", "description": "Enumerate project files and derive an initial structural picture of the repository." },
+      { "step": 2, "action": "Generate a first-pass graph using init_graph when no seed memory exists or a reset is required.", "description": "Initialize baseline graph memory when the project has not yet been seeded or must be rebuilt." },
+      { "step": 3, "action": "Run scan_project to attempt semantic extraction of features, workflows, and data model entities.", "description": "Scan the codebase to extract structured knowledge candidates for the graph." },
+      { "step": 4, "action": "Merge curated or manually derived knowledge into the seed graph through enrich_seed_data.", "description": "Upsert curated features, workflows, and data-model entities into the graph seed data." },
+      { "step": 5, "action": "Rebuild indexes and expose resulting resources for query and downstream cognitive use.", "description": "Refresh graph indexes and resource views so the newly captured knowledge becomes queryable and usable by later cognition." }
+    ]
+  },
+  {
+    "id": "workflow_vscode_assisted_reasoning",
+    "name": "VS Code Assisted Reasoning",
+    "description": "Brings DreamGraph context into the editor through extension-hosted panels, status indicators, daemon communication, and contextual prompt building.",
+    "trigger": "VS Code extension activation or user interaction",
+    "source_repo": "dreamgraph",
+    "source_files": ["extensions/vscode/src/extension.ts", "extensions/vscode/src/chat-panel.ts", "extensions/vscode/src/context-builder.ts", "extensions/vscode/src/daemon-client.ts"],
+    "steps": [
+      { "step": 1, "action": "Activate the VS Code extension and establish daemon communication.", "description": "Start the extension and connect to the DreamGraph daemon so editor features have live project context." },
+      { "step": 2, "action": "Build or retrieve relevant DreamGraph context for the current editing situation.", "description": "Collect contextual project knowledge relevant to the active file, selection, or user intent." },
+      { "step": 3, "action": "Render conversational or dashboard surfaces inside VS Code.", "description": "Show DreamGraph-driven chat or dashboard UI inside the extension host surfaces." },
+      { "step": 4, "action": "Let the user ask questions, inspect context, and monitor DreamGraph state from the editor.", "description": "Support interactive reasoning and system inspection directly from the IDE." },
+      { "step": 5, "action": "Reflect daemon health and status through lightweight UI signals such as the status bar.", "description": "Expose connectivity and health state so the user can see whether DreamGraph services are available." }
+    ]
+  },
+  {
+    "id": "workflow_discipline_task_lifecycle",
+    "name": "Discipline Task Lifecycle",
+    "description": "Tracks how a discipline task is created, progressed, reviewed, and closed while keeping ownership and status transitions explicit.",
+    "trigger": "task creation or discipline status transition",
+    "source_repo": "dreamgraph",
+    "source_files": ["src/disciplines/task-manager.ts", "src/disciplines/session.ts"],
+    "steps": [
+      { "step": 1, "action": "Create a discipline task with scope and owner.", "description": "Open a task record that captures the requested work, responsible discipline, and initial constraints." },
+      { "step": 2, "action": "Prioritize and schedule the task.", "description": "Place the task into the discipline backlog or active queue according to urgency and dependencies." },
+      { "step": 3, "action": "Execute the task within the assigned discipline context.", "description": "Perform the work while preserving the discipline-specific tools, prompts, and boundaries." },
+      { "step": 4, "action": "Review results and capture follow-up actions.", "description": "Assess whether the task outcome satisfies the intent and whether more work must be spawned." },
+      { "step": 5, "action": "Update task status and evidence.", "description": "Record completion notes, evidence, or blockers so later sessions can understand the state." },
+      { "step": 6, "action": "Close or hand off the task.", "description": "Finish the lifecycle by marking the task complete or transferring ownership for the next stage." }
+    ]
+  },
+  {
+    "id": "workflow_ui_registration_flow",
+    "name": "Semantic UI Registration Flow",
+    "description": "Captures semantic UI elements, their data contracts, interaction model, and platform implementations so interface concepts can be queried and migrated independently of rendering technology.",
+    "trigger": "semantic UI registration request",
+    "source_repo": "dreamgraph",
+    "source_files": ["src/tools/ui-registry.ts"],
+    "steps": [
+      { "step": 1, "action": "Define a semantic UI element with purpose, category, inputs, outputs, and interactions.", "description": "Describe the UI concept independently of any concrete rendering technology." },
+      { "step": 2, "action": "Optionally associate child semantic elements and known platform implementations.", "description": "Capture composition relationships and any current implementations across platforms." },
+      { "step": 3, "action": "Register or merge the element into the UI registry.", "description": "Persist the semantic element so it becomes part of the shared UI knowledge base." },
+      { "step": 4, "action": "Query elements by feature, category, platform, or migration gaps.", "description": "Retrieve registered UI concepts to support search, inspection, and migration analysis." },
+      { "step": 5, "action": "Use registered elements to support migration planning and architectural documentation.", "description": "Apply registry knowledge to broader UI planning and documentation workflows." }
+    ]
+  },
+  {
+    "id": "workflow_scheduled_cognitive_execution",
+    "name": "Scheduled Cognitive Execution",
+    "description": "Automates recurring cognitive actions like dream cycles, nightmare scans, metacognitive analysis, and narrative updates according to temporal triggers.",
+    "trigger": "schedule trigger condition met",
+    "source_repo": "dreamgraph",
+    "source_files": ["src/cognitive/scheduler.ts", "src/cognitive/register.ts"],
+    "steps": [
+      { "step": 1, "action": "Create a schedule with an action type and trigger configuration.", "description": "Define the recurring cognitive action together with the timing or event trigger that should fire it." },
+      { "step": 2, "action": "Persist and enable the schedule.", "description": "Store the schedule so it survives process restarts and becomes eligible for execution." },
+      { "step": 3, "action": "When the trigger condition is met, execute the configured cognitive action subject to safety guards.", "description": "Run the scheduled cognitive operation only when timing and safety conditions allow it." },
+      { "step": 4, "action": "Record execution history including success or failure.", "description": "Capture an audit trail of each scheduled run and whether it completed successfully." },
+      { "step": 5, "action": "Allow later inspection, update, manual run, or deletion of the schedule.", "description": "Support ongoing management of the scheduled cognitive action after creation." }
+    ]
+  },
+  {
+    "id": "workflow_vscode_autonomy_continuation_loop",
+    "name": "VS Code Autonomy Continuation Loop",
+    "description": "After each architect pass, the extension extracts the structured pass envelope, derives recommended actions, analyzes continuation safety against autonomy mode and pass budget, updates visible autonomy status, and may self-continue with a synthesized next prompt until the goal is reached, risk rises, or the budget is exhausted.",
+    "trigger": "assistant pass completion in the VS Code architect chat panel",
+    "source_repo": "dreamgraph",
+    "source_files": ["extensions/vscode/src/chat-panel.ts", "extensions/vscode/src/autonomy-loop.ts", "extensions/vscode/src/autonomy-structured.ts", "extensions/vscode/src/autonomy.ts", "extensions/vscode/src/reporting.ts"],
+    "steps": [
+      { "step": 1, "action": "Detect requested/configured autonomy mode and pass budget", "description": "Read the current autonomy settings so continuation decisions stay within configured limits." },
+      { "step": 2, "action": "Inject reporting/autonomy instruction blocks into the architect system prompt", "description": "Ensure the assistant response format includes the structured continuation envelope needed by the extension." },
+      { "step": 3, "action": "Extract structured pass envelope and recommended next actions from the response", "description": "Parse the assistant output to recover progress, uncertainty, and action recommendations." },
+      { "step": 4, "action": "Analyze progress, uncertainty, and scope to decide continuation", "description": "Determine whether the session should continue automatically or stop based on policy and current state." },
+      { "step": 5, "action": "Broadcast autonomy status and actions to the webview", "description": "Update the visible UI so the user can see the autonomy state and proposed next steps." },
+      { "step": 6, "action": "If allowed, synthesize the next prompt and run another bounded pass", "description": "Perform another controlled assistant turn only when autonomy mode and safety checks permit it." }
+    ]
+  },
+  {
+    "id": "workflow_cli_enrich_pipeline",
+    "name": "CLI Enrich Pipeline",
+    "description": "The dg enrich workflow resolves the target instance, verifies a running daemon, optionally scans the project, runs enrich_seed_data, and reports graph coverage improvements.",
+    "trigger": "dg enrich <instance>",
+    "source_repo": "dreamgraph",
+    "source_files": ["src/cli/commands/enrich.ts", "src/cli/dg.ts"],
+    "steps": [
+      { "step": 1, "action": "Resolve target instance and daemon metadata", "description": "Identify the instance to enrich and gather the daemon connection details needed for the operation." },
+      { "step": 2, "action": "Validate daemon is reachable and has a port", "description": "Confirm the target daemon is running and can accept enrichment-related requests." },
+      { "step": 3, "action": "Run scan_project unless skip-scan is enabled", "description": "Optionally refresh structural and semantic understanding before enrichment begins." },
+      { "step": 4, "action": "Run enrich_seed_data unless skip-enrich is enabled", "description": "Upsert seed knowledge into the graph so the instance becomes more complete and queryable." },
+      { "step": 5, "action": "Report scan and enrichment summaries in text or JSON", "description": "Return a usable summary of the operation and the resulting graph coverage changes." }
+    ]
+  },
+  {
+    "id": "workflow_cli_curate_audit",
+    "name": "CLI Curate Audit",
+    "description": "The dg curate workflow inspects graph quality on a running daemon by querying features, workflows, data model entities, and ADRs, then groups findings and suggests next actions. If no daemon is running, it emits advisory-only guidance.",
+    "trigger": "dg curate <instance>",
+    "source_repo": "dreamgraph",
+    "source_files": ["src/cli/commands/curate.ts", "src/cli/dg.ts"],
+    "steps": [
+      { "step": 1, "action": "Resolve target instance and determine whether the daemon is running", "description": "Figure out which instance to audit and whether live graph inspection is possible." },
+      { "step": 2, "action": "If no daemon is present, emit advisory guidance only", "description": "Fall back to non-live guidance when the system cannot query a running daemon." },
+      { "step": 3, "action": "Query live graph resources for requested quality targets", "description": "Inspect the live graph for workflows, features, data model entities, and ADR coverage." },
+      { "step": 4, "action": "Detect stale, weak, empty, or underspecified records", "description": "Identify graph quality gaps that should be curated or remediated." },
+      { "step": 5, "action": "Group findings and print suggested remediation actions", "description": "Present the audit output in a way that guides the next graph-improvement steps." }
+    ]
+  },
+  {
+    "id": "workflow_architect_agentic_tool_execution",
+    "name": "Architect Agentic Tool Execution",
+    "description": "Executes architect chat requests through a structured tool-calling loop and renders rich execution artifacts in the VS Code chat surface.",
+    "trigger": "User submits a request in the VS Code architect chat panel.",
+    "source_repo": "dreamgraph",
+    "source_files": ["extensions/vscode/src/architect-llm.ts", "extensions/vscode/src/chat-panel.ts", "extensions/vscode/media/"],
+    "steps": [
+      { "step": 1, "action": "Accept user prompt and optional multimodal attachments.", "description": "Capture the architect request together with any attached context such as images or files." },
+      { "step": 2, "action": "Normalize provider-specific request payloads for the active LLM provider.", "description": "Translate the request into the provider-specific shape needed for the selected model backend." },
+      { "step": 3, "action": "Execute structured tool-calling loop under architect orchestration.", "description": "Run the orchestrated reasoning loop that can call tools and iterate toward an answer." },
+      { "step": 4, "action": "Render verdicts, traces, pills, and other advanced execution artifacts immediately in the structured webview.", "description": "Display rich execution outputs as soon as they are available rather than waiting for a plain final answer." },
+      { "step": 5, "action": "Render recognized file and entity references as interactive links.", "description": "Convert recognized references into navigable IDE links to improve follow-up exploration." },
+      { "step": 6, "action": "Preserve the end-to-end execution loop while progressively updating the rich chat surface.", "description": "Keep the tool-execution lifecycle coherent while continuously improving the user-visible chat surface." }
     ]
   }
 ]

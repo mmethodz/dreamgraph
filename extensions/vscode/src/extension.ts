@@ -35,6 +35,7 @@ import {
   switchInstanceCommand,
   showStatusCommand,
   openDashboardCommand,
+  restoreSidebarCommand,
   startDaemonCommand,
   stopDaemonCommand,
   inspectContextCommand,
@@ -125,6 +126,30 @@ export function activate(context: vscode.ExtensionContext): void {
   const statusBar = new StatusBarManager();
   const contextInspector = new ContextInspector();
 
+  // ---- Keep DreamGraph container visible / recoverable ----
+  const syncDreamGraphVisibility = (): void => {
+    const shouldShowRestore = !chatPanel.isVisible && !dashboardView.isVisible;
+    statusBar.setRestoreSidebarVisible(shouldShowRestore);
+
+    if (shouldShowRestore) {
+      void dashboardView.ensureContainerVisible();
+    }
+  };
+
+  context.subscriptions.push(
+    vscode.window.onDidChangeVisibleTextEditors(() => {
+      syncDreamGraphVisibility();
+    }),
+    vscode.window.onDidChangeWindowState((state) => {
+      if (state.focused) {
+        syncDreamGraphVisibility();
+      }
+    }),
+    vscode.window.onDidChangeActiveTextEditor(() => {
+      syncDreamGraphVisibility();
+    }),
+  );
+
   // ---- Wire health monitor → status bar ----
   healthMonitor.onTransition((event) => {
     statusBar.update(healthMonitor.state, currentInstance?.name);
@@ -165,6 +190,7 @@ export function activate(context: vscode.ExtensionContext): void {
     ["dreamgraph.switchInstance", () => switchInstanceCommand(services)],
     ["dreamgraph.showStatus", () => showStatusCommand(services)],
     ["dreamgraph.openDashboard", () => openDashboardCommand(services)],
+    ["dreamgraph.restoreSidebar", () => restoreSidebarCommand(services)],
     ["dreamgraph.startDaemon", () => startDaemonCommand(services)],
     ["dreamgraph.stopDaemon", () => stopDaemonCommand(services)],
     ["dreamgraph.inspectContext", () => inspectContextCommand(services)],
@@ -248,6 +274,13 @@ export function activate(context: vscode.ExtensionContext): void {
     // Delay slightly to let VS Code finish loading
     setTimeout(() => void connectCommand(services), 1500);
   }
+
+  syncDreamGraphVisibility();
+
+  // Ensure the container is recoverable even before the first manual open.
+  setTimeout(() => {
+    syncDreamGraphVisibility();
+  }, 2000);
 }
 
 /* ------------------------------------------------------------------ */

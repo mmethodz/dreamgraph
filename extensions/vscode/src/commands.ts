@@ -250,9 +250,29 @@ export function showStatusCommand(svc: CommandServices): void {
 /* ------------------------------------------------------------------ */
 
 export async function openDashboardCommand(
-  _svc: CommandServices,
+  svc: CommandServices,
 ): Promise<void> {
-  await vscode.commands.executeCommand("dreamgraph.dashboardView.focus");
+  await svc.dashboardView.ensureContainerVisible();
+  svc.statusBar.setRestoreSidebarVisible(false);
+  await svc.dashboardView.open();
+}
+
+export async function restoreSidebarCommand(
+  svc: CommandServices,
+): Promise<void> {
+  await svc.dashboardView.ensureContainerVisible();
+  svc.statusBar.setRestoreSidebarVisible(false);
+
+  try {
+    await svc.dashboardView.open();
+    void vscode.window.showInformationMessage(
+      "DreamGraph: sidebar restored and dashboard opened.",
+    );
+  } catch (err) {
+    void vscode.window.showWarningMessage(
+      `DreamGraph: attempted sidebar restore, but opening the dashboard may still need manual recovery — ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -426,6 +446,10 @@ export async function statusQuickPickCommand(
       description: "Full instance details",
     },
     {
+      label: "$(layout-sidebar-left) Restore Sidebar",
+      description: "Re-show DreamGraph activity bar icon and open dashboard",
+    },
+    {
       label: "$(globe) Open Dashboard",
       description: "Open web dashboard",
     },
@@ -450,6 +474,8 @@ export async function statusQuickPickCommand(
       return switchInstanceCommand(svc);
     case "$(info) Show Status":
       return showStatusCommand(svc), undefined;
+    case "$(layout-sidebar-left) Restore Sidebar":
+      return restoreSidebarCommand(svc);
     case "$(globe) Open Dashboard":
       return openDashboardCommand(svc);
     case "$(eye) Inspect Context":

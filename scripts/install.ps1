@@ -47,6 +47,11 @@ function Write-Step([string]$msg) { Write-Host "`n$msg" -ForegroundColor Cyan }
 function Write-Ok([string]$msg)   { Write-Host "  $msg (ok)" -ForegroundColor Green }
 function Write-Warn([string]$msg) { Write-Host "  WARNING: $msg" -ForegroundColor Yellow }
 function Fail-Install([string]$msg) { Write-Error $msg; exit 1 }
+function Get-ArrayCount {
+    param([AllowNull()]$Value)
+    if ($null -eq $Value) { return 0 }
+    return @($Value).Count
+}
 
 function Invoke-LoggedCommand {
     param(
@@ -58,19 +63,23 @@ function Invoke-LoggedCommand {
     )
 
     $output = @()
+    $exitCode = 0
     Push-Location $WorkingDirectory
     try {
         $prevPref = $ErrorActionPreference
         $ErrorActionPreference = "SilentlyContinue"
         $output = & $FilePath @Arguments 2>&1
         $exitCode = $LASTEXITCODE
+        if ($null -eq $exitCode) {
+            $exitCode = 0
+        }
         $ErrorActionPreference = $prevPref
     } finally {
         Pop-Location
     }
 
     if (-not $Quiet) {
-        $output | Where-Object { $_ -is [string] -and $_.Trim() } | ForEach-Object {
+        @($output) | Where-Object { $_ -is [string] -and $_.Trim() } | ForEach-Object {
             Write-Host "  $_" -ForegroundColor DarkGray
         }
     }
@@ -98,8 +107,8 @@ function Ensure-RootBuildDependencies {
         (Join-Path $SourceDir "node_modules\@modelcontextprotocol")
     )
 
-    $missing = $requiredPaths | Where-Object { -not (Test-Path $_) }
-    if ($missing.Count -gt 0) {
+    $missing = @($requiredPaths | Where-Object { -not (Test-Path $_) })
+    if ((Get-ArrayCount $missing) -gt 0) {
         Write-Host "  Installing root npm dependencies (including devDependencies)..." -ForegroundColor Cyan
         $result = Invoke-LoggedCommand -FilePath "npm" -Arguments @("install", "--include=dev", "--loglevel=warn") -WorkingDirectory $SourceDir
         if ($result.ExitCode -ne 0) {
@@ -160,7 +169,7 @@ function Remove-LegacyVsCodeExtensionArtifacts {
     foreach ($extensionsRoot in $extensionsRoots) {
         $legacyPattern = "$ExtensionId-$LegacyVersion*"
         $legacyDirs = Get-ChildItem -Path $extensionsRoot -Directory -Filter $legacyPattern -ErrorAction SilentlyContinue
-        foreach ($dir in $legacyDirs) {
+        foreach ($dir in @($legacyDirs)) {
             try {
                 Remove-Item -Recurse -Force $dir.FullName
                 Write-Ok "Removed legacy extension folder $($dir.Name)"
@@ -184,7 +193,7 @@ function Test-VsCodeExtensionInstalled {
     }
 
     $pattern = "^$([regex]::Escape($ExtensionId))@$([regex]::Escape($Version))$"
-    return $result.Output -match $pattern
+    return @($result.Output) -match $pattern
 }
 
 function Install-VsCodeExtensionSafely {
@@ -415,10 +424,14 @@ Write-Ok "Shims created (dg.cmd, dg.ps1, dreamgraph.cmd, dreamgraph.ps1)"
 # -- PATH setup ----------------------------------------------------
 Write-Step "Configuring PATH..."
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+if ([string]::IsNullOrWhiteSpace($userPath)) {
+    $userPath = ""
+}
 if ($userPath -notlike "*$BinDir*") {
+    $newUserPath = if ([string]::IsNullOrWhiteSpace($userPath)) { $BinDir } else { "$BinDir;$userPath" }
     [Environment]::SetEnvironmentVariable(
         "Path",
-        "$BinDir;$userPath",
+        $newUserPath,
         "User"
     )
     Write-Ok "Added $BinDir to user PATH"
@@ -426,7 +439,7 @@ if ($userPath -notlike "*$BinDir*") {
 } else {
     Write-Ok "$BinDir already in PATH"
 }
-$env:Path = "$BinDir;$env:Path"
+$env:Path = if ([string]::IsNullOrWhiteSpace($env:Path)) { $BinDir } else { "$BinDir;$env:Path" }
 
 # -- Verify ---------------------------------------------------------
 Write-Step "Verifying installation..."

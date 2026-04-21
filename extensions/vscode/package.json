@@ -96,6 +96,10 @@
         "title": "DreamGraph: Open Dashboard"
       },
       {
+        "command": "dreamgraph.restoreSidebar",
+        "title": "DreamGraph: Restore Sidebar"
+      },
+      {
         "command": "dreamgraph.startDaemon",
         "title": "DreamGraph: Start Daemon"
       },

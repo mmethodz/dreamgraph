@@ -24,6 +24,7 @@ import { resolve, basename, extname } from "node:path";
 import { config, updateDatabaseConnectionString } from "../config/config.js";
 import { engine } from "../cognitive/engine.js";
 import { getActiveScope, isInstanceMode, getToolCallCount } from "../instance/lifecycle.js";
+import { getActiveProfileName, switchProfile } from "../instance/policies.js";
 import {
   getSchedules, getScheduleHistory, getSchedulerConfig, updateSchedulerConfig,
   createSchedule, updateSchedule, deleteSchedule, runScheduleNow,
@@ -105,7 +106,11 @@ export function setDashboardContext(ctx: DashboardContext): void {
 const BRAND = "DreamGraph";
 const VERSION = config.server.version;
 
-function shell(title: string, body: string, activeTab: string): string {
+async function shell(title: string, body: string, activeTab: string): Promise<string> {
+  const scope = getActiveScope();
+  const instanceId = isInstanceMode() ? scope?.uuid ?? "legacy" : "legacy";
+  const storageKey = `dreamgraph:last-tab:${instanceId}`;
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -114,7 +119,36 @@ function shell(title: string, body: string, activeTab: string): string {
   <title>${esc(title)} — ${BRAND} v${VERSION}</title>
   <style>${CSS}</style>
 </head>
-<body>
+<body data-dg-active-tab="${escAttr(activeTab)}" data-dg-instance="${escAttr(instanceId)}">
+  <script>
+    (function() {
+      try {
+        var activeTab = document.body.dataset.dgActiveTab || '';
+        var storageKey = ${JSON.stringify(storageKey)};
+        if (activeTab) {
+          localStorage.setItem(storageKey, activeTab);
+        }
+        if ((window.location.pathname === '/' || window.location.pathname === '') && !window.location.search) {
+          var rememberedTab = localStorage.getItem(storageKey);
+          var validTabs = ['status', 'schedules', 'config', 'docs', 'health'];
+          if (rememberedTab && validTabs.indexOf(rememberedTab) !== -1) {
+            var docsPageKey = storageKey + ':docs-page';
+            if (rememberedTab === 'docs') {
+              var rememberedDocsPage = localStorage.getItem(docsPageKey);
+              if (rememberedDocsPage) {
+                window.location.replace(rememberedDocsPage);
+                return;
+              }
+            }
+            window.location.replace('/' + rememberedTab);
+            return;
+          }
+        }
+      } catch (_) {
+        // Ignore storage access failures and continue rendering normally.
+      }
+    })();
+  </script>
   <nav class="topbar">
     <a class="brand" href="/">${BRAND} <span class="version">v${VERSION}</span></a>
     <div class="nav-links">
@@ -128,9 +162,25 @@ function shell(title: string, body: string, activeTab: string): string {
   <main>${body}</main>
   <footer>
     <span>${BRAND} v${VERSION} "El Alarife"</span>
-    <span>Instance: ${isInstanceMode() ? getActiveScope()!.uuid : "legacy"}</span>
+    <span>Instance: ${instanceId}</span>
     <span>Generated: ${new Date().toISOString()}</span>
   </footer>
+  <script>
+    (function() {
+      try {
+        var activeTab = document.body.dataset.dgActiveTab || '';
+        if (activeTab !== 'docs') return;
+        var storageKey = ${JSON.stringify(storageKey)} + ':docs-page';
+        var path = window.location.pathname || '';
+        var isDocsPath = path === '/docs' || path.indexOf('/docs/') === 0;
+        if (isDocsPath) {
+          localStorage.setItem(storageKey, path + (window.location.search || ''));
+        }
+      } catch (_) {
+        // Ignore storage access failures and continue rendering normally.
+      }
+    })();
+  </script>
 </body>
 </html>`;
 }
@@ -328,7 +378,7 @@ async function renderIndex(): Promise<string> {
       </a>
     </div>`;
 
-  return shell("Dashboard", body, "");
+  return await shell("Dashboard", body, "");
 }
 
 /* ------------------------------------------------------------------ */
@@ -500,7 +550,7 @@ async function renderStatus(): Promise<string> {
   body += `<h2>Schedules</h2>
   <p><a href="/schedules">View and manage schedules →</a></p>`;
 
-  return shell("Status", body, "status");
+  return await shell("Status", body, "status");
 }
 
 /* ------------------------------------------------------------------ */
@@ -545,7 +595,7 @@ async function renderHealth(): Promise<string> {
   </p>
   <pre><code>curl -H "Accept: application/json" http://localhost:${_ctx.port}/health</code></pre>`;
 
-  return shell("Health", body, "health");
+  return await shell("Health", body, "health");
 }
 
 /* ------------------------------------------------------------------ */
@@ -652,7 +702,7 @@ async function renderSchedules(toast?: string): Promise<string> {
               <input type="hidden" name="id" value="${escAttr(s.id)}">
               <button type="submit" class="btn" style="padding:2px 8px;font-size:11px">⚡ Run</button>
             </form>
-            <form method="POST" action="/schedules" style="display:inline" onsubmit="return confirm('Delete schedule ${escAttr(s.name)}?')">
+            <form method="POST" action="/schedules" style="display:inline">
               <input type="hidden" name="_action" value="delete">
               <input type="hidden" name="id" value="${escAttr(s.id)}">
               <button type="submit" class="btn" style="padding:2px 8px;font-size:11px;color:var(--red)">✕</button>
@@ -762,7 +812,7 @@ async function renderSchedules(toast?: string): Promise<string> {
     </table>`;
   }
 
-  return shell("Schedules", body, "schedules");
+  return await shell("Schedules", body, "schedules");
 }
 
 /* ------------------------------------------------------------------ */
@@ -1215,6 +1265,25 @@ async function renderConfig(savedSection?: string): Promise<string> {
     });
   </script>`;
 
+  const activePolicyProfile = await getActiveProfileName();
+  body += `<h2>Policy</h2>
+  <div class="card">
+    <form method="POST" action="/config" class="config-form">
+      <input type="hidden" name="_section" value="policy">
+      <div class="form-row">
+        <label>Active Profile</label>
+        <select name="profile">
+          ${(["strict", "balanced", "creative"] as const).map(profile =>
+            `<option value="${profile}" ${activePolicyProfile === profile ? "selected" : ""}>${profile}</option>`
+          ).join("")}
+        </select>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Save Policy</button>
+      </div>
+    </form>
+  </div>`;
+
   body += `<h2>Scheduler</h2>
   <div class="card">
     <form method="POST" action="/config" class="config-form">
@@ -1328,7 +1397,7 @@ async function renderConfig(savedSection?: string): Promise<string> {
     </p>
   </div>`;
 
-  return shell("Config", body, "config");
+  return await shell("Config", body, "config");
 }
 
 /* ------------------------------------------------------------------ */
@@ -1404,6 +1473,12 @@ async function handleConfigPost(
           max_error_streak: parseInt(body.max_error_streak ?? "3", 10),
         });
         logger.info("Dashboard: Scheduler config updated via web UI");
+        break;
+      }
+      case "policy": {
+        const profile = (body.profile ?? "balanced") as "strict" | "balanced" | "creative";
+        await switchProfile(profile);
+        logger.info(`Dashboard: Policy profile updated via web UI (${profile})`);
         break;
       }
       case "events": {
@@ -1877,7 +1952,7 @@ function buildSidebar(files: string[], activeFile: string): string {
 async function renderDocs(): Promise<string> {
   const files = await getDocFiles();
   if (files.length === 0) {
-    return shell("Docs", `<h1>Documentation</h1><p class="empty">No markdown files found in docs/ directory.</p>`, "docs");
+    return await shell("Docs", `<h1>Documentation</h1><p class="empty">No markdown files found in docs/ directory.</p>`, "docs");
   }
   // Default to first file (index.md or README.md due to sort order)
   return renderDocFile(files[0], files);
@@ -1888,7 +1963,7 @@ async function renderDocFile(filename: string, files?: string[]): Promise<string
 
   // Security: reject traversal and non-.md
   if (filename.includes("..")) {
-    return shell("Not Found", `<h1>Not Found</h1><p><a href="/docs">Back to Docs</a></p>`, "docs");
+    return await shell("Not Found", `<h1>Not Found</h1><p><a href="/docs">Back to Docs</a></p>`, "docs");
   }
   const safePath = filename.endsWith(".md") ? filename : `${filename}.md`;
 
@@ -1897,7 +1972,7 @@ async function renderDocFile(filename: string, files?: string[]): Promise<string
     const fullPath = resolve(docsDir(), ...safePath.split("/"));
     content = await readFile(fullPath, "utf-8");
   } catch {
-    return shell("Not Found", `<h1>File not found</h1><p><code>${esc(safePath)}</code> does not exist.</p><p><a href="/docs">Back to Docs</a></p>`, "docs");
+    return await shell("Not Found", `<h1>File not found</h1><p><code>${esc(safePath)}</code> does not exist.</p><p><a href="/docs">Back to Docs</a></p>`, "docs");
   }
 
   const sidebar = buildSidebar(files, safePath);
@@ -1911,7 +1986,7 @@ async function renderDocFile(filename: string, files?: string[]): Promise<string
       <article class="docs-content">${rendered}</article>
     </div>`;
 
-  return shell(`Docs: ${title}`, body, "docs");
+  return await shell(`Docs: ${title}`, body, "docs");
 }
 
 /* ------------------------------------------------------------------ */

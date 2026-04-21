@@ -1,38 +1,52 @@
 # Discipline Task Lifecycle
 
-> Phase-governed autonomous engineering workflow that ensures evidence-based auditing, planning, execution, and verification for sensitive project changes.
+> Auto-generated primary workflow doc. Canonical structured source: data/workflows.json.
 
-**Trigger:**   
-**Source files:** src/discipline/register.ts, src/discipline/state-machine.ts, src/discipline/session.ts, src/discipline/tools.ts  
+> Tracks how a discipline task is created, progressed, reviewed, and closed while keeping ownership and status transitions explicit.
+
+**Trigger:** task creation or discipline status transition  
+**Source files:** src/disciplines/task-manager.ts, src/disciplines/session.ts  
 
 ## Flowchart
 
 ```mermaid
 flowchart TD
-    S1["Start a discipline session in INGEST phase with task type, scope, and truth requirements."]
-    S2["Transition into AUDIT and collect grounded evidence from source-of-truth tools."]
+    S1["Create a discipline task with scope and owner."]
+    S2["Prioritize and schedule the task."]
     S1 --> S2
-    S3["Record delta entries comparing expected truth to implementation."]
+    S3["Execute the task within the assigned discipline context."]
     S2 --> S3
-    S4["Transition into PLAN and submit a structured implementation plan mapped to deltas and verification criteria."]
+    S4["Review results and capture follow-up actions."]
     S3 --> S4
-    S5["Approve the plan and transition into EXECUTE for controlled modifications."]
+    S5["Update task status and evidence."]
     S4 --> S5
-    S6["Transition into VERIFY, re-audit the changed system, and produce a verification report before completing the session."]
+    S6["Close or hand off the task."]
     S5 --> S6
 ```
 
 ## Steps
 
-### 1. Start a discipline session in INGEST phase with task type, scope, and truth requirements.
+### 1. Create a discipline task with scope and owner.
 
-### 2. Transition into AUDIT and collect grounded evidence from source-of-truth tools.
+Open a task record that captures the requested work, responsible discipline, and initial constraints.
 
-### 3. Record delta entries comparing expected truth to implementation.
+### 2. Prioritize and schedule the task.
 
-### 4. Transition into PLAN and submit a structured implementation plan mapped to deltas and verification criteria.
+Place the task into the discipline backlog or active queue according to urgency and dependencies.
 
-### 5. Approve the plan and transition into EXECUTE for controlled modifications.
+### 3. Execute the task within the assigned discipline context.
 
-### 6. Transition into VERIFY, re-audit the changed system, and produce a verification report before completing the session.
+Perform the work while preserving the discipline-specific tools, prompts, and boundaries.
+
+### 4. Review results and capture follow-up actions.
+
+Assess whether the task outcome satisfies the intent and whether more work must be spawned.
+
+### 5. Update task status and evidence.
+
+Record completion notes, evidence, or blockers so later sessions can understand the state.
+
+### 6. Close or hand off the task.
+
+Finish the lifecycle by marking the task complete or transferring ownership for the next stage.
 
