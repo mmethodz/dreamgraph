@@ -5,17 +5,15 @@ set -euo pipefail
 # DreamGraph Global Installer (Linux / macOS)
 #
 # Builds the project, deploys compiled files to ~/.dreamgraph/bin/,
-# installs production dependencies, and creates wrapper scripts
-# on PATH.
+# installs production dependencies, creates wrapper scripts on PATH,
+# and attempts a verified VS Code extension install when possible.
 #
-# Usage:
-#   ./scripts/install.sh [--source <dir>] [--force]
-#
-# After installation, `dg` and `dreamgraph` are available from any
-# terminal session.
+# Fail-safe behavior:
+# - hard-fail on core DreamGraph install errors
+# - degrade gracefully on optional VS Code extension install errors
+# - never claim extension installation success without verification
 # ===================================================================
 
-# -- Defaults --------------------------------------------------------
 SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FORCE=false
 
@@ -40,7 +38,6 @@ BIN_DIR="$DG_HOME/bin"
 DIST_TARGET="$BIN_DIR/dist"
 TEMPLATE_TARGET="$DG_HOME/templates"
 
-# -- Colors -----------------------------------------------------------
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 CYAN='\033[0;36m'
@@ -52,6 +49,38 @@ step()  { echo -e "\n${CYAN}${BOLD}$*${NC}"; }
 ok()    { echo -e "  ${GREEN}$* [ok]${NC}"; }
 warn()  { echo -e "  ${YELLOW}[!] $*${NC}"; }
 fail()  { echo -e "${RED}Error: $*${NC}" >&2; exit 1; }
+
+run_logged() {
+    local allow_failure="false"
+    local quiet="false"
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --allow-failure) allow_failure="true"; shift ;;
+            --quiet) quiet="true"; shift ;;
+            --) shift; break ;;
+            *) break ;;
+        esac
+    done
+
+    local output
+    local exit_code=0
+    output=$("$@" 2>&1) || exit_code=$?
+
+    if [[ "$quiet" != "true" ]] && [[ -n "$output" ]]; then
+        while IFS= read -r line; do
+            [[ -n "$line" ]] && printf '  %s\n' "$line"
+        done <<< "$output"
+    fi
+
+    if [[ "$allow_failure" != "true" ]] && [[ $exit_code -ne 0 ]]; then
+        fail "$* failed with exit code $exit_code"
+    fi
+
+    RUN_LOGGED_EXIT_CODE=$exit_code
+    RUN_LOGGED_OUTPUT="$output"
+    return 0
+}
 
 ensure_root_build_dependencies() {
     local needs_install=false
@@ -70,31 +99,98 @@ ensure_root_build_dependencies() {
 
     if [[ "$needs_install" == "true" ]]; then
         echo -e "  ${CYAN}Installing root dependencies (including dev dependencies for build)...${NC}"
-        (cd "$SOURCE_DIR" && npm install --include=dev --loglevel=warn)
+        (
+            cd "$SOURCE_DIR"
+            run_logged -- npm install --include=dev --loglevel=warn
+        )
         ok "Root dependencies installed"
     fi
 }
 
+resolve_vscode_cli() {
+    if command -v code.cmd >/dev/null 2>&1; then
+        command -v code.cmd
+        return 0
+    fi
+    if command -v code >/dev/null 2>&1; then
+        command -v code
+        return 0
+    fi
+    if [[ -x "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code" ]]; then
+        echo "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"
+        return 0
+    fi
+    if [[ -x "/Applications/Visual Studio Code - Insiders.app/Contents/Resources/app/bin/code" ]]; then
+        echo "/Applications/Visual Studio Code - Insiders.app/Contents/Resources/app/bin/code"
+        return 0
+    fi
+    return 1
+}
+
 can_build_vscode_extension() {
-    if ! command -v code &>/dev/null; then
-        return 1
-    fi
-    if [[ ! -d "$SOURCE_DIR/extensions/vscode" ]]; then
-        return 1
-    fi
-    return 0
+    [[ -d "$SOURCE_DIR/extensions/vscode" ]]
 }
 
 ensure_extension_build_dependencies() {
     local ext_source="$SOURCE_DIR/extensions/vscode"
-    if [[ ! -d "$ext_source/node_modules/typescript" ]] || [[ ! -d "$ext_source/node_modules/esbuild" ]]; then
+    if [[ ! -d "$ext_source/node_modules/typescript" ]] || [[ ! -d "$ext_source/node_modules/esbuild" ]] || [[ ! -d "$ext_source/node_modules/@vscode/vsce" ]]; then
         echo -e "  ${CYAN}Installing VS Code extension build dependencies...${NC}"
-        (cd "$ext_source" && npm install --loglevel=warn)
+        (
+            cd "$ext_source"
+            run_logged -- npm install --loglevel=warn
+        )
         ok "VS Code extension build dependencies installed"
     fi
 }
 
-# -- Prerequisites ---------------------------------------------------
+remove_legacy_vscode_extension_artifacts() {
+    local extension_id="$1"
+    local legacy_version="$2"
+    local roots=("$HOME/.vscode/extensions" "$HOME/.vscode-insiders/extensions")
+
+    for extensions_root in "${roots[@]}"; do
+        [[ -d "$extensions_root" ]] || continue
+        shopt -s nullglob
+        local matches=("$extensions_root/${extension_id}-${legacy_version}"*)
+        shopt -u nullglob
+
+        for dir in "${matches[@]}"; do
+            if [[ -d "$dir" ]]; then
+                rm -rf "$dir"
+                ok "Removed legacy extension folder $(basename "$dir")"
+            fi
+        done
+    done
+}
+
+test_vscode_extension_installed() {
+    local code_cli="$1"
+    local extension_id="$2"
+    local version="$3"
+
+    run_logged --allow-failure --quiet -- "$code_cli" --list-extensions --show-versions
+    if [[ $RUN_LOGGED_EXIT_CODE -ne 0 ]]; then
+        return 1
+    fi
+
+    grep -q "^${extension_id}@${version}$" <<< "$RUN_LOGGED_OUTPUT"
+}
+
+install_vscode_extension_safely() {
+    local code_cli="$1"
+    local vsix_path="$2"
+    local extension_id="$3"
+    local version="$4"
+
+    run_logged --allow-failure --quiet -- "$code_cli" --uninstall-extension "$extension_id" --force || true
+    run_logged --allow-failure -- "$code_cli" --install-extension "$vsix_path" --force
+    if [[ $RUN_LOGGED_EXIT_CODE -ne 0 ]]; then
+        return 1
+    fi
+
+    test_vscode_extension_installed "$code_cli" "$extension_id" "$version"
+}
+
 step "Checking prerequisites..."
 
 NODE_VERSION=$(node --version 2>/dev/null || true)
@@ -107,7 +203,6 @@ NPM_VERSION=$(npm --version 2>/dev/null || true)
 [[ -z "$NPM_VERSION" ]] && fail "npm is required but not found."
 ok "npm $NPM_VERSION"
 
-# -- Validate source ------------------------------------------------
 PACKAGE_JSON="$SOURCE_DIR/package.json"
 [[ ! -f "$PACKAGE_JSON" ]] && fail "No package.json at $SOURCE_DIR. Is this the DreamGraph repo?"
 
@@ -117,7 +212,6 @@ PKG_NAME=$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('
 VERSION=$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('$PACKAGE_JSON','utf8')).version)")
 ok "DreamGraph v$VERSION source at $SOURCE_DIR"
 
-# -- Check existing install -----------------------------------------
 if [[ -d "$DIST_TARGET" ]] && [[ "$FORCE" != "true" ]]; then
     EXISTING="unknown"
     if [[ -f "$BIN_DIR/version.json" ]]; then
@@ -128,30 +222,23 @@ if [[ -d "$DIST_TARGET" ]] && [[ "$FORCE" != "true" ]]; then
     [[ "$confirm" != "y" && "$confirm" != "Y" ]] && { echo "Aborted."; exit 0; }
 fi
 
-# -- Build ----------------------------------------------------------
 step "Building DreamGraph..."
 ensure_root_build_dependencies
-if ! (cd "$SOURCE_DIR" && npm run build); then
-    fail "Root build failed. Make sure npm dependencies installed correctly in $SOURCE_DIR (try: cd '$SOURCE_DIR' && npm install --include=dev)"
-fi
+(
+    cd "$SOURCE_DIR"
+    run_logged -- npm run build
+)
 ok "Build complete"
 
 SOURCE_DIST="$SOURCE_DIR/dist"
 [[ ! -d "$SOURCE_DIST" ]] && fail "dist/ not found after build"
 
-# -- Deploy ---------------------------------------------------------
 step "Deploying to $BIN_DIR..."
-
 mkdir -p "$BIN_DIR"
-
-# Remove old dist if present
 [[ -d "$DIST_TARGET" ]] && rm -rf "$DIST_TARGET"
-
-# Copy dist
 cp -r "$SOURCE_DIST" "$DIST_TARGET"
 ok "dist/ copied"
 
-# Create minimal package.json with production deps only
 node -e "
   const pkg = JSON.parse(require('fs').readFileSync('$PACKAGE_JSON', 'utf8'));
   const binPkg = {
@@ -167,13 +254,14 @@ node -e "
 "
 ok "package.json created"
 
-# Install production deps (clean first to avoid hoisting artifacts)
 echo -e "  ${CYAN}Installing dependencies...${NC}"
 [[ -d "$BIN_DIR/node_modules" ]] && rm -rf "$BIN_DIR/node_modules"
-(cd "$BIN_DIR" && npm install --omit=dev --loglevel=warn 2>&1 | tail -1)
+(
+    cd "$BIN_DIR"
+    run_logged -- npm install --omit=dev --loglevel=warn
+)
 ok "Dependencies installed"
 
-# -- Templates -----------------------------------------------------
 if [[ -d "$SOURCE_DIR/templates" ]]; then
     COPY_TEMPLATES=true
     if [[ -d "$TEMPLATE_TARGET" ]]; then
@@ -197,58 +285,57 @@ if [[ -d "$SOURCE_DIR/templates" ]]; then
     fi
 fi
 
-# -- VS Code Extension ----------------------------------------------
 if can_build_vscode_extension; then
     step "Installing VS Code extension..."
     EXT_SOURCE="$SOURCE_DIR/extensions/vscode"
     EXT_PKG="$EXT_SOURCE/package.json"
-    if [[ -f "$EXT_PKG" ]]; then
+    CODE_CLI="$(resolve_vscode_cli || true)"
+
+    if [[ ! -f "$EXT_PKG" ]]; then
+        warn "Extension source not found at $EXT_SOURCE -- skipping"
+    elif [[ -z "$CODE_CLI" ]]; then
+        warn "VS Code CLI not found (tried PATH and standard app locations) -- skipping extension install"
+    else
         EXT_PUBLISHER=$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('$EXT_PKG','utf8')).publisher)")
         EXT_NAME=$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('$EXT_PKG','utf8')).name)")
         EXT_VER=$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('$EXT_PKG','utf8')).version)")
-        EXT_ID="${EXT_PUBLISHER}.${EXT_NAME}-${EXT_VER}"
-        EXT_DEST="$HOME/.vscode/extensions/$EXT_ID"
+        EXTENSION_ID="${EXT_PUBLISHER}.${EXT_NAME}"
+        LEGACY_EXTENSION_VERSION="7.0.0"
+        VSIX_PATH="$EXT_SOURCE/${EXT_NAME}-${EXT_VER}.vsix"
 
-        # Build the extension (install all deps including devDeps for vsce)
         ensure_extension_build_dependencies
         (
             cd "$EXT_SOURCE"
-            npm run build 2>&1
+            run_logged --allow-failure -- npm run build
         )
-        if [[ $? -ne 0 ]]; then
+        if [[ $RUN_LOGGED_EXIT_CODE -ne 0 ]]; then
             warn "Extension build failed -- skipping VS Code extension install"
         else
             ok "Extension built"
+            rm -f "$VSIX_PATH"
+            (
+                cd "$EXT_SOURCE"
+                run_logged --allow-failure -- npx --yes @vscode/vsce package --out "$VSIX_PATH"
+            )
+            if [[ $RUN_LOGGED_EXIT_CODE -ne 0 ]] || [[ ! -f "$VSIX_PATH" ]]; then
+                warn "Extension packaging failed -- skipping VS Code extension install"
+            else
+                ok "Packaged extension to $(basename "$VSIX_PATH")"
+                remove_legacy_vscode_extension_artifacts "$EXTENSION_ID" "$LEGACY_EXTENSION_VERSION"
 
-            # Always use direct file deploy (VSIX install silently skips same-version updates)
-            # Remove stale dist to avoid leftover files from older builds
-            [[ -d "$EXT_DEST/dist" ]] && rm -rf "$EXT_DEST/dist"
-
-            mkdir -p "$EXT_DEST/dist"
-            cp -r "$EXT_SOURCE/dist/"* "$EXT_DEST/dist/"
-            cp "$EXT_SOURCE/package.json" "$EXT_DEST/package.json"
-            # Copy media assets (activity bar icon, marketplace icon)
-            if [[ -d "$EXT_SOURCE/media" ]]; then
-                mkdir -p "$EXT_DEST/media"
-                cp -r "$EXT_SOURCE/media/"* "$EXT_DEST/media/"
+                if install_vscode_extension_safely "$CODE_CLI" "$VSIX_PATH" "$EXTENSION_ID" "$EXT_VER"; then
+                    ok "Installed ${EXTENSION_ID}@${EXT_VER}"
+                    warn "Reload VS Code to activate the extension"
+                else
+                    warn "VS Code extension installation could not be verified; VSIX was built at $VSIX_PATH"
+                fi
             fi
-            # Copy README for marketplace / extension details
-            if [[ -f "$EXT_SOURCE/README.md" ]]; then
-                cp "$EXT_SOURCE/README.md" "$EXT_DEST/README.md"
-            fi
-            # Install runtime dependencies (@modelcontextprotocol/sdk)
-            ( cd "$EXT_DEST" && npm install --omit=dev 2>/dev/null )
-            ok "Extension deployed to $EXT_DEST"
-            warn "Reload VS Code to activate the extension"
         fi
-    else
-        warn "Extension source not found at $EXT_SOURCE -- skipping"
     fi
 else
-    echo "  VS Code not found in PATH or extension source unavailable -- skipping extension build/install"
+    echo "  Extension source unavailable -- skipping extension build/install"
 fi
 
-# -- Version file ---------------------------------------------------
 node -e "
   require('fs').writeFileSync('$BIN_DIR/version.json', JSON.stringify({
     version: '$VERSION',
@@ -258,10 +345,7 @@ node -e "
   }, null, 2));
 "
 
-# -- Symlinks / Shims ---------------------------------------------
 step "Creating command shims..."
-
-# Determine link target directory (prefer /usr/local/bin if writable, else first writable PATH dir, else ~/.local/bin)
 LINK_DIR=""
 if mkdir -p "/usr/local/bin" 2>/dev/null && [[ -w "/usr/local/bin" ]]; then
     LINK_DIR="/usr/local/bin"
@@ -280,14 +364,12 @@ if [[ -z "$LINK_DIR" ]]; then
 fi
 mkdir -p "$LINK_DIR"
 
-# Resolve DG_HOME for shim scripts -- use env var if set, else hardcode home path
 if [[ -n "${DREAMGRAPH_MASTER_DIR:-}" ]]; then
     SHIM_BIN_DIR="\${DREAMGRAPH_MASTER_DIR:-$DG_HOME}/bin"
 else
     SHIM_BIN_DIR="$DG_HOME/bin"
 fi
 
-# Create wrapper scripts (more reliable than symlinks for Node.js ESM)
 cat > "$LINK_DIR/dg" << EOF
 #!/usr/bin/env bash
 exec node "$SHIM_BIN_DIR/dist/cli/dg.js" "\$@"
@@ -306,7 +388,6 @@ if [[ ! -x "$LINK_DIR/dg" ]] || [[ ! -x "$LINK_DIR/dreamgraph" ]]; then
     fail "Failed to create executable command shims in $LINK_DIR"
 fi
 
-# Check if LINK_DIR is in PATH
 if ! echo "$PATH" | tr ':' '\n' | grep -qx "$LINK_DIR"; then
     warn "$LINK_DIR is not in your PATH"
 
@@ -318,9 +399,7 @@ if ! echo "$PATH" | tr ':' '\n' | grep -qx "$LINK_DIR"; then
     esac
 
     mkdir -p "$(dirname "$RC_FILE")"
-    if [[ ! -f "$RC_FILE" ]]; then
-        touch "$RC_FILE"
-    fi
+    [[ -f "$RC_FILE" ]] || touch "$RC_FILE"
 
     PATH_LINE="export PATH=\"$LINK_DIR:\$PATH\""
     FISH_PATH_LINE="fish_add_path \"$LINK_DIR\""
@@ -344,12 +423,10 @@ if ! echo "$PATH" | tr ':' '\n' | grep -qx "$LINK_DIR"; then
     warn "Restart your shell or run: export PATH=\"$LINK_DIR:\$PATH\""
 fi
 
-# -- Verify ---------------------------------------------------------
 step "Verifying installation..."
 OUTPUT=$(node "$DIST_TARGET/cli/dg.js" --version 2>&1 || true)
 ok "$OUTPUT"
 
-# -- Summary ---------------------------------------------------------
 echo ""
 echo -e "${GREEN}${BOLD}===============================================${NC}"
 echo -e "${GREEN}${BOLD} DreamGraph v$VERSION installed successfully!${NC}"

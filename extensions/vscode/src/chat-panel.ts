@@ -337,6 +337,7 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
         case 'ready':
           this._syncAutonomyFromSettings();
           await this.rehydrateWebview();
+          if (!this.architectLlm?.currentConfig) await this.architectLlm?.loadConfig();
           this._sendModelUpdate();
           this._checkApiKeyWarning();
           await this._syncAttachments();
@@ -2117,7 +2118,10 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
 
       // Parse optional anchor-status sentinel: [anchor-status:STATE:LABEL]
       // If found, strip sentinel from display text and append a styled badge.
-      const sentinelRe = /\s*\[anchor-status:([a-z]+):([^\]]*)\]\s*$/;
+      // NOTE: backslashes are doubled because this code is inside a JS template literal
+      // in getHtml(). At runtime, the template literal strips single backslashes
+      // (\s → s, \[ → [), so \\s → \s and \\[ → \[ after evaluation.
+      const sentinelRe = /\\s*\\[anchor-status:([a-z]+):([^\\]]*)\\]\\s*$/;
       const match = text.match(sentinelRe);
       if (match) {
         const anchorState = match[1]; // promoted|rebound|drifted|archived|native|canonical

@@ -1,14 +1,17 @@
-﻿#!/usr/bin/env pwsh
+#!/usr/bin/env pwsh
 <#
 .SYNOPSIS
     Install DreamGraph globally to ~/.dreamgraph/bin/
 
 .DESCRIPTION
     Builds the project, deploys compiled files to the global bin directory,
-    installs production dependencies, and creates PATH entries.
+    installs production dependencies, creates PATH entries, and attempts to
+    package/install the VS Code extension using the most reliable CLI available.
 
-    After installation, `dg` and `dreamgraph` commands are available from
-    any terminal session without needing to cd to the source repo.
+    The installer is designed for fail-safe behavior:
+    - hard-fails on core DreamGraph install problems
+    - degrades gracefully for optional VS Code extension installation
+    - avoids partial extension activation claims unless installation is verified
 
 .PARAMETER SourceDir
     Path to the DreamGraph source repository (default: current directory)
@@ -27,17 +30,65 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
 
 # -- Config ----------------------------------------------------------
 $DGHome         = if ($env:DREAMGRAPH_MASTER_DIR) { $env:DREAMGRAPH_MASTER_DIR } else { Join-Path $env:USERPROFILE ".dreamgraph" }
 $BinDir         = Join-Path $DGHome "bin"
 $DistTarget     = Join-Path $BinDir "dist"
 $TemplateTarget = Join-Path $DGHome "templates"
+$VsCodeCliHints = @(
+    "code.cmd",
+    "code"
+)
 
 # -- Helpers ---------------------------------------------------------
 function Write-Step([string]$msg) { Write-Host "`n$msg" -ForegroundColor Cyan }
 function Write-Ok([string]$msg)   { Write-Host "  $msg (ok)" -ForegroundColor Green }
 function Write-Warn([string]$msg) { Write-Host "  WARNING: $msg" -ForegroundColor Yellow }
+function Fail-Install([string]$msg) { Write-Error $msg; exit 1 }
+
+function Invoke-LoggedCommand {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [string[]]$Arguments = @(),
+        [string]$WorkingDirectory = $SourceDir,
+        [switch]$AllowFailure,
+        [switch]$Quiet
+    )
+
+    $output = @()
+    Push-Location $WorkingDirectory
+    try {
+        $prevPref = $ErrorActionPreference
+        $ErrorActionPreference = "SilentlyContinue"
+        $output = & $FilePath @Arguments 2>&1
+        $exitCode = $LASTEXITCODE
+        $ErrorActionPreference = $prevPref
+    } finally {
+        Pop-Location
+    }
+
+    if (-not $Quiet) {
+        $output | Where-Object { $_ -is [string] -and $_.Trim() } | ForEach-Object {
+            Write-Host "  $_" -ForegroundColor DarkGray
+        }
+    }
+
+    if (-not $AllowFailure -and $exitCode -ne 0) {
+        Fail-Install "$FilePath $($Arguments -join ' ') failed with exit code $exitCode"
+    }
+
+    return [pscustomobject]@{
+        ExitCode = $exitCode
+        Output   = @($output)
+    }
+}
+
+function Test-CommandAvailable([string]$Name) {
+    return $null -ne (Get-Command $Name -ErrorAction SilentlyContinue)
+}
+
 function Ensure-RootBuildDependencies {
     $requiredPaths = @(
         (Join-Path $SourceDir "node_modules"),
@@ -50,30 +101,32 @@ function Ensure-RootBuildDependencies {
     $missing = $requiredPaths | Where-Object { -not (Test-Path $_) }
     if ($missing.Count -gt 0) {
         Write-Host "  Installing root npm dependencies (including devDependencies)..." -ForegroundColor Cyan
-        Push-Location $SourceDir
-        try {
-            $prevPref = $ErrorActionPreference
-            $ErrorActionPreference = "SilentlyContinue"
-            $npmOut = & npm install --include=dev --loglevel=warn 2>&1
-            $ErrorActionPreference = $prevPref
-            if ($LASTEXITCODE -ne 0) {
-                $npmOut | ForEach-Object { Write-Host "    $_" -ForegroundColor Red }
-                Write-Error "Root npm install failed (exit code $LASTEXITCODE)"
-                exit 1
-            }
-            $npmOut | Where-Object { $_ -is [string] -and $_.Trim() } | ForEach-Object {
-                Write-Host "  $_" -ForegroundColor DarkGray
-            }
-            Write-Ok "Root build dependencies installed"
-        } finally {
-            Pop-Location
+        $result = Invoke-LoggedCommand -FilePath "npm" -Arguments @("install", "--include=dev", "--loglevel=warn") -WorkingDirectory $SourceDir
+        if ($result.ExitCode -ne 0) {
+            Fail-Install "Root npm install failed (exit code $($result.ExitCode))"
         }
+        Write-Ok "Root build dependencies installed"
     }
 }
 
+function Resolve-VsCodeCli {
+    foreach ($candidate in $VsCodeCliHints) {
+        $cmd = Get-Command $candidate -ErrorAction SilentlyContinue
+        if ($cmd) {
+            return $cmd.Source
+        }
+    }
+
+    $userPrograms = Join-Path $env:LOCALAPPDATA "Programs\Microsoft VS Code\bin\code.cmd"
+    if (Test-Path $userPrograms) { return $userPrograms }
+
+    $machinePrograms = "C:\Program Files\Microsoft VS Code\bin\code.cmd"
+    if (Test-Path $machinePrograms) { return $machinePrograms }
+
+    return $null
+}
+
 function Test-CanBuildVsCodeExtension {
-    $codeCmd = Get-Command code -ErrorAction SilentlyContinue
-    if (-not $codeCmd) { return $false }
     $extSourceDir = Join-Path $SourceDir "extensions\vscode"
     return (Test-Path $extSourceDir)
 }
@@ -82,26 +135,74 @@ function Ensure-ExtensionBuildDependencies {
     $extSourceDir = Join-Path $SourceDir "extensions\vscode"
     $tsPath = Join-Path $extSourceDir "node_modules\typescript"
     $esbuildPath = Join-Path $extSourceDir "node_modules\esbuild"
-    if ((-not (Test-Path $tsPath)) -or (-not (Test-Path $esbuildPath))) {
+    $vscePath = Join-Path $extSourceDir "node_modules\@vscode\vsce"
+    if ((-not (Test-Path $tsPath)) -or (-not (Test-Path $esbuildPath)) -or (-not (Test-Path $vscePath))) {
         Write-Host "  Installing VS Code extension build dependencies..." -ForegroundColor Cyan
-        Push-Location $extSourceDir
-        try {
-            $prevPref = $ErrorActionPreference
-            $ErrorActionPreference = "SilentlyContinue"
-            $npmOut = & npm install 2>&1
-            $ErrorActionPreference = $prevPref
-            if ($LASTEXITCODE -ne 0) {
-                $npmOut | ForEach-Object { Write-Host "    $_" -ForegroundColor Red }
-                Write-Error "VS Code extension npm install failed (exit code $LASTEXITCODE)"
-                exit 1
+        $result = Invoke-LoggedCommand -FilePath "npm" -Arguments @("install", "--loglevel=warn") -WorkingDirectory $extSourceDir
+        if ($result.ExitCode -ne 0) {
+            Fail-Install "VS Code extension npm install failed (exit code $($result.ExitCode))"
+        }
+        Write-Ok "VS Code extension build dependencies installed"
+    }
+}
+
+function Remove-LegacyVsCodeExtensionArtifacts {
+    param(
+        [string]$ExtensionId,
+        [string]$LegacyVersion
+    )
+
+    $extensionsRoots = @(
+        (Join-Path $env:USERPROFILE ".vscode\extensions"),
+        (Join-Path $env:USERPROFILE ".vscode-insiders\extensions")
+    ) | Where-Object { Test-Path $_ }
+
+    foreach ($extensionsRoot in $extensionsRoots) {
+        $legacyPattern = "$ExtensionId-$LegacyVersion*"
+        $legacyDirs = Get-ChildItem -Path $extensionsRoot -Directory -Filter $legacyPattern -ErrorAction SilentlyContinue
+        foreach ($dir in $legacyDirs) {
+            try {
+                Remove-Item -Recurse -Force $dir.FullName
+                Write-Ok "Removed legacy extension folder $($dir.Name)"
+            } catch {
+                Write-Warn "Failed to remove legacy extension folder $($dir.FullName): $_"
             }
-            $summary = ($npmOut | Where-Object { $_ -is [string] -and $_.Trim() }) | Select-Object -Last 1
-            if ($summary) { Write-Host "  $summary" -ForegroundColor DarkGray }
-            Write-Ok "VS Code extension build dependencies installed"
-        } finally {
-            Pop-Location
         }
     }
+}
+
+function Test-VsCodeExtensionInstalled {
+    param(
+        [Parameter(Mandatory = $true)][string]$CodeCli,
+        [Parameter(Mandatory = $true)][string]$ExtensionId,
+        [Parameter(Mandatory = $true)][string]$Version
+    )
+
+    $result = Invoke-LoggedCommand -FilePath $CodeCli -Arguments @("--list-extensions", "--show-versions") -AllowFailure -Quiet
+    if ($result.ExitCode -ne 0) {
+        return $false
+    }
+
+    $pattern = "^$([regex]::Escape($ExtensionId))@$([regex]::Escape($Version))$"
+    return $result.Output -match $pattern
+}
+
+function Install-VsCodeExtensionSafely {
+    param(
+        [Parameter(Mandatory = $true)][string]$CodeCli,
+        [Parameter(Mandatory = $true)][string]$VsixPath,
+        [Parameter(Mandatory = $true)][string]$ExtensionId,
+        [Parameter(Mandatory = $true)][string]$Version
+    )
+
+    Invoke-LoggedCommand -FilePath $CodeCli -Arguments @("--uninstall-extension", $ExtensionId, "--force") -AllowFailure -Quiet | Out-Null
+
+    $installResult = Invoke-LoggedCommand -FilePath $CodeCli -Arguments @("--install-extension", $VsixPath, "--force") -AllowFailure
+    if ($installResult.ExitCode -ne 0) {
+        return $false
+    }
+
+    return (Test-VsCodeExtensionInstalled -CodeCli $CodeCli -ExtensionId $ExtensionId -Version $Version)
 }
 
 # -- Prerequisites ---------------------------------------------------
@@ -109,34 +210,29 @@ Write-Step "Checking prerequisites..."
 
 $nodeVersion = & node --version 2>$null
 if (-not $nodeVersion) {
-    Write-Error "Node.js is required but not found. Install from https://nodejs.org/"
-    exit 1
+    Fail-Install "Node.js is required but not found. Install from https://nodejs.org/"
 }
 $major = [int]($nodeVersion -replace '^v(\d+)\..*', '$1')
 if ($major -lt 18) {
-    Write-Error "Node.js >= 18 required (found $nodeVersion)"
-    exit 1
+    Fail-Install "Node.js >= 18 required (found $nodeVersion)"
 }
 Write-Ok "Node.js $nodeVersion"
 
 $npmVersion = & npm --version 2>$null
 if (-not $npmVersion) {
-    Write-Error "npm is required but not found."
-    exit 1
+    Fail-Install "npm is required but not found."
 }
 Write-Ok "npm $npmVersion"
 
 # -- Validate source ------------------------------------------------
 $packageJsonPath = Join-Path $SourceDir "package.json"
 if (-not (Test-Path $packageJsonPath)) {
-    Write-Error "No package.json found at $SourceDir. Is this the DreamGraph repo?"
-    exit 1
+    Fail-Install "No package.json found at $SourceDir. Is this the DreamGraph repo?"
 }
 
 $pkg = Get-Content $packageJsonPath -Raw | ConvertFrom-Json
 if ($pkg.name -ne "dreamgraph") {
-    Write-Error "package.json does not appear to be DreamGraph (name: $($pkg.name))"
-    exit 1
+    Fail-Install "package.json does not appear to be DreamGraph (name: $($pkg.name))"
 }
 $version = $pkg.version
 Write-Ok "DreamGraph v$version source at $SourceDir"
@@ -159,43 +255,27 @@ if ((Test-Path $DistTarget) -and -not $Force) {
 # -- Build ----------------------------------------------------------
 Write-Step "Building DreamGraph..."
 Ensure-RootBuildDependencies
-Push-Location $SourceDir
-try {
-    $prevPref = $ErrorActionPreference
-    $ErrorActionPreference = "SilentlyContinue"
-    & npm run build 2>&1 | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
-    $ErrorActionPreference = $prevPref
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "Build failed with exit code $LASTEXITCODE"
-        exit 1
-    }
-    Write-Ok "Build complete"
-} finally {
-    Pop-Location
+$result = Invoke-LoggedCommand -FilePath "npm" -Arguments @("run", "build") -WorkingDirectory $SourceDir
+if ($result.ExitCode -ne 0) {
+    Fail-Install "Build failed with exit code $($result.ExitCode)"
 }
+Write-Ok "Build complete"
 
 $SourceDist = Join-Path $SourceDir "dist"
 if (-not (Test-Path $SourceDist)) {
-    Write-Error "dist/ directory not found after build"
-    exit 1
+    Fail-Install "dist/ directory not found after build"
 }
 
 # -- Deploy ---------------------------------------------------------
 Write-Step "Deploying to $BinDir..."
-
-# Create bin directory
 New-Item -ItemType Directory -Path $BinDir -Force | Out-Null
 
-# Remove old dist if present
 if (Test-Path $DistTarget) {
     Remove-Item -Recurse -Force $DistTarget
 }
-
-# Copy dist
 Copy-Item -Recurse -Force $SourceDist $DistTarget
 Write-Ok "dist/ copied"
 
-# Create minimal package.json with production deps only
 $binPkg = [ordered]@{
     name         = "dreamgraph-global"
     version      = $version
@@ -209,33 +289,16 @@ $binPkgJson = $binPkg | ConvertTo-Json -Depth 10
 Set-Content -Path (Join-Path $BinDir "package.json") -Value $binPkgJson -Encoding UTF8
 Write-Ok "package.json created"
 
-# Install production deps (clean first to avoid hoisting artifacts)
 Write-Host "  Installing dependencies..." -ForegroundColor Cyan
 $nodeModulesDir = Join-Path $BinDir "node_modules"
 if (Test-Path $nodeModulesDir) {
     Remove-Item -Recurse -Force $nodeModulesDir
 }
-Push-Location $BinDir
-try {
-    $prevPref = $ErrorActionPreference
-    $ErrorActionPreference = "SilentlyContinue"
-    $npmOut = & npm install --omit=dev 2>&1
-    $ErrorActionPreference = $prevPref
-    if ($LASTEXITCODE -ne 0) {
-        # Show full output on failure
-        $npmOut | ForEach-Object { Write-Host "    $_" -ForegroundColor Red }
-        Write-Error "npm install failed (exit code $LASTEXITCODE)"
-        exit 1
-    }
-    # Show the summary line (last non-empty line from stdout)
-    $summary = ($npmOut | Where-Object { $_ -is [string] -and $_.Trim() }) | Select-Object -Last 1
-    if ($summary) {
-        Write-Host "  $summary" -ForegroundColor DarkGray
-    }
-    Write-Ok "Dependencies installed"
-} finally {
-    Pop-Location
+$result = Invoke-LoggedCommand -FilePath "npm" -Arguments @("install", "--omit=dev", "--loglevel=warn") -WorkingDirectory $BinDir
+if ($result.ExitCode -ne 0) {
+    Fail-Install "npm install failed (exit code $($result.ExitCode))"
 }
+Write-Ok "Dependencies installed"
 
 # -- Templates -----------------------------------------------------
 $sourceTemplates = Join-Path $SourceDir "templates"
@@ -267,60 +330,49 @@ if (Test-CanBuildVsCodeExtension) {
     Write-Step "Installing VS Code extension..."
     $ExtSourceDir = Join-Path $SourceDir "extensions\vscode"
     $ExtPkgJson  = Join-Path $ExtSourceDir "package.json"
-    if (Test-Path $ExtPkgJson) {
+    $CodeCli = Resolve-VsCodeCli
+
+    if (-not (Test-Path $ExtPkgJson)) {
+        Write-Warn "Extension source not found at $ExtSourceDir -- skipping"
+    } elseif (-not $CodeCli) {
+        Write-Warn "VS Code CLI not found (tried PATH and standard install locations) -- skipping extension install"
+    } else {
         $extPkg  = Get-Content $ExtPkgJson -Raw | ConvertFrom-Json
-        $extId   = "$($extPkg.publisher).$($extPkg.name)-$($extPkg.version)"
-        $ExtDest = Join-Path $env:USERPROFILE ".vscode\extensions\$extId"
+        $extensionId = "$($extPkg.publisher).$($extPkg.name)"
+        $legacyExtensionVersion = "7.0.0"
+        $vsixName = "$($extPkg.name)-$($extPkg.version).vsix"
+        $vsixPath = Join-Path $ExtSourceDir $vsixName
 
         Ensure-ExtensionBuildDependencies
-        Push-Location $ExtSourceDir
-        try {
-            $prevPref = $ErrorActionPreference
-            $ErrorActionPreference = "SilentlyContinue"
-            & npm run build 2>&1 | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
-            $ErrorActionPreference = $prevPref
-            if ($LASTEXITCODE -ne 0) {
-                Write-Warn "Extension build failed -- skipping VS Code extension install"
-            } else {
-                Write-Ok "Extension built"
+        $buildResult = Invoke-LoggedCommand -FilePath "npm" -Arguments @("run", "build") -WorkingDirectory $ExtSourceDir -AllowFailure
+        if ($buildResult.ExitCode -ne 0) {
+            Write-Warn "Extension build failed -- skipping VS Code extension install"
+        } else {
+            Write-Ok "Extension built"
 
-                # Always use direct file deploy (VSIX install silently skips same-version updates)
-                $prevPref2 = $ErrorActionPreference
-                $ErrorActionPreference = "SilentlyContinue"
-
-                # Remove stale dist to avoid leftover files from older builds
-                if (Test-Path "$ExtDest\dist") {
-                    Remove-Item -Recurse -Force "$ExtDest\dist"
-                }
-
-                New-Item -ItemType Directory -Path "$ExtDest\dist" -Force | Out-Null
-                Copy-Item -Path "dist\*" -Destination "$ExtDest\dist\" -Recurse -Force
-                Copy-Item -Path "package.json" -Destination "$ExtDest\package.json" -Force
-                # Copy media assets (activity bar icon, marketplace icon)
-                if (Test-Path "media") {
-                    New-Item -ItemType Directory -Path "$ExtDest\media" -Force | Out-Null
-                    Copy-Item -Path "media\*" -Destination "$ExtDest\media\" -Recurse -Force
-                }
-                # Copy README for marketplace / extension details
-                if (Test-Path "README.md") {
-                    Copy-Item -Path "README.md" -Destination "$ExtDest\README.md" -Force
-                }
-                # Install runtime dependencies (@modelcontextprotocol/sdk)
-                Push-Location $ExtDest
-                & npm install --omit=dev 2>&1 | Out-Null
-                Pop-Location
-                Write-Ok "Extension deployed to $ExtDest"
-                Write-Warn "Reload VS Code (Ctrl+Shift+P > Reload Window) to activate"
-                $ErrorActionPreference = $prevPref2
+            if (Test-Path $vsixPath) {
+                Remove-Item -Force $vsixPath
             }
-        } finally {
-            Pop-Location
+
+            $packageResult = Invoke-LoggedCommand -FilePath "npx" -Arguments @("--yes", "@vscode/vsce", "package", "--out", $vsixPath) -WorkingDirectory $ExtSourceDir -AllowFailure
+            if ($packageResult.ExitCode -ne 0 -or -not (Test-Path $vsixPath)) {
+                Write-Warn "Extension packaging failed -- skipping VS Code extension install"
+            } else {
+                Write-Ok "Packaged extension to $vsixName"
+                Remove-LegacyVsCodeExtensionArtifacts -ExtensionId $extensionId -LegacyVersion $legacyExtensionVersion
+
+                $installed = Install-VsCodeExtensionSafely -CodeCli $CodeCli -VsixPath $vsixPath -ExtensionId $extensionId -Version $extPkg.version
+                if ($installed) {
+                    Write-Ok "Installed $extensionId@$($extPkg.version)"
+                    Write-Warn "Reload VS Code (Ctrl+Shift+P > Reload Window) to activate"
+                } else {
+                    Write-Warn "VS Code extension installation could not be verified; VSIX was built at $vsixPath"
+                }
+            }
         }
-    } else {
-        Write-Warn "Extension source not found at $ExtSourceDir -- skipping"
     }
 } else {
-    Write-Host "  VS Code not found in PATH or extension source unavailable -- skipping extension build/install" -ForegroundColor DarkGray
+    Write-Host "  Extension source unavailable -- skipping extension build/install" -ForegroundColor DarkGray
 }
 
 # -- Version file ---------------------------------------------------
@@ -334,8 +386,6 @@ Set-Content -Path (Join-Path $BinDir "version.json") -Value $versionInfo -Encodi
 
 # -- Create shims --------------------------------------------------
 Write-Step "Creating command shims..."
-
-# .cmd shims for CMD.exe
 $dgCmd = @"
 @echo off
 node "%~dp0dist\cli\dg.js" %*
@@ -348,7 +398,6 @@ node "%~dp0dist\index.js" %*
 "@
 Set-Content -Path (Join-Path $BinDir "dreamgraph.cmd") -Value $serverCmd -Encoding ASCII
 
-# .ps1 shims for PowerShell
 $dgPs1 = @'
 #!/usr/bin/env pwsh
 & node (Join-Path $PSScriptRoot "dist/cli/dg.js") @args
@@ -365,7 +414,6 @@ Write-Ok "Shims created (dg.cmd, dg.ps1, dreamgraph.cmd, dreamgraph.ps1)"
 
 # -- PATH setup ----------------------------------------------------
 Write-Step "Configuring PATH..."
-
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
 if ($userPath -notlike "*$BinDir*") {
     [Environment]::SetEnvironmentVariable(
@@ -378,8 +426,6 @@ if ($userPath -notlike "*$BinDir*") {
 } else {
     Write-Ok "$BinDir already in PATH"
 }
-
-# Update current session so verify works
 $env:Path = "$BinDir;$env:Path"
 
 # -- Verify ---------------------------------------------------------
@@ -391,7 +437,7 @@ try {
     Write-Warn "Verification failed: $_"
 }
 
-# -- Summary ---------------------------------------------------------
+# -- Summary --------------------------------------------------------
 Write-Host ""
 Write-Host ("=" * 50) -ForegroundColor Green
 Write-Host " DreamGraph v$version installed successfully!" -ForegroundColor Green

@@ -33,16 +33,19 @@
         {
           "type": "webview",
           "id": "dreamgraph.chatView",
-          "name": "Chat"
+          "name": "Chat",
+          "icon": "media/dreamgraph-icon.svg"
         },
         {
           "type": "webview",
           "id": "dreamgraph.dashboardView",
-          "name": "Dashboard"
+          "name": "Dashboard",
+          "icon": "media/dreamgraph-icon.svg"
         },
         {
           "id": "dreamgraph.changedFiles",
-          "name": "Files Changed"
+          "name": "Files Changed",
+          "icon": "media/dreamgraph-icon.svg"
         }
       ]
     },
@@ -203,10 +206,12 @@
             "anthropic",
             "ollama"
           ],
+          "default": "anthropic",
           "description": "LLM provider for the Architect model."
         },
         "dreamgraph.architect.model": {
           "type": "string",
+          "default": "claude-opus-4-6",
           "description": "Model name for the Architect (e.g., 'claude-opus-4-6')."
         },
         "dreamgraph.architect.baseUrl": {
@@ -250,7 +255,7 @@
             "xhigh",
             "max"
           ],
-          "default": "high",
+          "default": "xhigh",
           "description": "Anthropic effort level. Opus 4.7 defaults to xhigh when unset; Opus 4.6 uses high and clamps xhigh to high for compatibility."
         },
         "dreamgraph.architect.anthropic.adaptiveThinking": {

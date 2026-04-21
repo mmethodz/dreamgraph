@@ -218,8 +218,8 @@ export class ArchitectLlm implements vscode.Disposable {
 
   async loadConfig(): Promise<void> {
     const cfg = vscode.workspace.getConfiguration("dreamgraph.architect");
-    const provider = (cfg.get<string>("provider") ?? "") as ArchitectProvider;
-    const model = cfg.get<string>("model") ?? "";
+    const provider = (cfg.get<string>("provider") ?? "anthropic") as ArchitectProvider;
+    const model = cfg.get<string>("model") ?? "claude-opus-4-6";
     const baseUrl = cfg.get<string>("baseUrl") || this._defaultBaseUrl(provider);
 
     let apiKey = "";
