@@ -184,6 +184,20 @@ export interface EditorContextEnvelope {
   changedFiles: string[];
   pinnedFiles: string[];
 
+  environmentContext: {
+    workspaceRuntime?: string;
+    workspacePackageManager?: string;
+    entries: Array<{
+      scope: string;
+      runtime: string;
+      moduleSystem: string;
+      role: string;
+      framework?: string;
+      boundaries: string[];
+      keyDependencies: string[];
+    }>;
+  } | null;
+
   graphContext: {
     relatedFeatures: Array<{ id: string; name: string; relevance?: number }>;
     relatedWorkflows: Array<{ id: string; name: string; relevance?: number }>;
@@ -234,6 +248,7 @@ export interface EditorContextEnvelope {
 
 export type ContextEvidenceKind =
   | "task"
+  | "environment"
   | "code"
   | "adr"
   | "tension"
@@ -292,6 +307,12 @@ export interface ContextPlan {
   optionalEvidence: ContextEvidenceKind[];
   codeReadPlan: CodeReadPlan[];
   budgetPolicy: BudgetPolicy;
+  environmentPolicy?: {
+    forceInclude: boolean;
+    softTokenCeiling: number;
+    hardTokenCeiling: number;
+    scopeLimit: number;
+  };
 }
 
 export interface EvidenceItem {
@@ -318,12 +339,58 @@ export interface ReasoningPacket {
     title: string;
     reason: string;
     required: boolean;
+    kind?: ContextEvidenceKind;
   }>;
   confidence: number;
   tokenUsage: {
     used: number;
     budget: number;
     reserved: number;
+  };
+  instrumentation?: ContextInstrumentation;
+}
+
+export interface ContextEnvironmentMetrics {
+  matchedScopes: string[];
+  renderedScopeCount: number;
+  tokenEstimate: number;
+  bytes: number;
+  hash: string;
+  stablePrefixHash: string;
+  stablePrefixBytes: number;
+  stablePrefixTokenEstimate: number;
+  stableReuseRatio?: number;
+  volatilityKey: string;
+}
+
+export interface ContextInstrumentation {
+  layerTokenEstimates: {
+    environment: number;
+    task: number;
+    code: number;
+    graph: number;
+    notes: number;
+    totalEvidence: number;
+  };
+  evidenceCounts: {
+    includedByKind: Partial<Record<ContextEvidenceKind, number>>;
+    omittedByKind: Partial<Record<ContextEvidenceKind, number>>;
+  };
+  environment?: ContextEnvironmentMetrics;
+  cacheChurn?: {
+    stablePrefixHash: string;
+    stablePrefixBytes: number;
+    stablePrefixTokenEstimate: number;
+    stableReuseRatio?: number;
+    churned: boolean;
+    layerHashes: {
+      task: string;
+      environment: string;
+      graph: string;
+      code: string;
+      notes: string;
+    };
+    packetVolatilityKey: string;
   };
 }
 

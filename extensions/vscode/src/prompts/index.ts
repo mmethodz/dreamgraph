@@ -80,6 +80,22 @@ function formatContextBlock(envelope: EditorContextEnvelope): string {
     parts.push(`- **Unsaved files:** ${envelope.changedFiles.join(", ")}`);
   }
 
+  if (envelope.environmentContext?.entries?.length) {
+    const scoped = envelope.environmentContext.entries
+      .filter((entry) => !envelope.activeFile?.path || envelope.activeFile.path.startsWith(entry.scope))
+      .slice(0, 2);
+    if (scoped.length > 0) {
+      parts.push("");
+      parts.push("### Environment Context");
+      for (const entry of scoped) {
+        parts.push(`- **${entry.scope}** → ${entry.runtime}; ${entry.moduleSystem}; ${entry.role}`);
+        if (entry.keyDependencies.length > 0) {
+          parts.push(`  - key deps: ${entry.keyDependencies.join(", ")}`);
+        }
+      }
+    }
+  }
+
   // Graph context — the core knowledge advantage
   if (envelope.graphContext) {
     const gc = envelope.graphContext;

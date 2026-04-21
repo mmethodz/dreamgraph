@@ -284,7 +284,10 @@
     "build:webview": "esbuild src/webview/index.ts --bundle --outfile=dist/webview.js --format=iife --platform=browser",
     "watch": "tsc -watch -p ./tsconfig.json",
     "package": "vsce package",
-    "lint": "eslint src --ext ts"
+    "lint": "eslint src --ext ts",
+    "test:context-contract": "npm run build && node --test dist/test/context-architecture-contract.test.js",
+    "test:context-bench": "npm run build && node --test dist/test/context-architecture-contract.test.js",
+    "test:environment-context": "npm run build && node --test dist/test/environment-context.test.js dist/test/context-builder-environment.test.js dist/test/context-builder-integration.test.js dist/test/context-architecture-contract.test.js"
   },
   "devDependencies": {
     "@types/dompurify": "^3.0.5",

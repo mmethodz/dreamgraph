@@ -205,6 +205,7 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
   private architectLlm?: ArchitectLlm;
   private contextBuilder?: ContextBuilder;
   private mcpClient?: McpClient;
+  private contextInspector?: import('./context-inspector.js').ContextInspector;
   private _restoringAnchors = false;
   private changedFilesView?: ChangedFilesView;
   private currentInstanceId = 'default';
@@ -297,6 +298,7 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
   public setContextBuilder(cb: ContextBuilder): void { this.contextBuilder = cb; }
   public setMcpClient(mcp: McpClient): void { this.mcpClient = mcp; }
   public setChangedFilesProvider(provider: ChangedFilesView): void { this.changedFilesView = provider; }
+  public setContextInspector(inspector: import('./context-inspector.js').ContextInspector): void { this.contextInspector = inspector; }
 
   public setInstance(instanceId: string): void {
     if (this.currentInstanceId === instanceId) return;
@@ -529,12 +531,12 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
   }
 
   private async handleUserMessage(text: string): Promise<void> {
-    // Detect and apply autonomy mode requests from user text
     this._detectAutonomyRequest(text);
 
     const attachmentSummary = this._attachmentSummaryForUserMessage();
     const envelope = this.contextBuilder ? await this.contextBuilder.buildEnvelope(text) : null;
     const liveAnchor = envelope?.activeFile?.selection?.anchor ?? envelope?.activeFile?.cursorAnchor;
+    let assistantMessage: ChatMessage | undefined;
     const userMessage: ChatMessage = {
       id: this._createMessageId(),
       role: 'user',
@@ -562,7 +564,6 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       return;
     }
 
-    let assistantMessage: ChatMessage | undefined;
     try {
       this.streaming = true;
       this.streamingContent = '';
@@ -591,6 +592,18 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
         llmMessages.push({ role: 'user', content: userContentBlocks });
       }
 
+      let packet: import('./types.js').ReasoningPacket | null = null;
+      if (envelope && this.contextBuilder) {
+        try {
+          packet = await this.contextBuilder.buildReasoningPacket(envelope, {
+            prompt: text,
+          });
+        } catch {
+          packet = null;
+        }
+      }
+      await this._logContextToOutput(envelope, packet);
+
       await this.postMessage({ type: 'stream-start' });
 
       let tools: ToolDefinition[] = [];
@@ -610,7 +623,8 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       if (tools.length > 0) {
         fullContent = await this.runAgenticLoop(llmMessages, tools);
       } else {
-        const req = this._createRequestSignal();
+        const timeoutMs = this._getLlmTimeoutMs({ mode: 'stream' });
+        const req = this._createRequestSignal(timeoutMs);
         try {
           await this.architectLlm.stream(llmMessages, (chunk: string) => {
             const safeChunk = this._redactSecrets(chunk);
@@ -618,6 +632,19 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
             this.streamingContent += safeChunk;
             void this.postMessage({ type: 'stream-chunk', chunk: safeChunk });
           }, req.signal);
+        } catch (err) {
+          this._logTimeoutDiagnostics({
+            provider: this.architectLlm.provider ?? 'unknown',
+            model: this.architectLlm.currentConfig?.model,
+            mode: 'stream',
+            timeoutMs,
+            recoveryAttempted: this._isTimeoutError(err),
+            recovered: false,
+            toolCount: 0,
+            usedReducedContext: false,
+            errorMessage: err instanceof Error ? err.message : String(err),
+          });
+          throw err;
         } finally {
           req.dispose();
         }
@@ -646,18 +673,20 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       this.attachments = [];
       await this._syncAttachments();
 
-      // Autonomy: analyze the pass and decide whether to continue
       if (this._autonomyEnabled) {
         await this._handleAutonomyPassComplete(redactedFullContent, assistantMessage.id ?? '', llmMessages, tools);
       }
     } catch (err: unknown) {
-      const errorText = err instanceof Error ? err.message : String(err);
-      const isAbort = err instanceof DOMException && err.name === 'AbortError';
-      const displayText = isAbort ? 'Generation stopped.' : `Error: ${errorText}`;
-      const errMsg: ChatMessage = { id: this._createMessageId(), role: 'system', content: displayText, timestamp: new Date().toISOString(), instanceId: this.currentInstanceId };
-      this.messages.push(errMsg);
-      await this.persistMessages();
-      await this.postMessage({ type: 'addMessage', message: errMsg, actions: this._buildMessageActions(errMsg), roleMeta: this._roleMetaFor(errMsg), contextFooter: this._contextFooterFor(errMsg) });
+      const recovered = await this._recoverFromLlmTimeout(err, text, envelope);
+      if (!recovered) {
+        const errorText = err instanceof Error ? err.message : String(err);
+        const isAbort = err instanceof DOMException && err.name === 'AbortError';
+        const displayText = isAbort ? 'Generation stopped.' : `Error: ${errorText}`;
+        const errMsg: ChatMessage = { id: this._createMessageId(), role: 'system', content: displayText, timestamp: new Date().toISOString(), instanceId: this.currentInstanceId };
+        this.messages.push(errMsg);
+        await this.persistMessages();
+        await this.postMessage({ type: 'addMessage', message: errMsg, actions: this._buildMessageActions(errMsg), roleMeta: this._roleMetaFor(errMsg), contextFooter: this._contextFooterFor(errMsg) });
+      }
     } finally {
       this.resetStreamState();
       if (assistantMessage) {
@@ -850,6 +879,138 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
     };
   }
 
+  private _getLlmTimeoutMs(options: { mode: 'stream' | 'tool'; toolCount?: number; reducedContext?: boolean }): number {
+    const provider = this.architectLlm?.provider ?? 'anthropic';
+    const baseByProvider: Record<string, { stream: number; tool: number }> = {
+      anthropic: { stream: 90_000, tool: 120_000 },
+      openai: { stream: 150_000, tool: 210_000 },
+      ollama: { stream: 180_000, tool: 180_000 },
+    };
+    const selected = baseByProvider[provider] ?? { stream: ChatPanel.REQUEST_TIMEOUT_MS, tool: ChatPanel.REQUEST_TIMEOUT_MS };
+    let timeoutMs = options.mode === 'tool' ? selected.tool : selected.stream;
+    if (options.toolCount && options.toolCount > 12) {
+      timeoutMs += 30_000;
+    }
+    if (options.reducedContext) {
+      timeoutMs = Math.max(60_000, timeoutMs - 30_000);
+    }
+    return timeoutMs;
+  }
+
+  private _isTimeoutError(err: unknown): boolean {
+    const message = err instanceof Error ? err.message : String(err);
+    return /timed out after \d+s/i.test(message) || /request timed out/i.test(message);
+  }
+
+  private _buildTimeoutRecoveryPrompt(originalText: string): string {
+    return [
+      originalText,
+      '',
+      'Continue using an alternative method because the previous LLM request timed out.',
+      'Use a faster recovery strategy:',
+      '1. Prefer the knowledge graph over long source reads.',
+      '2. Use at most 8 recent messages of history.',
+      '3. Avoid broad tool use unless strictly necessary.',
+      '4. Produce a concise useful result first, then suggest a follow-up if needed.',
+    ].join('\n');
+  }
+
+  private async _recoverFromLlmTimeout(
+    err: unknown,
+    originalText: string,
+    envelope: import('./types.js').EditorContextEnvelope | null,
+  ): Promise<boolean> {
+    if (!this._isTimeoutError(err) || !this.architectLlm) return false;
+
+    const provider = this.architectLlm.provider ?? 'unknown';
+    const model = this.architectLlm.currentConfig?.model;
+    const recoveryTimeoutMs = this._getLlmTimeoutMs({ mode: 'stream', reducedContext: true });
+    const notice = `\n⚠️ LLM request timed out for provider \`${provider}\`. Retrying once with reduced context and a faster recovery strategy…\n`;
+    this.streamingContent += notice;
+    await this.postMessage({ type: 'stream-chunk', chunk: notice });
+
+    const recoveryPrompt = this._buildTimeoutRecoveryPrompt(originalText);
+    const task = inferTask(envelope?.intentMode ?? 'ask_dreamgraph');
+    const autonomyInstruction: AutonomyInstructionState | undefined = this._autonomyEnabled
+      ? { ...this._autonomyState, enabled: true }
+      : undefined;
+    const { system } = assemblePrompt(task, envelope, undefined, undefined, autonomyInstruction, provider);
+    const recoveryMessages: ArchitectMessage[] = [{ role: 'system', content: system }];
+    for (const msg of this.messages.slice(-8)) {
+      if (msg.role === 'user' || msg.role === 'assistant') {
+        recoveryMessages.push({ role: msg.role, content: msg.content });
+      }
+    }
+    recoveryMessages.push({ role: 'user', content: recoveryPrompt });
+
+    let fullContent = '';
+    const req = this._createRequestSignal(recoveryTimeoutMs);
+    try {
+      await this.architectLlm.stream(recoveryMessages, (chunk: string) => {
+        const safeChunk = this._redactSecrets(chunk);
+        fullContent += safeChunk;
+        this.streamingContent += safeChunk;
+        void this.postMessage({ type: 'stream-chunk', chunk: safeChunk });
+      }, req.signal);
+    } catch (recoveryErr) {
+      this._logTimeoutDiagnostics({
+        provider,
+        model,
+        mode: 'stream',
+        timeoutMs: recoveryTimeoutMs,
+        recoveryAttempted: true,
+        recovered: false,
+        toolCount: 0,
+        usedReducedContext: true,
+        errorMessage: recoveryErr instanceof Error ? recoveryErr.message : String(recoveryErr),
+      });
+      return false;
+    } finally {
+      req.dispose();
+    }
+
+    this._logTimeoutDiagnostics({
+      provider,
+      model,
+      mode: 'stream',
+      timeoutMs: recoveryTimeoutMs,
+      recoveryAttempted: true,
+      recovered: true,
+      toolCount: 0,
+      usedReducedContext: true,
+      errorMessage: err instanceof Error ? err.message : String(err),
+    });
+
+    const redactedFullContent = this._redactSecrets(fullContent);
+    const finalContent = this._applyRenderLimits(redactedFullContent);
+    const implicitEntities = this._detectImplicitEntities(redactedFullContent);
+    const implicitEntityNotice = implicitEntities.names.length > 0
+      ? this._formatImplicitEntityNotice(implicitEntities)
+      : undefined;
+
+    const recoveredMessage: ChatMessage = {
+      id: this._createMessageId(),
+      role: 'assistant',
+      content: finalContent.content,
+      fullContent: redactedFullContent,
+      implicitEntityNotice,
+      timestamp: new Date().toISOString(),
+      instanceId: this.currentInstanceId,
+      verdict: this._deriveVerdict(redactedFullContent, this._lastToolTrace) ?? undefined,
+      toolTrace: this._lastToolTrace.length > 0 ? [...this._lastToolTrace] : undefined,
+    };
+    this.messages.push(recoveredMessage);
+    await this.persistMessages();
+    await this.postMessage({
+      type: 'addMessage',
+      message: recoveredMessage,
+      actions: this._buildMessageActions(recoveredMessage),
+      roleMeta: this._roleMetaFor(recoveredMessage),
+      contextFooter: this._contextFooterFor(recoveredMessage),
+    });
+    return true;
+  }
+
   /**
    * Reset ALL streaming-related state in one place.
    * Sends cleanup messages to the webview so the UI never stays stuck.
@@ -884,6 +1045,43 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
 
   private _createMessageId(): string {
     return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  private async _logContextToOutput(
+  envelope: import('./types.js').EditorContextEnvelope | null,
+  packet: import('./types.js').ReasoningPacket | null,
+): Promise<void> {
+  if (!envelope || !this.contextInspector) return;
+  try {
+    this.contextInspector.logContextRequestBoundary({
+      instanceId: envelope.instanceId ?? undefined,
+      intentMode: envelope.intentMode,
+    });
+    this.contextInspector.logEnvelope(envelope);
+    if (packet) {
+      this.contextInspector.logReasoningPacket(packet);
+    }
+  } catch {
+    // Best-effort transparency logging only.
+  }
+}
+
+  private _logTimeoutDiagnostics(event: {
+    provider: string;
+    model?: string;
+    mode: 'stream' | 'tool';
+    timeoutMs: number;
+    recoveryAttempted: boolean;
+    recovered: boolean;
+    toolCount?: number;
+    usedReducedContext?: boolean;
+    errorMessage: string;
+  }): void {
+    try {
+      this.contextInspector?.logTimeoutDiagnostics(event);
+    } catch {
+      // Best-effort diagnostics logging only.
+    }
   }
 
     private _roleMetaFor(message: ChatMessage): { title: string; subtitle?: string } {
@@ -932,7 +1130,7 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
     const anchorStatus = anchor ? this._formatAnchorFooterStatus(anchor) : undefined;
 
     if (message.role === 'assistant') {
-      return `Instance: ${scope} • Actions require explicit click • Trace reflects real tool execution`;
+      return `Instance: ${scope} • Actions require explicit click • Trace reflects real tool execution • Context packet logged to DreamGraph Context`;
     }
     if (message.role === 'user') {
       return anchorStatus ? `Instance: ${scope} • ${anchorStatus}` : `Instance: ${scope}`;
@@ -1168,6 +1366,7 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
             visibleFiles: [],
             changedFiles: [],
             pinnedFiles: [],
+            environmentContext: null,
             graphContext: null,
             intentMode: 'manual',
             intentConfidence: 0,
@@ -1592,150 +1791,149 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
     return ChatPanel.TOOL_TIMEOUT_MS[toolName] ?? ChatPanel.TOOL_TIMEOUT_MS._default;
   }
 
-  private async runAgenticLoop(llmMessages: ArchitectMessage[], tools: ToolDefinition[]): Promise<string> {
-    if (!this.architectLlm) return '';
+  private async runAgenticLoop(initialMessages: ArchitectMessage[], tools: ToolDefinition[]): Promise<string> {
+  if (!this.architectLlm) {
+    throw new Error('Architect LLM not configured');
+  }
 
-    let fullContent = '';
-    // rawMessages tracks the full conversation in Anthropic-native format
-    // (assistant messages with tool_use blocks, user messages with tool_result blocks).
-    // Both Anthropic and OpenAI providers accept this via callWithTools(…, rawMessages).
-    let rawMessages: unknown[] | undefined;
+  const llmMessages = [...initialMessages];
+  let rawMessages: unknown[] = llmMessages.map((message) => {
+    if (Array.isArray(message.content)) {
+      return { role: message.role, content: message.content };
+    }
+    return { role: message.role, content: message.content };
+  });
+  let finalText = '';
+  let pass = 0;
+  const maxPasses = 12;
 
-    for (let iteration = 0; iteration < ChatPanel.MAX_TOOL_ITERATIONS; iteration++) {
-      // Throttle between iterations to avoid TPM rate limits on fast tool loops
-      if (iteration > 0) await new Promise((r) => setTimeout(r, 2000));
+  while (pass < maxPasses) {
+    pass += 1;
+    const timeoutMs = this._getLlmTimeoutMs({ mode: 'tool', toolCount: tools.length });
+    const req = this._createRequestSignal(timeoutMs);
 
-      // Show thinking indicator while waiting for the non-streaming API call
-      void this.postMessage({ type: 'stream-thinking', active: true });
+    try {
+      await this.postMessage({ type: 'stream-thinking', active: true });
+      const response = await this._callWithToolsRetry(llmMessages, tools, rawMessages, req.signal);
 
-      // Create a per-iteration signal with hard timeout (P2) linked to user abort (P1)
-      const req = this._createRequestSignal();
-      let response: Awaited<ReturnType<ArchitectLlm['callWithTools']>>;
-      try {
-        response = await this._callWithToolsRetry(llmMessages, tools, rawMessages, req.signal);
-      } catch (err) {
-        // Ensure thinking indicator is hidden before the error propagates
-        void this.postMessage({ type: 'stream-thinking', active: false });
-        throw err;
-      } finally {
-        req.dispose();
-      }
-
-      // Hide thinking indicator now that we have a response
-      void this.postMessage({ type: 'stream-thinking', active: false });
-
-      // Stream any text content to the webview
       if (response.content) {
-        const safeContent = this._redactSecrets(response.content);
-        fullContent += safeContent;
-        // Guard: cap streamingContent to prevent unbounded memory growth across
-        // many tool iterations. The webview receives each chunk regardless — only
-        // the in-memory accumulator is capped.
-        if (this.streamingContent.length < ChatPanel.MAX_STREAMING_CONTENT_CHARS) {
-          this.streamingContent += safeContent;
-        }
-        void this.postMessage({ type: 'stream-chunk', chunk: safeContent });
+        const safeChunk = this._redactSecrets(response.content);
+        finalText += safeChunk;
+        this.streamingContent += safeChunk;
+        await this.postMessage({ type: 'stream-chunk', chunk: safeChunk });
       }
 
-      // If no tool calls, we're done
-      if (response.stopReason !== 'tool_use' || response.toolCalls.length === 0) {
-        break;
+      if (!response.toolCalls || response.toolCalls.length === 0) {
+        return finalText;
       }
 
-      // Build the assistant message with tool_use blocks (Anthropic format)
-      const assistantBlocks: unknown[] = [];
+      const assistantBlocks: Array<Record<string, unknown>> = [];
       if (response.content) {
         assistantBlocks.push({ type: 'text', text: response.content });
       }
-      for (const tc of response.toolCalls) {
-        assistantBlocks.push({ type: 'tool_use', id: tc.id, name: tc.name, input: tc.input });
-      }
-
-      // Execute each tool call and collect results
-      const toolResultBlocks: unknown[] = [];
-      for (const tc of response.toolCalls) {
-        // Show tool execution status (P4)
-        const statusChunk = `\n\n⚡ Running \`${tc.name}\`…\n`;
-        fullContent += statusChunk;
-        if (this.streamingContent.length < ChatPanel.MAX_STREAMING_CONTENT_CHARS) {
-          this.streamingContent += statusChunk;
-        }
-        void this.postMessage({ type: 'stream-chunk', chunk: statusChunk });
-        void this.postMessage({ type: 'tool-progress', tool: tc.name, message: 'started' });
-
-        const toolTimeout = ChatPanel._toolTimeoutMs(tc.name);
-        const startedAt = Date.now();
-        let result: string;
-        let status: 'completed' | 'failed' = 'completed';
-        try {
-          if (isLocalTool(tc.name)) {
-            // Wrap local tool with per-tool timeout (P5)
-            const raw = await Promise.race([
-              executeLocalTool(tc.name, tc.input),
-              new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error(`Local tool "${tc.name}" timed out after ${toolTimeout / 1000}s`)), toolTimeout),
-              ),
-            ]);
-            result = typeof raw === 'string' ? raw : JSON.stringify(raw);
-          } else if (this.mcpClient?.isConnected) {
-            // Pass per-tool timeout + progress callback (P4 + P5)
-            const raw = await this.mcpClient.callTool(
-              tc.name,
-              tc.input,
-              toolTimeout,
-              (message, progress, total) => {
-                void this.postMessage({ type: 'tool-progress', tool: tc.name, message, progress, total });
-              },
-            );
-            result = typeof raw === 'string' ? raw : JSON.stringify(raw);
-          } else {
-            result = JSON.stringify({ error: `Tool "${tc.name}" is not available — MCP client is not connected.` });
-            status = 'failed';
-          }
-        } catch (err: unknown) {
-          status = 'failed';
-          result = JSON.stringify({ error: err instanceof Error ? err.message : String(err) });
-        }
-
-        this._lastToolTrace.push({
-          tool: tc.name,
-          argsSummary: this._summarizeToolArgs(tc.input),
-          filesAffected: this._extractFilesAffected(tc.input, result),
-          durationMs: Date.now() - startedAt,
-          status,
-        });
-
-        // Show tool completion (P4)
-        const doneChunk = `✓ \`${tc.name}\` done\n`;
-        fullContent += doneChunk;
-        if (this.streamingContent.length < ChatPanel.MAX_STREAMING_CONTENT_CHARS) {
-          this.streamingContent += doneChunk;
-        }
-        void this.postMessage({ type: 'stream-chunk', chunk: doneChunk });
-        void this.postMessage({ type: 'tool-progress', tool: tc.name, message: 'completed' });
-
-        toolResultBlocks.push({
-          type: 'tool_result',
-          tool_use_id: tc.id,
-          content: this._redactSecrets(result),
+      for (const toolCall of response.toolCalls) {
+        assistantBlocks.push({
+          type: 'tool_use',
+          id: toolCall.id,
+          name: toolCall.name,
+          input: toolCall.input,
         });
       }
-
-      // Build rawMessages for the next iteration.
-      // First call: seed from the original llmMessages (non-system only).
-      if (!rawMessages) {
-        rawMessages = llmMessages
-          .filter((m) => m.role !== 'system')
-          .map((m) => ({ role: m.role, content: typeof m.content === 'string' ? m.content : m.content }));
-      }
-
-      // Append assistant turn (with tool_use blocks) and user turn (with tool_result blocks)
       rawMessages.push({ role: 'assistant', content: assistantBlocks });
-      rawMessages.push({ role: 'user', content: toolResultBlocks });
-    }
 
-    return fullContent;
+      const toolResultBlocks: Array<{ type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean }> = [];
+      for (const toolCall of response.toolCalls) {
+        const toolStartedAt = Date.now();
+        await this.postMessage({ type: 'tool-progress', tool: toolCall.name, message: `Running ${toolCall.name}…` });
+
+        try {
+          const result = isLocalTool(toolCall.name)
+            ? await executeLocalTool(toolCall.name, toolCall.input ?? {})
+            : await this.mcpClient?.callTool(toolCall.name, toolCall.input ?? {});
+          const normalized = this._truncateToolResult(toolCall.name, this._stringifyToolResult(result));
+          toolResultBlocks.push({
+            type: 'tool_result',
+            tool_use_id: toolCall.id,
+            content: normalized,
+          });
+          this._lastToolTrace.push({
+            tool: toolCall.name,
+            argsSummary: this._summarizeToolArgs(toolCall.input ?? {}),
+            filesAffected: this._extractFilesAffected(toolCall.name, toolCall.input ?? {}, normalized),
+            durationMs: Date.now() - toolStartedAt,
+            status: 'completed',
+          });
+          await this.postMessage({ type: 'tool-progress', tool: toolCall.name, message: `${toolCall.name} done` });
+        } catch (toolErr) {
+          const toolError = toolErr instanceof Error ? toolErr.message : String(toolErr);
+          toolResultBlocks.push({
+            type: 'tool_result',
+            tool_use_id: toolCall.id,
+            content: toolError,
+            is_error: true,
+          });
+          this._lastToolTrace.push({
+            tool: toolCall.name,
+            argsSummary: this._summarizeToolArgs(toolCall.input ?? {}),
+            filesAffected: this._extractFilesAffected(toolCall.name, toolCall.input ?? {}, toolError),
+            durationMs: Date.now() - toolStartedAt,
+            status: 'failed',
+          });
+          await this.postMessage({ type: 'tool-progress', tool: toolCall.name, message: `${toolCall.name} failed` });
+        }
+      }
+
+      rawMessages.push({ role: 'user', content: toolResultBlocks });
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      const isTimeout = this._isTimeoutError(err);
+
+      if (isTimeout) {
+        const provider = this.architectLlm.provider ?? 'unknown';
+        const model = this.architectLlm.currentConfig?.model;
+        const visibleNotice = `\n⚠️ Tool-enabled LLM request timed out after ${Math.round(timeoutMs / 1000)}s. Recovery will be attempted if available.\n`;
+        this.streamingContent += visibleNotice;
+        await this.postMessage({ type: 'stream-chunk', chunk: visibleNotice });
+
+        const timeoutMessage: ChatMessage = {
+          id: this._createMessageId(),
+          role: 'system',
+          content: `Tool-enabled LLM request timed out after ${Math.round(timeoutMs / 1000)}s. Recovery will be attempted if available.`,
+          timestamp: new Date().toISOString(),
+          instanceId: this.currentInstanceId,
+        };
+        this.messages.push(timeoutMessage);
+        await this.persistMessages();
+        await this.postMessage({
+          type: 'addMessage',
+          message: timeoutMessage,
+          actions: this._buildMessageActions(timeoutMessage),
+          roleMeta: this._roleMetaFor(timeoutMessage),
+          contextFooter: this._contextFooterFor(timeoutMessage),
+        });
+
+        this._logTimeoutDiagnostics({
+          provider,
+          model,
+          mode: 'tool',
+          timeoutMs,
+          recoveryAttempted: true,
+          recovered: false,
+          toolCount: tools.length,
+          usedReducedContext: false,
+          errorMessage,
+        });
+      }
+
+      throw err;
+    } finally {
+      req.dispose();
+      await this.postMessage({ type: 'stream-thinking', active: false });
+    }
   }
+
+  return finalText;
+}
 
   /**
    * Load markdown-it and DOMPurify browser builds from node_modules.
@@ -1816,6 +2014,28 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
     }
   }
 
+  private _stringifyToolResult(result: unknown): string {
+    if (typeof result === 'string') {
+      return result;
+    }
+    if (result === undefined) {
+      return 'undefined';
+    }
+    try {
+      return JSON.stringify(result, null, 2);
+    } catch {
+      return String(result);
+    }
+  }
+
+  private _truncateToolResult(toolName: string, content: string): string {
+    const limit = ChatPanel._toolResultLimit(toolName);
+    if (content.length <= limit) {
+      return content;
+    }
+    return `${content.slice(0, limit)}\n\n[Tool result truncated to ${limit} chars]`;
+  }
+
   private _summarizeToolArgs(input: unknown): string {
     if (!input || typeof input !== 'object') return 'no args';
     const keys = Object.keys(input as Record<string, unknown>).slice(0, 4);
@@ -1847,7 +2067,9 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
     };
   }
 
-  private _extractFilesAffected(input: unknown, result: string): string[] {
+  private _extractFilesAffected(toolNameOrInput: unknown, inputOrResult?: unknown, maybeResult?: string): string[] {
+    const input = typeof toolNameOrInput === 'string' ? inputOrResult : toolNameOrInput;
+    const result = typeof toolNameOrInput === 'string' ? (maybeResult ?? '') : (typeof inputOrResult === 'string' ? inputOrResult : '');
     const found = new Set<string>();
     const visit = (value: unknown): void => {
       if (typeof value === 'string') {

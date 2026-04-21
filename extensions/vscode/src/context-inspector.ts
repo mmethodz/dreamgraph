@@ -36,6 +36,17 @@ export class ContextInspector implements vscode.Disposable {
 
   /* ---- Context Envelope Logging (§3.6) ---- */
 
+  logContextRequestBoundary(event: {
+    instanceId?: string;
+    intentMode?: string;
+  }): void {
+    const ts = new Date().toISOString();
+    this._contextChannel.appendLine("");
+    this._contextChannel.appendLine(
+      `[${ts}] ── Request boundary ──${event.intentMode ? ` intent=${event.intentMode}` : ""}${event.instanceId ? ` instance=${event.instanceId}` : ""}`,
+    );
+  }
+
   /**
    * Log a context envelope to the output channel.
    */
@@ -46,6 +57,10 @@ export class ContextInspector implements vscode.Disposable {
       `[${ts}] Intent: ${envelope.intentMode} (confidence: ${envelope.intentConfidence.toFixed(2)})`,
     );
 
+    if (envelope.instanceId) {
+      this._contextChannel.appendLine(`[${ts}] Instance: ${envelope.instanceId}`);
+    }
+
     if (envelope.activeFile) {
       const anchorHint = envelope.activeFile.selection?.summary
         ? `selection anchor: ${envelope.activeFile.selection.summary}`
@@ -53,6 +68,14 @@ export class ContextInspector implements vscode.Disposable {
       this._contextChannel.appendLine(
         `[${ts}] Active file: ${envelope.activeFile.path} (${envelope.activeFile.languageId}; ${anchorHint})`,
       );
+      this._contextChannel.appendLine(
+        `[${ts}] Cursor: line ${envelope.activeFile.cursorLine}, column ${envelope.activeFile.cursorColumn}`,
+      );
+      if (envelope.activeFile.selection) {
+        this._contextChannel.appendLine(
+          `[${ts}] Selection: lines ${envelope.activeFile.selection.startLine}-${envelope.activeFile.selection.endLine}`,
+        );
+      }
       if (envelope.activeFile.selection?.summary) {
         this._contextChannel.appendLine(
           `[${ts}] Selection anchor: ${envelope.activeFile.selection.summary}`,
@@ -74,20 +97,51 @@ export class ContextInspector implements vscode.Disposable {
       );
     }
 
+    if (envelope.environmentContext) {
+      this._contextChannel.appendLine(`[${ts}] Environment context:`);
+      if (envelope.environmentContext.workspaceRuntime) {
+        this._contextChannel.appendLine(
+          `  - Workspace runtime: ${envelope.environmentContext.workspaceRuntime}`,
+        );
+      }
+      if (envelope.environmentContext.workspacePackageManager) {
+        this._contextChannel.appendLine(
+          `  - Package manager: ${envelope.environmentContext.workspacePackageManager}`,
+        );
+      }
+      const entries = envelope.environmentContext.entries ?? [];
+      this._contextChannel.appendLine(`  - Rendered scopes: ${entries.length}`);
+      for (const entry of entries) {
+        this._contextChannel.appendLine(
+          `    - ${entry.scope}: ${entry.runtime}; ${entry.moduleSystem}; ${entry.role}`,
+        );
+        if (entry.framework) {
+          this._contextChannel.appendLine(`      framework: ${entry.framework}`);
+        }
+        if (entry.keyDependencies.length > 0) {
+          this._contextChannel.appendLine(
+            `      dependencies: ${entry.keyDependencies.slice(0, 5).join(", ")}`,
+          );
+        }
+      }
+    } else {
+      this._contextChannel.appendLine(`[${ts}] Environment context: (not loaded)`);
+    }
+
     if (envelope.graphContext) {
       const gc = envelope.graphContext;
       this._contextChannel.appendLine(`[${ts}] Graph context:`);
       this._contextChannel.appendLine(
-        `  - Features: ${gc.relatedFeatures.join(", ") || "(none)"}`,
+        `  - Features (${gc.relatedFeatures.length}): ${gc.relatedFeatures.map((f) => `${f.id}:${f.name}`).join(", ") || "(none)"}`,
       );
       this._contextChannel.appendLine(
-        `  - Workflows: ${gc.relatedWorkflows.join(", ") || "(none)"}`,
+        `  - Workflows (${gc.relatedWorkflows.length}): ${gc.relatedWorkflows.map((w) => `${w.id}:${w.name}`).join(", ") || "(none)"}`,
       );
       this._contextChannel.appendLine(
-        `  - ADRs: ${gc.applicableAdrs.join(", ") || "(none)"}`,
+        `  - ADRs (${gc.applicableAdrs.length}): ${gc.applicableAdrs.map((a) => `${a.id}:${a.title}`).join(", ") || "(none)"}`,
       );
       this._contextChannel.appendLine(
-        `  - UI patterns: ${gc.uiPatterns.join(", ") || "(none)"}`,
+        `  - UI patterns (${gc.uiPatterns.length}): ${gc.uiPatterns.map((u) => `${u.id}:${u.name}`).join(", ") || "(none)"}`,
       );
       this._contextChannel.appendLine(
         `  - Tensions: ${gc.activeTensions} active`,
@@ -99,7 +153,140 @@ export class ContextInspector implements vscode.Disposable {
       this._contextChannel.appendLine(`[${ts}] Graph context: (not loaded)`);
     }
 
-    this._contextChannel.appendLine(""); // blank separator
+    this._contextChannel.appendLine("");
+  }
+
+  logReasoningPacket(packet: import("./types.js").ReasoningPacket): void {
+    const ts = new Date().toISOString();
+    const instrumentation = packet.instrumentation;
+
+    this._contextChannel.appendLine(`[${ts}] Context packet summary:`);
+    this._contextChannel.appendLine(
+      `  - Intent: ${packet.task.intentMode}`,
+    );
+    this._contextChannel.appendLine(
+      `  - Task: ${packet.task.summary}`,
+    );
+    this._contextChannel.appendLine(
+      `  - Primary anchor: ${packet.primaryAnchor?.label ?? "(none)"}`,
+    );
+    this._contextChannel.appendLine(
+      `  - Secondary anchors: ${packet.secondaryAnchors.length}`,
+    );
+    this._contextChannel.appendLine(
+      `  - Evidence included: ${packet.evidence.length}`,
+    );
+    this._contextChannel.appendLine(
+      `  - Evidence omitted: ${packet.omitted.length}`,
+    );
+    this._contextChannel.appendLine(
+      `  - Token usage: ${packet.tokenUsage.used}/${packet.tokenUsage.budget} (reserved ${packet.tokenUsage.reserved})`,
+    );
+
+    if (instrumentation) {
+      this._contextChannel.appendLine(`[${ts}] Context packet layers:`);
+      this._contextChannel.appendLine(
+        `  - task: ${instrumentation.layerTokenEstimates.task} tokens`,
+      );
+      this._contextChannel.appendLine(
+        `  - environment: ${instrumentation.layerTokenEstimates.environment} tokens`,
+      );
+      this._contextChannel.appendLine(
+        `  - code: ${instrumentation.layerTokenEstimates.code} tokens`,
+      );
+      this._contextChannel.appendLine(
+        `  - graph: ${instrumentation.layerTokenEstimates.graph} tokens`,
+      );
+      this._contextChannel.appendLine(
+        `  - notes: ${instrumentation.layerTokenEstimates.notes} tokens`,
+      );
+      this._contextChannel.appendLine(
+        `  - total evidence: ${instrumentation.layerTokenEstimates.totalEvidence} tokens`,
+      );
+      this._contextChannel.appendLine(
+        `  - included by kind: ${this._formatCounts(instrumentation.evidenceCounts.includedByKind)}`,
+      );
+      this._contextChannel.appendLine(
+        `  - omitted by kind: ${this._formatCounts(instrumentation.evidenceCounts.omittedByKind)}`,
+      );
+
+      if (instrumentation.environment) {
+        this._contextChannel.appendLine(`[${ts}] Environment metrics:`);
+        this._contextChannel.appendLine(
+          `  - matched scopes: ${instrumentation.environment.matchedScopes.join(", ") || "(none)"}`,
+        );
+        this._contextChannel.appendLine(
+          `  - rendered scopes: ${instrumentation.environment.renderedScopeCount}`,
+        );
+        this._contextChannel.appendLine(
+          `  - environment bytes/tokens: ${instrumentation.environment.bytes} bytes / ${instrumentation.environment.tokenEstimate} tokens`,
+        );
+      }
+
+      if (instrumentation.cacheChurn) {
+        this._contextChannel.appendLine(`[${ts}] Cache churn:`);
+        this._contextChannel.appendLine(
+          `  - stable prefix hash: ${instrumentation.cacheChurn.stablePrefixHash}`,
+        );
+        this._contextChannel.appendLine(
+          `  - stable prefix bytes/tokens: ${instrumentation.cacheChurn.stablePrefixBytes} bytes / ${instrumentation.cacheChurn.stablePrefixTokenEstimate} tokens`,
+        );
+        this._contextChannel.appendLine(
+          `  - stable reuse ratio: ${instrumentation.cacheChurn.stableReuseRatio ?? "n/a"}`,
+        );
+        this._contextChannel.appendLine(
+          `  - churned: ${instrumentation.cacheChurn.churned}`,
+        );
+        this._contextChannel.appendLine(
+          `  - packet volatility key: ${instrumentation.cacheChurn.packetVolatilityKey}`,
+        );
+      }
+    }
+
+    if (packet.evidence.length > 0) {
+      this._contextChannel.appendLine(`[${ts}] Included evidence:`);
+      for (const item of packet.evidence) {
+        this._contextChannel.appendLine(
+          `  - [${item.kind}] ${item.title} — ${item.tokenCost} tokens${item.required ? " (required)" : ""}`,
+        );
+      }
+    }
+
+    if (packet.omitted.length > 0) {
+      this._contextChannel.appendLine(`[${ts}] Omitted evidence:`);
+      for (const item of packet.omitted) {
+        this._contextChannel.appendLine(
+          `  - [${item.kind ?? "unknown"}] ${item.title} — ${item.reason}`,
+        );
+      }
+    }
+
+    this._contextChannel.appendLine("");
+  }
+
+  logTimeoutDiagnostics(event: {
+    provider: string;
+    model?: string;
+    mode: 'stream' | 'tool';
+    timeoutMs: number;
+    recoveryAttempted: boolean;
+    recovered: boolean;
+    toolCount?: number;
+    usedReducedContext?: boolean;
+    errorMessage: string;
+  }): void {
+    const ts = new Date().toISOString();
+    this._contextChannel.appendLine(`[${ts}] Timeout diagnostics:`);
+    this._contextChannel.appendLine(`  - provider: ${event.provider}`);
+    this._contextChannel.appendLine(`  - model: ${event.model ?? "(unknown)"}`);
+    this._contextChannel.appendLine(`  - request mode: ${event.mode}`);
+    this._contextChannel.appendLine(`  - timeout budget: ${event.timeoutMs} ms`);
+    this._contextChannel.appendLine(`  - tool count: ${event.toolCount ?? 0}`);
+    this._contextChannel.appendLine(`  - reduced context: ${event.usedReducedContext ? "yes" : "no"}`);
+    this._contextChannel.appendLine(`  - recovery attempted: ${event.recoveryAttempted ? "yes" : "no"}`);
+    this._contextChannel.appendLine(`  - recovered: ${event.recovered ? "yes" : "no"}`);
+    this._contextChannel.appendLine(`  - error: ${event.errorMessage}`);
+    this._contextChannel.appendLine("");
   }
 
   /**
@@ -107,6 +294,10 @@ export class ContextInspector implements vscode.Disposable {
    */
   showContextChannel(): void {
     this._contextChannel.show(true);
+  }
+
+  clearContextChannel(): void {
+    this._contextChannel.clear();
   }
 
   /* ---- Instance Status (§2.6.1) ---- */
@@ -183,6 +374,15 @@ export class ContextInspector implements vscode.Disposable {
     this._contextChannel.appendLine(text);
     this._contextChannel.appendLine("");
     this._contextChannel.show(true);
+  }
+
+  private _formatCounts(
+    counts: Partial<Record<string, number>>,
+  ): string {
+    const entries = Object.entries(counts).filter(([, value]) => typeof value === "number" && value > 0);
+    return entries.length > 0
+      ? entries.map(([key, value]) => `${key}=${value}`).join(", ")
+      : "(none)";
   }
 
   /* ---- Dispose ---- */

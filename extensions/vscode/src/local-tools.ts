@@ -347,64 +347,128 @@ async function handleRunCommand(input: Record<string, unknown>): Promise<string>
     cwd = path.isAbsolute(input.cwd) ? input.cwd : path.resolve(wsRoot, input.cwd);
   }
 
-  const timeoutMs = Math.min(Math.max(Number(input.timeoutMs) || 60_000, 5_000), 300_000);
+  const requestedTimeoutMs = Number(input.timeoutMs);
+  const baseTimeoutMs = Math.min(Math.max(requestedTimeoutMs || 60_000, 5_000), 300_000);
+  const retryOnTimeout = input.retryOnTimeout === false ? false : true;
+  const retryTimeoutMs = Math.min(
+    Math.max(Number(input.retryTimeoutMs) || Math.round(baseTimeoutMs * 2), baseTimeoutMs + 1_000),
+    300_000,
+  );
   const out = getOutput();
-  out.appendLine(`\n$ ${command}  [cwd: ${cwd}]`);
 
   // --- Issue 4: auto-inject DREAMGRAPH_INSTANCE_UUID from ~/.dreamgraph/.instances.json ---
   const instanceEnv = await resolveInstanceEnv(wsRoot);
 
-  // --- Issue 3: spawn PowerShell directly to avoid cmd.exe quoting mangling ---
-  const spawnArgs = buildSpawnArgs(command, cwd, instanceEnv);
+  const executeOnce = async (timeoutMs: number, attempt: number): Promise<{
+    exitCode: number;
+    relevant: string;
+    timedOut: boolean;
+    command: string;
+    cwd: string;
+    durationMs: number;
+    attempt: number;
+    timeoutMs: number;
+  }> => {
+    out.appendLine(`\n$ ${command}  [cwd: ${cwd}] [attempt ${attempt}] [timeout ${timeoutMs}ms]`);
 
-  const start = Date.now();
-  return new Promise<string>((resolve) => {
-    const proc = cp.spawn(spawnArgs.cmd, spawnArgs.args, spawnArgs.opts);
+    // --- Issue 3: spawn PowerShell directly to avoid cmd.exe quoting mangling ---
+    const spawnArgs = buildSpawnArgs(command, cwd, instanceEnv);
+    const start = Date.now();
 
-    let stdout = '';
-    let stderr = '';
-    let killed = false;
+    return new Promise((resolve) => {
+      const proc = cp.spawn(spawnArgs.cmd, spawnArgs.args, spawnArgs.opts);
 
-    const timer = setTimeout(() => {
-      killed = true;
-      try { proc.kill('SIGINT'); } catch { /* ignore */ }
-    }, timeoutMs);
+      let stdout = '';
+      let stderr = '';
+      let killed = false;
 
-    // Show progress notification in VS Code
-    void vscode.window.withProgress(
-      { location: vscode.ProgressLocation.Notification, title: `Running: ${command}`, cancellable: true },
-      (_progress, token) => {
-        token.onCancellationRequested(() => { killed = true; try { proc.kill('SIGINT'); } catch { /* ignore */ } });
-        return new Promise<void>((res) => { proc.on('close', () => res()); proc.on('error', () => res()); });
-      },
+      const timer = setTimeout(() => {
+        killed = true;
+        try { proc.kill('SIGINT'); } catch { /* ignore */ }
+      }, timeoutMs);
+
+      void vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Notification, title: `Running: ${command} (attempt ${attempt})`, cancellable: true },
+        (_progress, token) => {
+          token.onCancellationRequested(() => {
+            killed = true;
+            try { proc.kill('SIGINT'); } catch { /* ignore */ }
+          });
+          return new Promise<void>((res) => {
+            proc.on('close', () => res());
+            proc.on('error', () => res());
+          });
+        },
+      );
+
+      proc.stdout?.setEncoding('utf8');
+      proc.stderr?.setEncoding('utf8');
+      proc.stdout?.on('data', (chunk: string) => { stdout += chunk; out.append(chunk); });
+      proc.stderr?.on('data', (chunk: string) => { stderr += chunk; out.append(chunk); });
+
+      proc.on('close', (code) => {
+        clearTimeout(timer);
+        const elapsed = Date.now() - start;
+        const exitCode = code ?? (killed ? 137 : 1);
+        const combined = (stdout + '\n' + stderr).trim();
+        const relevant = extractRelevant(combined);
+
+        out.appendLine(`\n--- exit ${exitCode} (${(elapsed / 1000).toFixed(1)}s) [attempt ${attempt}] ---`);
+
+        resolve({
+          exitCode,
+          relevant,
+          timedOut: killed,
+          command,
+          cwd,
+          durationMs: elapsed,
+          attempt,
+          timeoutMs,
+        });
+      });
+
+      proc.on('error', (err) => {
+        clearTimeout(timer);
+        resolve({
+          exitCode: 1,
+          relevant: `spawn failed: ${err.message}`,
+          timedOut: false,
+          command,
+          cwd,
+          durationMs: Date.now() - start,
+          attempt,
+          timeoutMs,
+        });
+      });
+    });
+  };
+
+  const first = await executeOnce(baseTimeoutMs, 1);
+  if (first.timedOut && retryOnTimeout) {
+    out.appendLine(
+      `\n[run_command] Attempt 1 timed out after ${baseTimeoutMs}ms. Retrying once with ${retryTimeoutMs}ms timeout...`,
     );
+    const second = await executeOnce(retryTimeoutMs, 2);
+    const finalResult = {
+      ...second,
+      retriedAfterTimeout: true,
+      firstAttempt: {
+        exitCode: first.exitCode,
+        timedOut: first.timedOut,
+        durationMs: first.durationMs,
+        timeoutMs: first.timeoutMs,
+      },
+    };
+    const finalRelevant = finalResult.relevant.length > MAX_OUTPUT
+      ? finalResult.relevant.slice(0, MAX_OUTPUT)
+      : finalResult.relevant;
+    return ok({ ...finalResult, relevant: finalRelevant });
+  }
 
-    proc.stdout?.setEncoding('utf8');
-    proc.stderr?.setEncoding('utf8');
-    proc.stdout?.on('data', (chunk: string) => { stdout += chunk; out.append(chunk); });
-    proc.stderr?.on('data', (chunk: string) => { stderr += chunk; out.append(chunk); });
-
-    proc.on('close', (code) => {
-      clearTimeout(timer);
-      const elapsed = Date.now() - start;
-      const exitCode = code ?? (killed ? 137 : 1);
-      const combined = (stdout + '\n' + stderr).trim();
-      const relevant = extractRelevant(combined);
-
-      out.appendLine(`\n--- exit ${exitCode} (${(elapsed / 1000).toFixed(1)}s) ---`);
-
-      if (relevant.length > MAX_OUTPUT) {
-        resolve(ok({ exitCode, relevant: relevant.slice(0, MAX_OUTPUT), timedOut: killed, command, cwd, durationMs: elapsed }));
-      } else {
-        resolve(ok({ exitCode, relevant, timedOut: killed, command, cwd, durationMs: elapsed }));
-      }
-    });
-
-    proc.on('error', (err) => {
-      clearTimeout(timer);
-      resolve(fail(`spawn failed: ${err.message}`));
-    });
-  });
+  const result = first.relevant.length > MAX_OUTPUT
+    ? { ...first, relevant: first.relevant.slice(0, MAX_OUTPUT) }
+    : first;
+  return ok({ ...result, retriedAfterTimeout: false });
 }
 
 /* ------------------------------------------------------------------ */

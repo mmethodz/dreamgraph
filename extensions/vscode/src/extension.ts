@@ -125,6 +125,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // ---- Layer 1: VS Code Integration ----
   const statusBar = new StatusBarManager();
   const contextInspector = new ContextInspector();
+  chatPanel.setContextInspector(contextInspector);
 
   // ---- Keep DreamGraph container visible / recoverable ----
   const syncDreamGraphVisibility = (): void => {

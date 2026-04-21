@@ -294,6 +294,9 @@ $binPkg = [ordered]@{
 foreach ($dep in $pkg.dependencies.PSObject.Properties) {
     $binPkg.dependencies[$dep.Name] = $dep.Value
 }
+if ($pkg.devDependencies -and $pkg.devDependencies.PSObject.Properties.Name -contains "@modelcontextprotocol/sdk") {
+    $binPkg.dependencies["@modelcontextprotocol/sdk"] = $pkg.devDependencies."@modelcontextprotocol/sdk"
+}
 $binPkgJson = $binPkg | ConvertTo-Json -Depth 10
 Set-Content -Path (Join-Path $BinDir "package.json") -Value $binPkgJson -Encoding UTF8
 Write-Ok "package.json created"

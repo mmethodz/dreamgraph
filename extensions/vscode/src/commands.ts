@@ -416,8 +416,13 @@ export async function inspectContextCommand(
     undefined,
     "inspectContext",
   );
+  const packet = await svc.contextBuilder.buildReasoningPacket(envelope, {
+    commandSource: "inspectContext",
+  });
 
+  svc.contextInspector.clearContextChannel();
   svc.contextInspector.logEnvelope(envelope);
+  svc.contextInspector.logReasoningPacket(packet);
   svc.contextInspector.showContextChannel();
 }
 

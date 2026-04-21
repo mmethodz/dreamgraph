@@ -60,6 +60,9 @@ export class ContextBuilder {
     Object.assign(this._options, options);
   }
 
+  private _environmentMetrics: import("./types.js").ContextEnvironmentMetrics | null = null;
+  private _previousStablePrefixHash: string | null = null;
+
     async buildEnvelope(
     prompt?: string,
     commandSource?: string,
@@ -89,6 +92,15 @@ export class ContextBuilder {
     const cursorAnchor = editor
       ? await this._deriveCursorSemanticAnchor(editor)
       : undefined;
+
+    const environmentModule = await import("./environment-context.js");
+    const environmentSnapshot = workspaceRoot
+      ? await environmentModule.buildEnvironmentContextSnapshot(workspaceRoot)
+      : null;
+    const environmentEntries = environmentModule.selectEnvironmentContextForFile(
+      environmentSnapshot,
+      editor ? vscode.workspace.asRelativePath(editor.document.uri) : null,
+    );
 
     const envelope: EditorContextEnvelope = {
       workspaceRoot,
@@ -124,10 +136,33 @@ export class ContextBuilder {
         .filter((d) => d.isDirty)
         .map((d) => vscode.workspace.asRelativePath(d.uri)),
       pinnedFiles: [],
+      environmentContext: environmentSnapshot
+        ? {
+            workspaceRuntime: environmentSnapshot.workspaceRuntime,
+            workspacePackageManager: environmentSnapshot.workspacePackageManager,
+            entries: environmentEntries,
+          }
+        : null,
       graphContext: null,
       intentMode: mode,
       intentConfidence: confidence,
     };
+
+    if (environmentSnapshot) {
+      const renderResult = environmentModule.renderEnvironmentContextBlockWithMetrics(
+        environmentSnapshot,
+        envelope.activeFile?.path ?? null,
+        this._environmentMetrics
+          ? {
+              hash: this._environmentMetrics.hash,
+              stablePrefixHash: this._environmentMetrics.stablePrefixHash,
+            }
+          : null,
+      );
+      this._environmentMetrics = renderResult.metrics;
+    } else {
+      this._environmentMetrics = null;
+    }
 
     // Phase 2: resolve graph context (evidence-driven)
     const plan = await this.createContextPlan(envelope, prompt, commandSource);
@@ -246,11 +281,21 @@ export class ContextBuilder {
     codeRetryOptions?: { fileContent: string; envelope: EditorContextEnvelope },
   ): {
     included: import("./types.js").EvidenceItem[];
-    omitted: Array<{ title: string; reason: string; required: boolean }>;
+    omitted: Array<{
+      title: string;
+      reason: string;
+      required: boolean;
+      kind?: import("./types.js").ContextEvidenceKind;
+    }>;
     used: number;
   } {
     const included: import("./types.js").EvidenceItem[] = [];
-    const omitted: Array<{ title: string; reason: string; required: boolean }> = [];
+    const omitted: Array<{
+      title: string;
+      reason: string;
+      required: boolean;
+      kind?: import("./types.js").ContextEvidenceKind;
+    }> = [];
     let used = 0;
 
     for (const item of evidence) {
@@ -258,7 +303,6 @@ export class ContextBuilder {
         included.push(item);
         used += item.tokenCost;
       } else if (codeRetryOptions && item.kind === "code") {
-        // Attempt a narrower trim before giving up on code evidence.
         const trimmed = this._trimActiveFile(
           codeRetryOptions.fileContent,
           codeRetryOptions.envelope,
@@ -269,7 +313,12 @@ export class ContextBuilder {
           included.push({ ...item, content: trimmed, tokenCost: trimmedCost });
           used += trimmedCost;
         } else {
-          omitted.push({ title: item.title, reason: "code excerpt could not be trimmed within remaining budget", required: item.required });
+          omitted.push({
+            title: item.title,
+            reason: "code excerpt could not be trimmed within remaining budget",
+            required: item.required,
+            kind: item.kind,
+          });
         }
       } else {
         omitted.push({
@@ -278,6 +327,7 @@ export class ContextBuilder {
             ? "required evidence exceeded the current usable budget and needs a narrower retrieval plan"
             : "omitted to preserve minimum sufficient context within budget",
           required: item.required,
+          kind: item.kind,
         });
       }
     }
@@ -317,6 +367,15 @@ export class ContextBuilder {
     const usableBudget = Math.max(200, budget - reserved);
 
     const { included, omitted, used } = this._applyBudget(evidence, usableBudget);
+    const instrumentationResult = await import("./context-builder.instrumentation.js").then((m) =>
+      m.buildContextInstrumentation(
+        included,
+        omitted,
+        this._environmentMetrics,
+        this._previousStablePrefixHash,
+      ),
+    );
+    this._previousStablePrefixHash = instrumentationResult.stablePrefixHash;
 
     return {
       task: {
@@ -334,6 +393,7 @@ export class ContextBuilder {
         budget,
         reserved,
       },
+      instrumentation: instrumentationResult.instrumentation,
     };
   }
 
@@ -499,6 +559,7 @@ export class ContextBuilder {
       promptLower.includes("architecture") ||
       promptLower.includes("workflow") ||
       promptLower.includes("system");
+    const forceEnvironment = envelope.intentMode === "active_file" || isExplain || isModify || isBug || isUi;
 
     const requiredEvidence = new Set<import("./types.js").ContextEvidenceKind>();
     const optionalEvidence = new Set<import("./types.js").ContextEvidenceKind>();
@@ -603,20 +664,25 @@ export class ContextBuilder {
         allowFullActiveFile: false,
         includeOptionalEvidence: envelope.intentConfidence >= 0.5,
       },
+      environmentPolicy: {
+        forceInclude: forceEnvironment,
+        softTokenCeiling: 220,
+        hardTokenCeiling: 320,
+        scopeLimit: 2,
+      },
     };
   }
 
   private _createFallbackPlan(
     envelope: EditorContextEnvelope,
   ): import("./types.js").ContextPlan {
+    const primaryAnchor = this._resolvePrimaryAnchor(envelope);
+
     return {
       intentMode: envelope.intentMode,
       taskSummary: envelope.activeFile?.path ?? "current context",
-      primaryAnchor: this._resolvePrimaryAnchor(envelope),
-      secondaryAnchors: this._resolveSecondaryAnchors(
-        envelope,
-        this._resolvePrimaryAnchor(envelope),
-      ),
+      primaryAnchor,
+      secondaryAnchors: this._resolveSecondaryAnchors(envelope, primaryAnchor),
       requiredEvidence: envelope.activeFile?.selection?.text ? ["code"] : [],
       optionalEvidence: ["feature", "workflow", "adr", "api", "ui", "tension"],
       codeReadPlan: envelope.activeFile
@@ -638,6 +704,12 @@ export class ContextBuilder {
         reserveTokens: Math.min(1200, Math.floor(this._options.maxContextTokens * 0.2)),
         allowFullActiveFile: false,
         includeOptionalEvidence: true,
+      },
+      environmentPolicy: {
+        forceInclude: envelope.intentMode === "active_file",
+        softTokenCeiling: 220,
+        hardTokenCeiling: 320,
+        scopeLimit: 2,
       },
     };
   }
@@ -1092,6 +1164,36 @@ export class ContextBuilder {
   ): import("./types.js").EvidenceItem[] {
     const items: import("./types.js").EvidenceItem[] = [];
 
+    const priorityRank = (
+      item: import("./types.js").EvidenceItem,
+    ): number => {
+      switch (item.kind) {
+        case "task":
+          return 0;
+        case "code":
+          return 1;
+        case "adr":
+        case "api":
+          return 2;
+        case "environment":
+          return 3;
+        case "feature":
+        case "workflow":
+        case "ui":
+          return 4;
+        case "tension":
+        case "causal":
+        case "temporal":
+        case "data_model":
+        case "cognitive_status":
+          return 5;
+        case "note":
+          return 6;
+        default:
+          return 7;
+      }
+    };
+
     /** Aggregate relevance from a list of graph entities that each carry a relevance score.
      *  Returns the max score, falling back to a supplied default when the list is empty. */
     const aggregateRelevance = (
@@ -1174,6 +1276,61 @@ export class ContextBuilder {
         tokenCost: estimateTokens(content),
         required: plan.requiredEvidence.includes("api"),
       });
+    }
+
+    if (envelope.environmentContext?.entries?.length) {
+      const entries = envelope.environmentContext.entries.slice(
+        0,
+        plan.environmentPolicy?.scopeLimit ?? 2,
+      );
+      const contentLines: string[] = ["## Environment Context"];
+      if (envelope.environmentContext.workspaceRuntime) {
+        contentLines.push(`Workspace runtime: ${envelope.environmentContext.workspaceRuntime}`);
+      }
+      if (envelope.environmentContext.workspacePackageManager) {
+        contentLines.push(
+          `Package manager: ${envelope.environmentContext.workspacePackageManager}`,
+        );
+      }
+      for (const entry of entries) {
+        contentLines.push(
+          `- \`${entry.scope}\`: ${entry.runtime}; ${entry.moduleSystem}; ${entry.role}`,
+        );
+        if (entry.framework) {
+          contentLines.push(`  - Framework: ${entry.framework}`);
+        }
+        if (entry.boundaries[0]) {
+          contentLines.push(`  - Boundary: ${entry.boundaries[0]}`);
+        }
+        if (entry.keyDependencies.length > 0) {
+          contentLines.push(
+            `  - Dependencies: ${entry.keyDependencies.slice(0, 3).join(", ")}`,
+          );
+        }
+      }
+
+      let content = contentLines.join("\n");
+      let tokenCost = estimateTokens(content);
+      if (tokenCost > (plan.environmentPolicy?.hardTokenCeiling ?? 320)) {
+        const minimalLines: string[] = ["## Environment Context"];
+        for (const entry of entries) {
+          minimalLines.push(`- \`${entry.scope}\`: ${entry.role}`);
+        }
+        content = minimalLines.join("\n");
+        tokenCost = estimateTokens(content);
+      }
+
+      if (tokenCost <= (plan.environmentPolicy?.hardTokenCeiling ?? 320)) {
+        const aboveSoftCeiling = tokenCost > (plan.environmentPolicy?.softTokenCeiling ?? 220);
+        items.push({
+          kind: "environment",
+          title: "Environment Context",
+          content,
+          relevance: aboveSoftCeiling ? 0.74 : 0.86,
+          tokenCost,
+          required: plan.environmentPolicy?.forceInclude ?? false,
+        });
+      }
     }
 
     if (
@@ -1297,6 +1454,8 @@ export class ContextBuilder {
     }
 
     return items.sort((a, b) => {
+      const priorityDiff = priorityRank(a) - priorityRank(b);
+      if (priorityDiff !== 0) return priorityDiff;
       if (a.required !== b.required) return a.required ? -1 : 1;
       if (b.relevance !== a.relevance) return b.relevance - a.relevance;
       return (b.confidence ?? 0) - (a.confidence ?? 0);
