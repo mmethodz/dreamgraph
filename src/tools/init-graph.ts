@@ -596,7 +596,8 @@ export function registerInitGraphTool(server: McpServer): void {
     async ({ repos: requestedRepos, force = false }) => {
       logger.debug(`init_graph called repos=${JSON.stringify(requestedRepos ?? null)} force=${String(force)}`);
 
-      const availableRepos = config.repos.map((repoConfig) => repoConfig.name);
+      const configuredRepos = Object.entries(config.repos).map(([name, local_path]) => ({ name, local_path }));
+      const availableRepos = configuredRepos.map((repoConfig) => repoConfig.name);
 
       const result = await safeExecute<InitGraphResult>(async () => {
         try {
@@ -619,8 +620,8 @@ export function registerInitGraphTool(server: McpServer): void {
 
           // Resolve repos
           const repoConfigs = requestedRepos && requestedRepos.length > 0
-            ? config.repos.filter((repoConfig) => requestedRepos.includes(repoConfig.name))
-            : config.repos;
+            ? configuredRepos.filter((repoConfig) => requestedRepos.includes(repoConfig.name))
+            : configuredRepos;
 
           if (requestedRepos && requestedRepos.length > 0 && repoConfigs.length !== requestedRepos.length) {
             const missing = requestedRepos.filter((repoName) => !repoConfigs.some((repoConfig) => repoConfig.name === repoName));
@@ -637,12 +638,39 @@ export function registerInitGraphTool(server: McpServer): void {
             );
           }
 
-          const scans = await Promise.all(repoConfigs.map(async (repoConfig) => {
+          const scans: Array<{
+            repository: Repository;
+            fileCount: number;
+            features: Feature[];
+            workflows: Workflow[];
+            dataModel: DataModelEntity[];
+          }> = await Promise.all(repoConfigs.map(async (repoConfig: { name: string; local_path: string }) => {
             const repoRoot = path.resolve(repoConfig.local_path);
-            const files = await collectFiles(repoRoot);
-            logger.info(`init_graph: scanning repo ${repoConfig.name} (${files.length} files)`);
-            const scan = await analyzeRepo(repoConfig, files);
-            return scan;
+            const scan = await scanRepo(repoConfig.name, repoRoot);
+            logger.info(`init_graph: scanning repo ${repoConfig.name} (${scan.files.length} files)`);
+
+            const groups = await groupFiles(scan);
+            const features = generateFeatures(groups, repoConfig.name);
+            const workflows = generateWorkflows(groups, repoConfig.name);
+            const dataModel = generateDataModel(groups, repoConfig.name);
+
+            const repository: Repository = {
+              id: `repository_${toSnakeCase(repoConfig.name)}`,
+              name: repoConfig.name,
+              description: `Repository ${repoConfig.name} scanned by init_graph.`,
+              technology: scan.technology,
+              local_path: repoConfig.local_path,
+              source_repo: repoConfig.name,
+              source_files: scan.files.map((file) => file.rel),
+            };
+
+            return {
+              repository,
+              fileCount: scan.files.length,
+              features,
+              workflows,
+              dataModel,
+            };
           }));
 
           const allFeatures = scans.flatMap((scan) => scan.features);
