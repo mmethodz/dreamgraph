@@ -67,6 +67,12 @@ function Invoke-LoggedCommand {
     Push-Location $WorkingDirectory
     try {
         $prevPref = $ErrorActionPreference
+        $originalEncoding = [Console]::OutputEncoding
+        $originalInputEncoding = [Console]::InputEncoding
+        $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+        [Console]::OutputEncoding = $utf8NoBom
+        [Console]::InputEncoding = $utf8NoBom
+        $OutputEncoding = $utf8NoBom
         $ErrorActionPreference = "SilentlyContinue"
         $output = & $FilePath @Arguments 2>&1
         $exitCode = $LASTEXITCODE
@@ -74,6 +80,8 @@ function Invoke-LoggedCommand {
             $exitCode = 0
         }
         $ErrorActionPreference = $prevPref
+        [Console]::OutputEncoding = $originalEncoding
+        [Console]::InputEncoding = $originalInputEncoding
     } finally {
         Pop-Location
     }
