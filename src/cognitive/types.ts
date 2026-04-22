@@ -792,6 +792,8 @@ export interface ArchitectureDecisionRecord {
   decided_by: "human" | "system" | "collaborative";
   status: "accepted" | "deprecated" | "superseded";
   superseded_by?: string;
+  deprecated_at?: string;
+  deprecation_reason?: string;
 
   context: {
     problem: string;

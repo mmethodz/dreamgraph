@@ -588,194 +588,176 @@ async function writeSeedFile(filename: string, data: unknown): Promise<void> {
 export function registerInitGraphTool(server: McpServer): void {
   server.tool(
     "init_graph",
-    "Bootstrap the fact graph by scanning configured project repositories. " +
-    "This discovers features, workflows, and data model entities from source code " +
-    "and populates the seed data files (features.json, workflows.json, data_model.json, " +
-    "system_overview.json, index.json). Run this ONCE for a new project, or when the " +
-    "fact graph is empty and the dreamer has nothing to work with. " +
-    "The tool reads source files, classifies them by directory structure and content patterns, " +
-    "generates cross-links between related entities, and writes all seed files. " +
-    "After running, the dreamer will have a populated fact graph to dream about.",
+    "Bootstrap the fact graph by scanning configured project repositories. This discovers features, workflows, and data model entities from source code and populates the seed data files (features.json, workflows.json, data_model.json, system_overview.json, index.json). Run this ONCE for a new project, or when the fact graph is empty and the dreamer has nothing to work with. The tool reads source files, classifies them by directory structure and content patterns, generates cross-links between related entities, and writes all seed files. After running, the dreamer will have a populated fact graph to dream about.",
     {
-      repos: z
-        .array(z.string())
-        .optional()
-        .describe(
-          "Specific repo names to scan (from DREAMGRAPH_REPOS config). " +
-          "If omitted, scans ALL configured repos."
-        ),
-      force: z
-        .boolean()
-        .optional()
-        .describe(
-          "If true, overwrites existing seed data. " +
-          "If false (default), skips if features.json already has real entries."
-        ),
+      repos: z.array(z.string()).optional().describe("Specific repo names to scan (from DREAMGRAPH_REPOS config). If omitted, scans ALL configured repos."),
+      force: z.boolean().optional().describe("If true, overwrites existing seed data. If false (default), skips if features.json already has real entries."),
     },
-    async ({ repos, force }) => {
-      logger.info("init_graph: starting fact graph bootstrap");
+    async ({ repos: requestedRepos, force = false }) => {
+      logger.debug(`init_graph called repos=${JSON.stringify(requestedRepos ?? null)} force=${String(force)}`);
 
-      const result = await safeExecute<InitGraphResult>(async (): Promise<ToolResponse<InitGraphResult>> => {
-        // Validate repos exist
-        const availableRepos = Object.keys(config.repos);
-        if (availableRepos.length === 0) {
-          return error(
-            "NO_REPOS",
-            "No repositories configured. Set DREAMGRAPH_REPOS env var as JSON object: " +
-            '{"my-app": "/path/to/my-app"}',
-          );
-        }
+      const availableRepos = config.repos.map((repoConfig) => repoConfig.name);
 
-        const targetRepos = repos ?? availableRepos;
-        const unknownRepos = targetRepos.filter(r => !config.repos[r]);
-        if (unknownRepos.length > 0) {
-          return error(
-            "UNKNOWN_REPOS",
-            `Unknown repos: ${unknownRepos.join(", ")}. Available: ${availableRepos.join(", ")}`,
-          );
-        }
-
-        // Check if seed data already exists (unless force=true)
-        if (!force) {
-          try {
-            const existing = await fs.readFile(dataPath("features.json"), "utf-8");
-            const parsed = JSON.parse(existing);
-            const realEntries = Array.isArray(parsed)
-              ? parsed.filter((e: Record<string, unknown>) => !e._schema && !e._fields && !e._note)
-              : [];
-            if (realEntries.length > 0) {
-              return error(
-                "ALREADY_POPULATED",
-                `features.json already has ${realEntries.length} entries. Use force=true to overwrite.`,
-              );
-            }
-          } catch { /* file doesn't exist or is empty — proceed */ }
-        }
-
-        // Scan all target repos
-        const scans: ScanResult[] = [];
-        for (const repoName of targetRepos) {
-          const repoRoot = path.resolve(config.repos[repoName]);
-          logger.info(`init_graph: scanning ${repoName} at ${repoRoot}`);
-          const scan = await scanRepo(repoName, repoRoot);
-          scans.push(scan);
-          logger.info(`init_graph: found ${scan.files.length} source files in ${repoName}`);
-        }
-
-        const totalFiles = scans.reduce((sum, s) => sum + s.files.length, 0);
-        if (totalFiles === 0) {
-          return error(
-            "NO_FILES",
-            "No source files found in any of the scanned repos. Check that the repo paths are correct.",
-          );
-        }
-
-        // Classify and group files from all repos
-        const allFeatures: Feature[] = [];
-        const allWorkflows: Workflow[] = [];
-        const allDataModel: DataModelEntity[] = [];
-
-        for (const scan of scans) {
-          const groups = await groupFiles(scan);
-
-          allFeatures.push(...generateFeatures(groups, scan.repoName));
-          allWorkflows.push(...generateWorkflows(groups, scan.repoName));
-          allDataModel.push(...generateDataModel(groups, scan.repoName));
-        }
-
-        // Cross-link by domain and keyword overlap
-        crossLink(allFeatures, allWorkflows, allDataModel);
-
-        // Count cross-links
-        const linkCount =
-          allFeatures.reduce((s, f) => s + f.links.length, 0) +
-          allWorkflows.reduce((s, w) => s + w.links.length, 0) +
-          allDataModel.reduce((s, d) => s + d.links.length, 0);
-
-        // Generate supporting structures
-        const overview = generateSystemOverview(scans, allFeatures.length, allWorkflows.length, allDataModel.length);
-        const index = generateIndex(allFeatures, allWorkflows, allDataModel);
-
-        // Write seed files — skip categories where heuristics found nothing
-        // to avoid obliterating rich template stubs or prior enrichment.
-        const writtenFiles: string[] = [];
-
-        if (allFeatures.length > 0) {
-          await writeSeedFile("features.json", allFeatures);
-          writtenFiles.push("features.json");
-        } else {
-          logger.warn("init_graph: 0 features detected — preserving existing features.json");
-        }
-
-        if (allWorkflows.length > 0) {
-          await writeSeedFile("workflows.json", allWorkflows);
-          writtenFiles.push("workflows.json");
-        } else {
-          logger.warn("init_graph: 0 workflows detected — preserving existing workflows.json");
-        }
-
-        if (allDataModel.length > 0) {
-          await writeSeedFile("data_model.json", allDataModel);
-          writtenFiles.push("data_model.json");
-        } else {
-          logger.warn("init_graph: 0 data model entities detected — preserving existing data_model.json");
-        }
-
-        await writeSeedFile("system_overview.json", overview);
-        writtenFiles.push("system_overview.json");
-
-        await writeSeedFile("index.json", index);
-        writtenFiles.push("index.json");
-
-        // Invalidate entire cache to ensure fresh reads
-        invalidateCache();
-
-        const summary =
-          `Bootstrap complete: ${scans.length} repo(s) scanned, ${totalFiles} files analyzed. ` +
-          `Generated ${allFeatures.length} features, ${allWorkflows.length} workflows, ` +
-          `${allDataModel.length} data model entities with ${linkCount} cross-links. ` +
-          `${Object.keys(index.entities).length} index entries written.`;
-
-        // Check LLM readiness and add guidance if not configured
-        let llmAdvice = "";
+      const result = await safeExecute<InitGraphResult>(async () => {
         try {
-          const llmCfg = getLlmConfig();
-          if (llmCfg.provider === "none" || !llmCfg.provider) {
-            llmAdvice =
-              "\n\nNEXT STEP: Configure an LLM model to unlock full dreaming and semantic validation. " +
-              "Without LLM, DreamGraph uses structural heuristics only (8 strategies). " +
-              "With LLM, the dreamer generates creative connections and the normalizer validates them semantically. " +
-              "Configure via: (1) Dashboard /config page > LLM section, or " +
-              "(2) Edit engine.env in the instance config directory. " +
-              "Recommended: Set DREAMGRAPH_LLM_PROVIDER=ollama with a local model for autonomous dreaming, " +
-              "or DREAMGRAPH_LLM_PROVIDER=openai/anthropic with an API key. " +
-              "The normalizer uses low temperature (0.1) by default for consistent validation.";
+          // Safety: avoid overwriting a live graph unless explicitly forced
+          const featuresFile = dataPath("features.json");
+          if (!force) {
+            try {
+              const existing = JSON.parse(await fs.readFile(featuresFile, "utf-8")) as Feature[];
+              const hasRealEntries = Array.isArray(existing) && existing.some((feature) => !feature.id.startsWith("feature-template-"));
+              if (hasRealEntries) {
+                return error(
+                  "INVALID_INPUT",
+                  "features.json already contains entries. Use force=true to overwrite existing seed data."
+                );
+              }
+            } catch {
+              // Missing or unreadable file is fine — we are bootstrapping.
+            }
           }
-        } catch { /* LLM module not loaded yet — skip advice */ }
 
-        logger.info(`init_graph: ${summary}`);
+          // Resolve repos
+          const repoConfigs = requestedRepos && requestedRepos.length > 0
+            ? config.repos.filter((repoConfig) => requestedRepos.includes(repoConfig.name))
+            : config.repos;
 
-        return success<InitGraphResult>({
-          repos_scanned: scans.length,
-          files_scanned: totalFiles,
-          features_generated: allFeatures.length,
-          workflows_generated: allWorkflows.length,
-          data_model_entities_generated: allDataModel.length,
-          index_entries: Object.keys(index.entities).length,
-          cross_links_created: linkCount,
-          files_written: writtenFiles,
-          message: summary + llmAdvice,
-        });
+          if (requestedRepos && requestedRepos.length > 0 && repoConfigs.length !== requestedRepos.length) {
+            const missing = requestedRepos.filter((repoName) => !repoConfigs.some((repoConfig) => repoConfig.name === repoName));
+            return error(
+              "NOT_FOUND",
+              `Unknown repos: ${missing.join(", ")}. Available: ${availableRepos.join(", ")}`
+            );
+          }
+
+          if (repoConfigs.length === 0) {
+            return error(
+              "NOT_FOUND",
+              `No configured repositories to scan. Available: ${availableRepos.join(", ") || "none"}`
+            );
+          }
+
+          const scans = await Promise.all(repoConfigs.map(async (repoConfig) => {
+            const repoRoot = path.resolve(repoConfig.local_path);
+            const files = await collectFiles(repoRoot);
+            logger.info(`init_graph: scanning repo ${repoConfig.name} (${files.length} files)`);
+            const scan = await analyzeRepo(repoConfig, files);
+            return scan;
+          }));
+
+          const allFeatures = scans.flatMap((scan) => scan.features);
+          const allWorkflows = scans.flatMap((scan) => scan.workflows);
+          const allDataModel = scans.flatMap((scan) => scan.dataModel);
+          const repositories = scans.map((scan) => scan.repository);
+          const totalFiles = scans.reduce((sum, scan) => sum + scan.fileCount, 0);
+
+          const overview: SystemOverview = {
+            id: "system-overview",
+            name: "DreamGraph System Overview",
+            description: "High-level map of configured repositories, generated by init_graph.",
+            source_repo: "dreamgraph",
+            source_files: repositories.map((repository) => repository.local_path),
+            repositories,
+          };
+
+          const index: ResourceIndex = { entities: {} };
+          const addIndexEntry = (entry: IndexEntry, id: string) => {
+            index.entities[id] = entry;
+          };
+
+          for (const feature of allFeatures) {
+            addIndexEntry({
+              type: "feature",
+              uri: `feature://${feature.id}`,
+              name: feature.name,
+              source_repo: feature.source_repo,
+            }, feature.id);
+          }
+
+          for (const workflow of allWorkflows) {
+            addIndexEntry({
+              type: "workflow",
+              uri: `workflow://${workflow.id}`,
+              name: workflow.name,
+              source_repo: workflow.source_repo,
+            }, workflow.id);
+          }
+
+          for (const entity of allDataModel) {
+            addIndexEntry({
+              type: "data_model",
+              uri: `data-model://${entity.id}`,
+              name: entity.name,
+              source_repo: entity.source_repo,
+            }, entity.id);
+          }
+
+          addIndexEntry({
+            type: "feature",
+            uri: "system://overview",
+            name: overview.name,
+            source_repo: overview.source_repo,
+          }, overview.id);
+
+          const linkCount = [allFeatures, allWorkflows, allDataModel]
+            .flat()
+            .reduce((sum, item) => sum + (item.links?.length ?? 0), 0);
+
+          await writeSeedFile("features.json", allFeatures);
+          await writeSeedFile("workflows.json", allWorkflows);
+          await writeSeedFile("data_model.json", allDataModel);
+          await writeSeedFile("system_overview.json", overview);
+          await writeSeedFile("index.json", index);
+          const writtenFiles = ["features.json", "workflows.json", "data_model.json", "system_overview.json", "index.json"];
+
+          const summary = `Bootstrapped graph from ${repoConfigs.length} repo(s), ${totalFiles} file(s): ${allFeatures.length} features, ${allWorkflows.length} workflows, ${allDataModel.length} data model entities, ${linkCount} cross-links.`;
+
+          // Check LLM readiness and add guidance if not configured
+          let llmAdvice = "";
+          try {
+            const llmCfg = getLlmConfig();
+            if (llmCfg.provider === "none" || !llmCfg.provider) {
+              llmAdvice =
+                "\n\nNEXT STEP: Configure an LLM model to unlock full dreaming and semantic validation. " +
+                "Without LLM, DreamGraph uses structural heuristics only (8 strategies). " +
+                "With LLM, the dreamer generates creative connections and the normalizer validates them semantically. " +
+                "Configure via: (1) Dashboard /config page > LLM section, or " +
+                "(2) Edit engine.env in the instance config directory. " +
+                "Recommended: Set DREAMGRAPH_LLM_PROVIDER=ollama with a local model for autonomous dreaming, " +
+                "or DREAMGRAPH_LLM_PROVIDER=openai/anthropic with an API key. " +
+                "The normalizer uses low temperature (0.1) by default for consistent validation.";
+            }
+          } catch {
+            /* LLM module not loaded yet — skip advice */
+          }
+
+          logger.info(`init_graph: ${summary}`);
+
+          return success<InitGraphResult>({
+            repos_scanned: scans.length,
+            files_scanned: totalFiles,
+            features_generated: allFeatures.length,
+            workflows_generated: allWorkflows.length,
+            data_model_entities_generated: allDataModel.length,
+            index_entries: Object.keys(index.entities).length,
+            cross_links_created: linkCount,
+            files_written: writtenFiles,
+            message: summary + llmAdvice,
+          });
+        } catch (err) {
+          logger.error(
+            `init_graph unexpected failure for repos=${JSON.stringify(requestedRepos ?? availableRepos)} force=${String(force)}: ${err instanceof Error ? err.message : String(err)}`
+          );
+          throw err;
+        }
       });
 
       return {
-        content: [
-          {
-            type: "text" as const,
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify(result, null, 2),
+        }],
       };
-    },
+    }
   );
 }

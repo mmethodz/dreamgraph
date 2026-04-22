@@ -174,6 +174,108 @@ export async function getADRCount(): Promise<number> {
 // ---------------------------------------------------------------------------
 
 export function registerADRTools(server: McpServer): void {
+  const SYNONYM_MAP: Record<string, string[]> = {
+    happens: ["occurs", "occur", "happening"],
+    occurs: ["happens", "occur", "occurring"],
+    logging: ["logs", "log", "logged"],
+    boundaries: ["boundary"],
+    boundary: ["boundaries"],
+    exceptions: ["exception", "errors", "error"],
+    exception: ["exceptions", "error", "errors"],
+    errors: ["error", "exceptions", "exception"],
+    error: ["errors", "exception", "exceptions"],
+    contextrich: ["contextaware", "contextual"],
+    contextaware: ["contextrich", "contextual"],
+  };
+
+  function normalizeSearchText(value: string): string {
+    return value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function normalizeToken(value: string): string {
+    return value.replace(/[^a-z0-9]/g, "");
+  }
+
+  function tokenizeSearchText(value: string): string[] {
+    return normalizeSearchText(value)
+      .split(" ")
+      .map(normalizeToken)
+      .filter((token) => token.length > 1);
+  }
+
+  function expandTokenVariants(token: string): string[] {
+    const variants = new Set<string>([token]);
+
+    if (token.endsWith("ing") && token.length > 4) {
+      variants.add(token.slice(0, -3));
+    }
+    if (token.endsWith("ed") && token.length > 3) {
+      variants.add(token.slice(0, -2));
+    }
+    if (token.endsWith("es") && token.length > 3) {
+      variants.add(token.slice(0, -2));
+    }
+    if (token.endsWith("s") && token.length > 2) {
+      variants.add(token.slice(0, -1));
+    }
+
+    for (const variant of [...variants]) {
+      for (const synonym of SYNONYM_MAP[variant] ?? []) {
+        variants.add(synonym);
+      }
+    }
+
+    return [...variants].filter((variant) => variant.length > 1);
+  }
+
+  function adrSearchCorpus(d: ArchitectureDecisionRecord): string {
+    const alternatives = (d.decision.alternatives ?? []).flatMap((alt) => [
+      alt.option,
+      alt.rejected_because,
+    ]);
+
+    return [
+      d.id,
+      d.title,
+      d.context.problem,
+      ...(d.context.constraints ?? []),
+      ...(d.context.affected_entities ?? []),
+      ...(d.context.related_tensions ?? []),
+      d.decision.chosen,
+      ...alternatives,
+      ...(d.consequences.expected ?? []),
+      ...(d.consequences.risks ?? []),
+      ...(d.guard_rails ?? []),
+      ...(d.tags ?? []),
+    ]
+      .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+      .join(" ");
+  }
+
+  function matchesADRSearch(d: ArchitectureDecisionRecord, query: string): boolean {
+    const corpusTokens = new Set(tokenizeSearchText(adrSearchCorpus(d)));
+    const queryTokens = tokenizeSearchText(query);
+
+    if (queryTokens.length === 0) {
+      return normalizeSearchText(adrSearchCorpus(d)).includes(normalizeSearchText(query));
+    }
+
+    const matchedCount = queryTokens.filter((token) => {
+      const variants = expandTokenVariants(token);
+      return variants.some((variant) => corpusTokens.has(variant));
+    }).length;
+
+    const minimumMatches = queryTokens.length <= 3
+      ? queryTokens.length
+      : Math.max(queryTokens.length - 1, Math.ceil(queryTokens.length * 0.75));
+
+    return matchedCount >= minimumMatches;
+  }
+
   // =========================================================================
   // record_architecture_decision
   // =========================================================================
@@ -335,13 +437,7 @@ export function registerADRTools(server: McpServer): void {
 
           // Free text search
           if (params.search) {
-            const q = params.search.toLowerCase();
-            filtered = filtered.filter(
-              (d) =>
-                d.title.toLowerCase().includes(q) ||
-                d.context.problem.toLowerCase().includes(q) ||
-                d.decision.chosen.toLowerCase().includes(q)
-            );
+            filtered = filtered.filter((d) => matchesADRSearch(d, params.search!));
           }
 
           // Guard rail check
@@ -418,27 +514,36 @@ export function registerADRTools(server: McpServer): void {
 
             if (adr.status !== "accepted") {
               return error(
-                "INVALID_STATE",
-                `ADR "${params.adr_id}" is already ${adr.status}. Only accepted ADRs can be deprecated.`
+                "INVALID_INPUT",
+                `ADR "${params.adr_id}" is already ${adr.status}.`
               );
             }
 
-            if (params.new_status === "superseded" && !params.superseded_by) {
+            if (
+              params.new_status === "superseded" &&
+              !params.superseded_by
+            ) {
               return error(
-                "MISSING_FIELD",
-                'When superseding an ADR, "superseded_by" must specify the replacement ADR ID.'
+                "INVALID_INPUT",
+                "superseded_by is required when new_status is \"superseded\"."
               );
             }
 
             adr.status = params.new_status;
-            if (params.superseded_by) adr.superseded_by = params.superseded_by;
+            adr.deprecated_at = new Date().toISOString();
+            adr.deprecation_reason = params.reason;
+            if (params.new_status === "superseded") {
+              adr.superseded_by = params.superseded_by;
+            }
 
             await saveADRLog(log);
 
             return success({
-              adr_id: params.adr_id,
-              new_status: params.new_status,
-              message: `ADR ${params.adr_id} is now ${params.new_status}. Guard rails from this ADR are no longer active. Reason: ${params.reason}`,
+              adr_id: adr.id,
+              previous_status: "accepted",
+              new_status: adr.status,
+              superseded_by: adr.superseded_by,
+              message: `ADR ${adr.id} marked as ${adr.status}. Reason: ${params.reason}`,
             });
           })
       );

@@ -99,62 +99,69 @@ export function registerQueryResourceTool(server: McpServer): void {
 
       const result = await safeExecute<unknown>(
         async (): Promise<ToolResponse<unknown>> => {
-          const filename = URI_TO_FILE[uri];
-          if (!filename) {
-            const available = Object.keys(URI_TO_FILE).join(", ");
-            return error(
-              "INVALID_URI",
-              `Unknown resource URI "${uri}". Available URIs: ${available}`
-            );
-          }
-
-          // READ-ONLY: Load resource data from cached JSON
-          const data = await loadJsonData<unknown>(filename);
-
-          // If no filter, return the full dataset
-          if (!filter || Object.keys(filter).length === 0) {
-            return success(data);
-          }
-
-          // Apply filter to array resources
-          if (Array.isArray(data)) {
-            const filtered = data.filter((entry) =>
-              matchesFilter(entry as Record<string, unknown>, filter)
-            );
-            if (filtered.length === 0) {
+          try {
+            const filename = URI_TO_FILE[uri];
+            if (!filename) {
+              const available = Object.keys(URI_TO_FILE).join(", ");
               return error(
-                "NO_MATCH",
-                `No entries matched the filter ${JSON.stringify(filter)} in resource "${uri}".`
+                "INVALID_URI",
+                `Unknown resource URI "${uri}". Available URIs: ${available}`
               );
             }
-            return success(filtered);
-          }
 
-          // For object resources, attempt to filter nested properties
-          if (typeof data === "object" && data !== null) {
-            const obj = data as Record<string, unknown>;
-            // If the object has an "entities" key (like index.json), filter within it
-            if ("entities" in obj && typeof obj.entities === "object") {
-              const entities = obj.entities as Record<string, Record<string, unknown>>;
-              const filtered: Record<string, Record<string, unknown>> = {};
-              for (const [id, entry] of Object.entries(entities)) {
-                if (matchesFilter(entry, filter)) {
-                  filtered[id] = entry;
-                }
-              }
-              if (Object.keys(filtered).length === 0) {
+            // READ-ONLY: Load resource data from cached JSON
+            const data = await loadJsonData<unknown>(filename);
+
+            // If no filter, return the full dataset
+            if (!filter || Object.keys(filter).length === 0) {
+              return success(data);
+            }
+
+            // Apply filter to array resources
+            if (Array.isArray(data)) {
+              const filtered = data.filter((entry) =>
+                matchesFilter(entry as Record<string, unknown>, filter)
+              );
+              if (filtered.length === 0) {
                 return error(
                   "NO_MATCH",
                   `No entries matched the filter ${JSON.stringify(filter)} in resource "${uri}".`
                 );
               }
-              return success({ entities: filtered });
+              return success(filtered);
             }
-            // Otherwise return the whole object (e.g., system_overview)
-            return success(data);
-          }
 
-          return success(data);
+            // For object resources, attempt to filter nested properties
+            if (typeof data === "object" && data !== null) {
+              const obj = data as Record<string, unknown>;
+              // If the object has an "entities" key (like index.json), filter within it
+              if ("entities" in obj && typeof obj.entities === "object") {
+                const entities = obj.entities as Record<string, Record<string, unknown>>;
+                const filtered: Record<string, Record<string, unknown>> = {};
+                for (const [id, entry] of Object.entries(entities)) {
+                  if (matchesFilter(entry, filter)) {
+                    filtered[id] = entry;
+                  }
+                }
+                if (Object.keys(filtered).length === 0) {
+                  return error(
+                    "NO_MATCH",
+                    `No entries matched the filter ${JSON.stringify(filter)} in resource "${uri}".`
+                  );
+                }
+                return success({ entities: filtered });
+              }
+              // Otherwise return the whole object (e.g., system_overview)
+              return success(data);
+            }
+
+            return success(data);
+          } catch (err) {
+            logger.error(
+              `query_resource unexpected failure for uri="${uri}"${filter ? `, filter=${JSON.stringify(filter)}` : ""}: ${err instanceof Error ? err.message : String(err)}`
+            );
+            throw err;
+          }
         }
       );
 
