@@ -1162,23 +1162,70 @@ class CognitiveEngine {
 
   /**
    * Check resolved tensions for recheck_ttl expiry.
-   * If a resolved tension's recheck window has passed,
-   * and there's new contradictory evidence (TODO: hook),
-   * it could be reactivated. For now just decrements recheck_ttl.
+   *
+   * Contradictory-evidence hook (F-02):
+   *   While a resolved tension's recheck window is still open
+   *   (recheck_ttl > 0), scan currently active tensions for any signal that
+   *   overlaps with the resolved tension's original entities AND shares its
+   *   domain. Such an overlap means the system has independently re-raised
+   *   the same concern after we marked it resolved — strong evidence the
+   *   resolution was premature. The original tension is restored to the
+   *   active list (with a fresh TTL and a small urgency bump) and removed
+   *   from the resolved archive. Reactivations are logged.
+   *
+   *   Resolutions that are explicitly `wont_fix` are NOT reactivated — the
+   *   user accepted the risk. `confirmed_fixed` and `false_positive` may be
+   *   reactivated.
    */
   async processRecheckWindows(): Promise<number> {
     const tensions = await this.loadTensions();
-    if (!tensions.resolved_tensions) return 0;
+    if (!tensions.resolved_tensions || tensions.resolved_tensions.length === 0) {
+      return 0;
+    }
 
+    const activeSignals = tensions.signals.filter((s) => !s.resolved);
     let reactivated = 0;
     const stillResolved: ResolvedTension[] = [];
 
     for (const resolved of tensions.resolved_tensions) {
-      if (resolved.recheck_ttl !== undefined && resolved.recheck_ttl > 0) {
-        resolved.recheck_ttl--;
-        // When recheck_ttl hits 0, the window closes. For now just keep it.
-        // Future: hook to check if new evidence contradicts the resolution.
+      // Closed window — keep archived as-is.
+      if (resolved.recheck_ttl === undefined || resolved.recheck_ttl <= 0) {
+        stillResolved.push(resolved);
+        continue;
       }
+
+      const original = resolved.original;
+      const originalEntities = new Set(original.entities ?? []);
+      const contradicted =
+        resolved.resolution_type !== "wont_fix" &&
+        activeSignals.some(
+          (sig) =>
+            sig.id !== original.id &&
+            sig.domain === original.domain &&
+            (sig.entities ?? []).some((e) => originalEntities.has(e))
+        );
+
+      if (contradicted) {
+        // Reactivate: restore the original signal with refreshed TTL and a
+        // small urgency bump so the dreamer notices it on the next cycle.
+        const reborn: TensionSignal = {
+          ...original,
+          attempted: false,
+          resolved: false,
+          ttl: this.tensionConfig.default_tension_ttl,
+          urgency: Math.min(1, (original.urgency ?? 0.5) + 0.1),
+          last_seen: new Date().toISOString(),
+        };
+        tensions.signals.push(reborn);
+        reactivated++;
+        logger.info(
+          `Tension reactivated by contradictory evidence: "${original.id}" ` +
+            `(domain=${original.domain}, recheck_ttl was ${resolved.recheck_ttl})`
+        );
+        continue; // Drop from resolved archive.
+      }
+
+      resolved.recheck_ttl--;
       stillResolved.push(resolved);
     }
 

@@ -26,8 +26,11 @@ test('Slice 5 next pass adds implicit entity detection and capping', () => {
   const source = readFileSync(join(process.cwd(), 'src', 'chat-panel.ts'), 'utf8');
   assert.match(source, /MAX_ENTITY_LINKS_PER_MESSAGE = 100/);
   assert.match(source, /private _detectImplicitEntities\(content: string\): ImplicitEntityDetectionResult/);
-  assert.match(source, /Implicit entity references detected:/);
-  assert.match(source, /Entity link cap reached/);
+  // Implicit-entity notice text and entity-link cap message live in the extracted
+  // pure helpers module after the chat-panel.ts split (F-06).
+  const helpers = readFileSync(join(process.cwd(), 'src', 'chat-panel', 'helpers.ts'), 'utf8');
+  assert.match(helpers, /Implicit entity references detected:/);
+  assert.match(helpers, /Entity link cap reached/);
 });
 
 test('Slice 5 next pass adds implicit entity notice styling', () => {

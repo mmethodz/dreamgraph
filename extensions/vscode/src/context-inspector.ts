@@ -300,6 +300,44 @@ export class ContextInspector implements vscode.Disposable {
     this._contextChannel.clear();
   }
 
+  /**
+   * Append a one-off informational line to the DreamGraph Context channel.
+   * Used for ad-hoc diagnostics like tool-selection rationale.
+   */
+  appendContextLine(line: string): void {
+    const ts = new Date().toISOString();
+    this._contextChannel.appendLine(`[${ts}] ${line}`);
+  }
+
+  /**
+   * Log a structured LLM request-budget summary to the DreamGraph Context channel.
+   * Called from the architect-llm budget guard before every outbound LLM call.
+   */
+  logRequestBudget(summary: {
+    callsite: string;
+    model: string;
+    inputChars: number;
+    approxTokens: number;
+    sections: Array<{ name: string; chars: number; approxTokens: number }>;
+    warn?: boolean;
+  }): void {
+    const ts = new Date().toISOString();
+    const flag = summary.warn ? "⚠ OVERSIZED" : "ok";
+    this._contextChannel.appendLine("");
+    this._contextChannel.appendLine(
+      `[${ts}] llm_input_budget [${flag}] callsite=${summary.callsite} model=${summary.model}`,
+    );
+    this._contextChannel.appendLine(
+      `  total: ${summary.inputChars.toLocaleString()} chars (~${summary.approxTokens.toLocaleString()} tokens)`,
+    );
+    this._contextChannel.appendLine(`  top sections by size:`);
+    for (const s of summary.sections) {
+      this._contextChannel.appendLine(
+        `    - ${s.name.padEnd(28)} ${s.chars.toLocaleString().padStart(10)} chars  (~${s.approxTokens.toLocaleString()} tok)`,
+      );
+    }
+  }
+
   /* ---- Instance Status (§2.6.1) ---- */
 
   /**

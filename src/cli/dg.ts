@@ -43,7 +43,7 @@ import { cmdSchedule } from "./commands/schedule.js";
 
 function printUsage(): void {
   console.log(`
-DreamGraph CLI — Instance Management (v7.1 El Alarife)
+DreamGraph CLI — Instance Management (v8.0 Vishnu)
 
 Usage:
   dg <command> [options]
@@ -77,7 +77,7 @@ Run 'dg <command> --help' for command-specific options.
 }
 
 function printVersion(): void {
-  console.log("DreamGraph CLI v7.1.0 (El Alarife)");
+  console.log("DreamGraph CLI v8.0.0 (Vishnu)");
 }
 
 /* ------------------------------------------------------------------ */

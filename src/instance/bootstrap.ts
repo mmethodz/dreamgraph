@@ -18,6 +18,7 @@ import { config } from "../config/config.js";
 import { dataPath } from "../utils/paths.js";
 import { logger } from "../utils/logger.js";
 import { loadJsonArray } from "../utils/cache.js";
+import { hasSchemaField } from "../utils/json-store.js";
 import { getActiveScope } from "./lifecycle.js";
 import { runScanProject } from "../tools/scan-project.js";
 import { recordADR, getADRCount } from "../tools/adr-historian.js";
@@ -186,13 +187,13 @@ export async function discoverAndRecordADRs(repoName: string): Promise<number> {
 
   // Load freshly created seed data
   const features = (await loadJsonArray<Feature>("features.json")).filter(
-    (f) => f.id && !("_schema" in (f as unknown as Record<string, unknown>)),
+    (f) => f.id && !hasSchemaField(f),
   );
   const workflows = (await loadJsonArray<Workflow>("workflows.json")).filter(
-    (w) => w.id && !("_schema" in (w as unknown as Record<string, unknown>)),
+    (w) => w.id && !hasSchemaField(w),
   );
   const dataModels = (await loadJsonArray<DataModelEntity>("data_model.json")).filter(
-    (d) => d.id && !("_schema" in (d as unknown as Record<string, unknown>)),
+    (d) => d.id && !hasSchemaField(d),
   );
 
   if (features.length === 0 && workflows.length === 0 && dataModels.length === 0) {

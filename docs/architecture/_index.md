@@ -46,3 +46,11 @@
 | ✅ ADR-042 | [Policy Management Framework](adr-042.md) | accepted | 2026-04-18T23:12:58.826Z | system |
 | ✅ ADR-043 | [Tool Management Layer Implementation](adr-043.md) | accepted | 2026-04-18T23:12:58.848Z | system |
 | ✅ ADR-044 | [Architect chat must render structured execution artifacts eagerly and normalize multimodal attachments per provider](adr-044.md) | accepted | 2026-04-19T21:39:15.402Z | collaborative |
+| ✅ ADR-045 | [Tension evidence must preserve semantic anchors as primary and treat line numbers as optional hints](adr-045.md) | accepted | 2026-04-20T11:31:41.190Z | collaborative |
+| ✅ ADR-046 | [Semantic anchors are canonical; positional coordinates are advisory only](adr-046.md) | accepted | 2026-04-20T20:37:04.091Z | collaborative |
+| ✅ ADR-047 | [Two-pass graph context fetch with confidence-gated direct feature refinement](adr-047.md) | accepted | 2026-04-20T21:27:56.110Z | collaborative |
+| ✅ ADR-048 | [Keep rewritten ContextBuilder as default for VS Code context assembly](adr-048.md) | accepted | 2026-04-21T01:49:29.527Z | collaborative |
+| ✅ ADR-049 | [LLM request timeout handling in VS Code architect chat](adr-049.md) | accepted | 2026-04-21T22:00:14.862Z | collaborative |
+| ✅ ADR-050 | [Transport-layer exception normalization remains silent; logging occurs at context-rich boundaries](adr-050.md) | accepted | 2026-04-22T08:02:01.386Z | collaborative |
+| ✅ ADR-051 | [Programmatic config and seed-data fallbacks are emergency stubs, not feature copies](adr-051.md) | accepted | 2026-04-24T00:00:00.000Z | collaborative |
+| ✅ ADR-052 | [Normalizer scoring yields to the event loop via setImmediate batching](adr-052.md) | accepted | 2026-04-24T00:00:00.000Z | collaborative |

@@ -149,7 +149,9 @@ async function startHTTP(port: number): Promise<void> {
     const url = new URL(req.url ?? "/", `http://localhost:${port}`);
 
     // ---- /mcp — the single Streamable HTTP endpoint ----------------
-    if (url.pathname === "/mcp") {
+    // Accept both "/mcp" and "/mcp/" so clients (e.g. VS Code Copilot Chat)
+    // that append a trailing slash to the configured URL still resolve.
+    if (url.pathname === "/mcp" || url.pathname === "/mcp/") {
       const sessionId = req.headers["mcp-session-id"] as string | undefined;
 
       // Existing session? Route to its transport.

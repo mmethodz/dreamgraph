@@ -627,6 +627,12 @@ export function registerCognitiveTools(server: McpServer): void {
           // Step 1b: Apply tension decay (urgency fades, TTL decrements)
           const tensionDecayResult = await engine.applyTensionDecay();
 
+          // Step 1c: Process recheck windows on resolved tensions.
+          // Reactivates resolved tensions when contradictory evidence
+          // appears (a new active signal overlaps the original entities
+          // and shares its domain). See engine.processRecheckWindows.
+          const tensionsReactivated = await engine.processRecheckWindows();
+
           // Step 2: Dream (with duplicate suppression built-in)
           const dreamResult = await dream(strat, maxD);
 
@@ -744,6 +750,7 @@ export function registerCognitiveTools(server: McpServer): void {
             tension_signals_resolved: tensionsResolved,
             tensions_expired: tensionDecayResult.expired,
             tensions_decayed: tensionDecayResult.decayed,
+            tensions_reactivated: tensionsReactivated,
           };
           await engine.appendHistoryEntry(historyEntry);
 
@@ -1678,9 +1685,37 @@ export function registerCognitiveTools(server: McpServer): void {
         .optional()
         .describe("Entity IDs affected by this event (for scoping). Default: []."),
       payload: z
-        .record(z.string(), z.unknown())
+        .object({
+          /** Free-text summary when no structured fields apply. */
+          summary: z.string().optional(),
+          /** Git webhook: branch / commit / repo. */
+          ref: z.string().optional(),
+          commit: z.string().optional(),
+          repo: z.string().optional(),
+          /** CI/CD: workflow + run + status. */
+          workflow: z.string().optional(),
+          run_id: z.string().optional(),
+          status: z.string().optional(),
+          /** Runtime anomaly: metric + value + threshold. */
+          metric: z.string().optional(),
+          value: z.number().optional(),
+          threshold: z.number().optional(),
+          /** Tension threshold: tension id + urgency. */
+          tension_id: z.string().optional(),
+          urgency: z.number().optional(),
+          /** Federation import: source instance + archetype id. */
+          source_instance: z.string().optional(),
+          archetype_id: z.string().optional(),
+          /** Manual: actor + reason. */
+          actor: z.string().optional(),
+          reason: z.string().optional(),
+        })
+        .strict()
         .optional()
-        .describe("Arbitrary event payload data."),
+        .describe(
+          "Structured event payload. All fields optional; pick those that apply to your `source`. " +
+            "Use `summary` for free-text when no structured field fits. Strict shape — extra keys rejected."
+        ),
     },
     async ({ source, severity, description: desc, affected_entities, payload }) => {
       logger.info(`dispatch_cognitive_event tool called: source=${source}, severity=${severity}`);

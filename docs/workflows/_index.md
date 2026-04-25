@@ -8,7 +8,7 @@
 | workflow_project_onboarding | Project Onboarding and Enrichment |  | 5 |
 | workflow_ui_registration_flow | Semantic UI Registration Flow |  | 5 |
 | workflow_scheduled_cognitive_execution | Scheduled Cognitive Execution |  | 5 |
-| workflow_vscode_assisted_reasoning | VS Code Assisted Reasoning |  | 5 |
+| workflow_vscode_assisted_reasoning | VS Code Assisted Reasoning |  | 6 |
 | startup_process | Startup Process | Server launch | 3 |
 | data_loading_process | Data Loading Process | Server initialization | 2 |
 | user_interaction_flow | User Interaction Flow | User command input | 3 |
@@ -118,3 +118,16 @@
 | compliance_framework | Compliance Framework | unknown | 0 |
 | security_ra_processing | Security Risk Assessment Processing | unknown | 0 |
 | security_workflow_integration | Security Workflow Integration | unknown | 0 |
+| policy_enforcement_process | Policy Enforcement Process | unknown | 0 |
+| security_compliance_pipeline | Security Compliance Pipeline | unknown | 0 |
+| security_workflow_framework | Security Workflow Framework | unknown | 0 |
+| permission_compliance_pipeline | Permission Compliance Pipeline | unknown | 0 |
+| security_compliance_monitoring | Security Compliance Monitoring | unknown | 0 |
+| error_handling_strategy | Error Handling Strategy | unknown | 0 |
+| cognitive_interface | Cognitive Interface Layer | unknown | 0 |
+| cognitive_data_pipeline | Cognitive Data Pipeline | unknown | 0 |
+| cognitive_enrichment_process | Cognitive Enrichment Process | unknown | 0 |
+| cognitive_processing | Cognitive Processing Hub | unknown | 0 |
+| user_navigation_hub | User Navigation Hub | unknown | 0 |
+| policy_audit_process | Policy Audit Process | unknown | 0 |
+| tool_permission_audit_process | Tool Permission Audit Process | unknown | 0 |

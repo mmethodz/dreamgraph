@@ -565,7 +565,7 @@ export function registerDisciplineTools(server: McpServer): void {
     },
   );
 
-  logger.info("Registered 9 discipline execution tools");
+  logger.info("Registered 10 discipline execution tools");
 }
 
 // ---------------------------------------------------------------------------

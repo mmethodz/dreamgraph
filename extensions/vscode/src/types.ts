@@ -260,6 +260,9 @@ export type ContextEvidenceKind =
   | "temporal"
   | "data_model"
   | "cognitive_status"
+  | "import_contract"
+  | "type_contract"
+  | "local_convention"
   | "note";
 
 export interface SemanticAnchor {
@@ -347,6 +350,8 @@ export interface ReasoningPacket {
     budget: number;
     reserved: number;
   };
+  contextText: string;
+  safetyWarnings: string[];
   instrumentation?: ContextInstrumentation;
 }
 

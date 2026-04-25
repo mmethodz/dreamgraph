@@ -65,11 +65,15 @@ export class InstanceScope {
   /** Additional repository paths this instance may read. */
   readonly repos: Record<string, string>;
 
+  /** Human-readable name (mutable in the registry; cached here for display). */
+  readonly name?: string;
+
   constructor(
     uuid: string,
     masterDir: string,
     projectRoot: string | null = null,
     repos: Record<string, string> = {},
+    name?: string,
   ) {
     this.uuid = uuid;
     this.masterDir = resolve(masterDir);
@@ -81,6 +85,7 @@ export class InstanceScope {
     this.exportsDir = resolve(masterDir, uuid, "exports");
     this.projectRoot = projectRoot ? resolve(projectRoot) : null;
     this.repos = repos;
+    this.name = name;
   }
 
   /**
@@ -96,6 +101,7 @@ export class InstanceScope {
       masterDir,
       inst.project_root,
       repos ?? {},
+      inst.name,
     );
   }
 

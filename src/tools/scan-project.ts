@@ -40,6 +40,19 @@ import { dream } from "../cognitive/dreamer.js";
 import { normalize } from "../cognitive/normalizer.js";
 import { engine } from "../cognitive/engine.js";
 import { discoverAndRecordADRs, isFreshInstance, scheduleFollowUpDreams } from "../instance/bootstrap.js";
+import type { ProjectScan, ScannedFile } from "./scan-types.js";
+import {
+  stripTemplateStubs,
+  mergeById,
+  extractJsonArray,
+  ensureStringArray,
+  sanitizeEntry,
+} from "./sanitize-entity.js";
+import {
+  generateStructuralFeatures,
+  generateStructuralWorkflows,
+  generateStructuralDataModel,
+} from "./structural-generators.js";
 import type {
   Feature,
   Workflow,
@@ -99,24 +112,10 @@ const UI_FILE_PATTERNS = [
 // Source file scanning
 // ---------------------------------------------------------------------------
 
-interface ScannedFile {
-  abs: string;
-  rel: string;
-  name: string;
-  ext: string;
-  dirParts: string[];
-  size: number;
-}
-
-interface ProjectScan {
-  repoName: string;
-  repoRoot: string;
-  technology: string;
-  files: ScannedFile[];
-  manifestContent: Record<string, string>;
-  uiFiles: ScannedFile[];
-  topLevelDirs: string[];
-}
+// `ScannedFile` and `ProjectScan` are re-exported from `./scan-types.js`
+// (see imports above) so helper modules can consume them without circling
+// back to this orchestrator file.
+export type { ScannedFile, ProjectScan };
 
 async function detectTechnology(repoRoot: string): Promise<string> {
   const techs: string[] = [];
@@ -426,28 +425,10 @@ Aim for 10-25 data model entities.`,
 
 // ---------------------------------------------------------------------------
 // Seed data persistence (reused from enrich-seed-data patterns)
+//
+// Pure helpers (`stripTemplateStubs`, `mergeById`, `extractJsonArray`,
+// `ensureStringArray`, `sanitizeEntry`) live in `./sanitize-entity.js`.
 // ---------------------------------------------------------------------------
-
-function stripTemplateStubs<T>(arr: T[]): T[] {
-  return arr.filter((e) => {
-    const obj = e as Record<string, unknown>;
-    return !("_schema" in obj) && !("_fields" in obj) && !("_note" in obj);
-  });
-}
-
-function mergeById<T>(existing: T[], incoming: T[]): { merged: T[]; inserted: number; updated: number } {
-  const map = new Map<string, T>();
-  for (const e of existing) map.set((e as Record<string, unknown>).id as string, e);
-  let inserted = 0;
-  let updated = 0;
-  for (const entry of incoming) {
-    const id = (entry as Record<string, unknown>).id as string;
-    if (map.has(id)) updated++;
-    else inserted++;
-    map.set(id, entry);
-  }
-  return { merged: [...map.values()], inserted, updated };
-}
 
 async function rebuildIndex(): Promise<number> {
   const features = await loadJsonArray<Feature>("features.json");
@@ -477,78 +458,9 @@ async function writeSeed(filename: string, data: unknown): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// LLM response parsing
+// LLM response parsing helpers — moved to ./sanitize-entity.js
+// (`extractJsonArray`, `ensureStringArray`, `sanitizeEntry`).
 // ---------------------------------------------------------------------------
-
-function extractJsonArray(text: string): unknown[] {
-  // Strip markdown code fences if present (```json ... ```)
-  const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const cleaned = fenceMatch ? fenceMatch[1].trim() : text.trim();
-
-  // Try direct parse first
-  try {
-    const parsed = JSON.parse(cleaned);
-    if (Array.isArray(parsed)) return parsed;
-
-    // OpenAI json_object mode wraps arrays in an object like { "features": [...] }
-    // Walk every top-level value and return the first array we find.
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      for (const val of Object.values(parsed as Record<string, unknown>)) {
-        if (Array.isArray(val) && val.length > 0) return val;
-      }
-    }
-    return [];
-  } catch { /* try extraction */ }
-
-  // Extract the largest JSON array from mixed text (greedy outer brackets)
-  const arrayMatch = cleaned.match(/\[[\s\S]*\]/);
-  if (arrayMatch) {
-    try {
-      const parsed = JSON.parse(arrayMatch[0]);
-      if (Array.isArray(parsed)) return parsed;
-    } catch {
-      // The greedy match may have grabbed too much — try the first balanced array
-      try {
-        const start = cleaned.indexOf("[");
-        if (start !== -1) {
-          let depth = 0;
-          for (let i = start; i < cleaned.length; i++) {
-            if (cleaned[i] === "[") depth++;
-            else if (cleaned[i] === "]") depth--;
-            if (depth === 0) {
-              const candidate = cleaned.slice(start, i + 1);
-              const arr = JSON.parse(candidate);
-              if (Array.isArray(arr)) return arr;
-              break;
-            }
-          }
-        }
-      } catch { /* give up */ }
-    }
-  }
-
-  return [];
-}
-
-function ensureStringArray(val: unknown): string[] {
-  if (Array.isArray(val)) return val.filter(v => typeof v === "string");
-  return [];
-}
-
-function sanitizeEntry(raw: Record<string, unknown>, repoName: string): Record<string, unknown> {
-  // Ensure required fields exist and have sane values
-  if (!raw.id || typeof raw.id !== "string") return raw;
-  if (!raw.name || typeof raw.name !== "string") raw.name = String(raw.id).replace(/_/g, " ");
-  if (!raw.description) raw.description = "";
-  if (!raw.source_repo) raw.source_repo = repoName;
-  if (!raw.status) raw.status = "active";
-  if (!raw.domain) raw.domain = "core";
-  raw.tags = ensureStringArray(raw.tags);
-  raw.keywords = ensureStringArray(raw.keywords);
-  raw.source_files = ensureStringArray(raw.source_files);
-  if (!raw.links) raw.links = [];
-  return raw;
-}
 
 // ---------------------------------------------------------------------------
 // Result type
@@ -1091,132 +1003,6 @@ export function registerScanProjectTool(server: McpServer): void {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Structural fallback generators (no LLM)
-// ---------------------------------------------------------------------------
-
-function toSnakeCase(str: string): string {
-  return str
-    .replace(/[^a-zA-Z0-9]/g, "_")
-    .replace(/([a-z])([A-Z])/g, "$1_$2")
-    .replace(/_+/g, "_")
-    .replace(/^_|_$/g, "")
-    .toLowerCase();
-}
-
-function toTitleCase(str: string): string {
-  return str.replace(/[-_]/g, " ").replace(/\b\w/g, c => c.toUpperCase());
-}
-
-function inferDomain(dirParts: string[]): string {
-  const hints: Record<string, string> = {
-    auth: "authentication", login: "authentication",
-    api: "api", server: "api", routes: "api", controller: "api",
-    ui: "ui", component: "ui", view: "ui", page: "ui",
-    model: "data", schema: "data", database: "data", migration: "data",
-    util: "infrastructure", config: "infrastructure", lib: "infrastructure",
-    tool: "tooling", tools: "tooling",
-    plugin: "plugin-system", extension: "plugin-system",
-    cli: "cli", command: "cli",
-    test: "testing", spec: "testing",
-  };
-  for (const part of dirParts) {
-    const lower = part.toLowerCase();
-    for (const [hint, domain] of Object.entries(hints)) {
-      if (lower.includes(hint)) return domain;
-    }
-  }
-  return "core";
-}
-
-function generateStructuralFeatures(scan: ProjectScan): Record<string, unknown>[] {
-  // Group files by top-level + second-level directory
-  const groups = new Map<string, ScannedFile[]>();
-  for (const f of scan.files) {
-    const key = f.dirParts.slice(0, 2).join("/") || f.name;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key)!.push(f);
-  }
-
-  const entries: Record<string, unknown>[] = [];
-  for (const [groupPath, files] of groups) {
-    const id = toSnakeCase(`${scan.repoName}_${groupPath}`);
-    const name = toTitleCase(groupPath.split("/").pop() ?? groupPath);
-    entries.push({
-      id,
-      name,
-      description: `${name} — ${files.length} source file(s) in ${groupPath}/`,
-      source_repo: scan.repoName,
-      source_files: files.slice(0, 10).map(f => f.rel),
-      status: "active",
-      category: inferDomain(files[0]?.dirParts ?? []),
-      tags: [scan.technology.split(",")[0]?.trim().toLowerCase() ?? "unknown"],
-      domain: inferDomain(files[0]?.dirParts ?? []),
-      keywords: [...new Set(files.slice(0, 5).map(f => path.basename(f.name, f.ext).toLowerCase()))],
-      links: [],
-    });
-  }
-  return entries;
-}
-
-function generateStructuralWorkflows(scan: ProjectScan): Record<string, unknown>[] {
-  // Basic workflow detection from directory patterns
-  const workflowPatterns = [/route/i, /handler/i, /middleware/i, /hook/i, /pipeline/i, /flow/i, /controller/i, /command/i];
-  const entries: Record<string, unknown>[] = [];
-  const seen = new Set<string>();
-
-  for (const f of scan.files) {
-    const dir = f.dirParts.join("/");
-    if (seen.has(dir)) continue;
-    if (workflowPatterns.some(p => p.test(dir) || p.test(f.name))) {
-      seen.add(dir);
-      const id = toSnakeCase(`${scan.repoName}_${dir}_flow`);
-      entries.push({
-        id,
-        name: `${toTitleCase(f.dirParts[f.dirParts.length - 1] ?? f.name)} Flow`,
-        description: `Workflow detected in ${dir}/`,
-        trigger: `Source: ${f.rel}`,
-        source_repo: scan.repoName,
-        source_files: scan.files.filter(sf => sf.dirParts.join("/") === dir).slice(0, 10).map(sf => sf.rel),
-        domain: inferDomain(f.dirParts),
-        keywords: f.dirParts.map(d => d.toLowerCase()),
-        status: "active",
-        steps: [],
-        links: [],
-      });
-    }
-  }
-  return entries;
-}
-
-function generateStructuralDataModel(scan: ProjectScan): Record<string, unknown>[] {
-  const modelPatterns = [/model/i, /schema/i, /entity/i, /types?$/i, /interface/i, /contract/i, /dto/i];
-  const entries: Record<string, unknown>[] = [];
-  const seen = new Set<string>();
-
-  for (const f of scan.files) {
-    const dir = f.dirParts.join("/");
-    const nameNoExt = path.basename(f.name, f.ext);
-    if (seen.has(dir + nameNoExt)) continue;
-    if (modelPatterns.some(p => p.test(dir) || p.test(nameNoExt))) {
-      seen.add(dir + nameNoExt);
-      const id = toSnakeCase(`${scan.repoName}_${dir}_${nameNoExt}`);
-      entries.push({
-        id,
-        name: toTitleCase(nameNoExt),
-        description: `Data model detected at ${f.rel}`,
-        table_name: id,
-        storage: "unknown",
-        source_repo: scan.repoName,
-        source_files: [f.rel],
-        domain: inferDomain(f.dirParts),
-        keywords: [nameNoExt.toLowerCase(), ...f.dirParts.map(d => d.toLowerCase())],
-        status: "active",
-        key_fields: [],
-        relationships: [],
-        links: [],
-      });
-    }
-  }
-  return entries;
-}
+// Structural fallback generators (toSnakeCase / toTitleCase / inferDomain /
+// generateStructuralFeatures / generateStructuralWorkflows / generateStructuralDataModel)
+// have moved to ./structural-generators.js

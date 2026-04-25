@@ -155,6 +155,119 @@ export function getCardRendererScript(): string {
 
       window.renderEnvelope = renderEnvelope;
 
+      // Repair common JSON quirks that providers (esp. Claude w/ extended thinking)
+      // emit and that strict JSON.parse rejects.
+      function repairJsonish(src) {
+        var s = String(src || '');
+        // Normalize common problem characters
+        s = s.replace(/\\u00A0/g, ' ');             // NBSP -> space
+        s = s.replace(/[\\u201C\\u201D\\u201E\\u201F]/g, '"'); // smart double quotes
+        s = s.replace(/[\\u2018\\u2019\\u201A\\u201B]/g, "'"); // smart single quotes
+        s = s.replace(/[\\u2013\\u2014]/g, '-');     // en/em dash -> hyphen (only if inside strings; harmless elsewhere for envelope)
+        // Strip // line comments (but not '://' inside strings — naive but safe enough for envelope payloads)
+        s = s.replace(/(^|[^:])\\/\\/[^\\n]*/g, '$1');
+        // Strip /* */ block comments
+        s = s.replace(/\\/\\*[\\s\\S]*?\\*\\//g, '');
+        // Trailing commas before } or ]
+        s = s.replace(/,\\s*([}\\]])/g, '$1');
+        return s.trim();
+      }
+
+      function isEnvelopeShape(obj) {
+        return obj && typeof obj === 'object' && typeof obj.summary === 'string' &&
+          ('goal_status' in obj || 'recommended_next_steps' in obj || 'progress_status' in obj);
+      }
+
+      function tryParseEnvelope(src) {
+        var raw = String(src || '').trim();
+        if (!raw) return null;
+        try {
+          var direct = JSON.parse(raw);
+          if (isEnvelopeShape(direct)) return direct;
+        } catch (_e) { /* fall through */ }
+        try {
+          var repaired = JSON.parse(repairJsonish(raw));
+          if (isEnvelopeShape(repaired)) return repaired;
+        } catch (_e2) { /* give up */ }
+        return null;
+      }
+
+      // Find a balanced { ... } substring starting at index i. Respects string literals.
+      function findBalancedObject(text, startIdx) {
+        var depth = 0, inStr = false, esc = false, quote = '';
+        for (var i = startIdx; i < text.length; i++) {
+          var ch = text[i];
+          if (inStr) {
+            if (esc) { esc = false; continue; }
+            if (ch === '\\\\') { esc = true; continue; }
+            if (ch === quote) { inStr = false; }
+            continue;
+          }
+          if (ch === '"' || ch === "'") { inStr = true; quote = ch; continue; }
+          if (ch === '{') { depth++; continue; }
+          if (ch === '}') {
+            depth--;
+            if (depth === 0) return text.slice(startIdx, i + 1);
+          }
+        }
+        return null;
+      }
+
+      // Normalize any envelope-shaped JSON in content into a clean ` + '```json' + ` fenced block
+      // that markdown-it will reliably tokenize. Handles fenced (any case/indent) and bare trailing JSON.
+      window.normalizeEnvelopeFence = function(content) {
+        var text = String(content || '');
+        if (!text) return text;
+
+        // 1) Fenced ` + '```json' + ` blocks (case-insensitive, allow leading whitespace, optional info string).
+        var fenceRe = /^[ \\t]*` + '```' + `[ \\t]*([A-Za-z]+)?[^\\n]*\\n([\\s\\S]*?)\\n[ \\t]*` + '```' + `[ \\t]*$/gm;
+        text = text.replace(fenceRe, function(match, lang, body) {
+          var langLower = String(lang || '').toLowerCase();
+          if (langLower && langLower !== 'json') return match;
+          var env = tryParseEnvelope(body);
+          if (!env) return match;
+          return '\\n\\n' + '` + '```' + `json\\n' + JSON.stringify(env, null, 2) + '\\n' + '` + '```' + `' + '\\n\\n';
+        });
+
+        // 2) Bare top-level JSON object containing "summary" — only consider if not already inside a fence.
+        // Quick guard: skip if a recognized envelope fence is now present.
+        if (/` + '```' + `json\\s*\\n\\s*\\{[\\s\\S]*?"summary"/i.test(text)) {
+          return text;
+        }
+        var summaryIdx = text.search(/"summary"\\s*:/);
+        if (summaryIdx >= 0) {
+          // Walk backward to find the enclosing '{' at depth 0.
+          var braceStart = -1, depth = 0, inStr = false, esc = false, quote = '';
+          for (var j = summaryIdx; j >= 0; j--) {
+            var ch = text[j];
+            if (inStr) {
+              if (esc) { esc = false; continue; }
+              if (ch === '\\\\') { esc = true; continue; }
+              if (ch === quote) { inStr = false; }
+              continue;
+            }
+            if (ch === '"' || ch === "'") { inStr = true; quote = ch; continue; }
+            if (ch === '}') depth++;
+            else if (ch === '{') {
+              if (depth === 0) { braceStart = j; break; }
+              depth--;
+            }
+          }
+          if (braceStart >= 0) {
+            var candidate = findBalancedObject(text, braceStart);
+            if (candidate) {
+              var env2 = tryParseEnvelope(candidate);
+              if (env2) {
+                var before = text.slice(0, braceStart).replace(/[ \\t]+$/, '');
+                var after = text.slice(braceStart + candidate.length).replace(/^[ \\t]+/, '');
+                text = before + '\\n\\n' + '` + '```' + `json\\n' + JSON.stringify(env2, null, 2) + '\\n' + '` + '```' + `' + '\\n\\n' + after;
+              }
+            }
+          }
+        }
+        return text;
+      };
+
       window.registerCardFencePlugin = function(md) {
         if (!md || typeof md.renderer !== 'object') return;
         const defaultFence = md.renderer.rules.fence || function(tokens, idx, options, env, self) {
@@ -168,14 +281,9 @@ export function getCardRendererScript(): string {
 
           // Handle structured JSON envelopes from DreamGraph
           if (lang === 'json') {
-            try {
-              const parsed = JSON.parse(token.content || '');
-              if (parsed && typeof parsed === 'object' && typeof parsed.summary === 'string' &&
-                  ('goal_status' in parsed || 'recommended_next_steps' in parsed)) {
-                return renderEnvelope(parsed);
-              }
-            } catch (_e) {
-              // Not valid JSON or not an envelope — fall through
+            var envParsed = tryParseEnvelope(token.content || '');
+            if (envParsed) {
+              return renderEnvelope(envParsed);
             }
             return defaultFence(tokens, idx, options, env, self);
           }

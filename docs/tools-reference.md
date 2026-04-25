@@ -1,6 +1,6 @@
 # DreamGraph Tools Reference
 
-> Complete catalog of all 68 MCP tools (28 cognitive + 31 general + 9 discipline) and 26 MCP resources.
+> Complete catalog of all 69 MCP tools (28 cognitive + 31 general + 10 discipline) and 26 MCP resources.
 
 The DreamGraph Architect actively calls these tools during conversations to build, query, enrich, and maintain the knowledge graph. Any MCP-compatible client can also invoke them directly.
 
@@ -152,7 +152,35 @@ Dispatch reactive event that may trigger scoped dream cycle.
 | `severity` | enum | yes | `critical`, `high`, `medium`, `low`, `info` |
 | `description` | string | yes | Event description |
 | `affected_entities` | string[] | no | Scoping entities |
-| `payload` | object | no | Arbitrary data |
+| `payload` | object | no | Structured payload (strict shape, all fields optional) — see below |
+
+**Payload fields** (all optional; pick what fits the `source`):
+
+| Field | Type | When to use |
+|-------|------|-------------|
+| `summary` | string | Free-text fallback when no structured field fits |
+| `ref`, `commit`, `repo` | string | `git_webhook` |
+| `workflow`, `run_id`, `status` | string | `ci_cd` |
+| `metric`, `value`, `threshold` | string / number | `runtime_anomaly` |
+| `tension_id`, `urgency` | string / number | `tension_threshold` |
+| `source_instance`, `archetype_id` | string | `federation_import` |
+| `actor`, `reason` | string | `manual` |
+
+**Examples**
+
+```jsonc
+// git_webhook
+{ "source": "git_webhook", "severity": "info", "description": "main updated",
+  "payload": { "ref": "refs/heads/main", "commit": "6ce383d", "repo": "dreamgraph" } }
+
+// runtime_anomaly
+{ "source": "runtime_anomaly", "severity": "high", "description": "Slow query",
+  "payload": { "metric": "query.p95_ms", "value": 2400, "threshold": 800 } }
+
+// manual
+{ "source": "manual", "severity": "info", "description": "Forcing recheck",
+  "payload": { "actor": "mika", "reason": "post-deploy validation" } }
+```
 
 #### `get_system_story`
 
@@ -731,6 +759,16 @@ Check whether a specific tool call is permitted in the current discipline phase.
 |-----------|------|----------|-------------|
 | `tool_name` | string | yes | Name of the MCP tool to check |
 | `target_file` | string | no | Target file path (for write tools — validates data protection) |
+
+### `discipline_record_tool_call`
+
+Register a tool call in the active discipline session's audit trail. Use immediately AFTER calling any truth/read tool during INGEST or AUDIT phases so the session tracker counts it toward mandatory tool requirements. Especially required for local extension tools (`read_local_file`, `query_api_surface`, `extract_api_surface`) that bypass normal MCP tool tracking.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `tool_name` | string | yes | Name of the tool that was called |
+| `result_summary` | string | yes | Brief summary of what the tool returned (1–2 sentences) |
+| `duration_ms` | number | no | Approximate duration in ms |
 
 ### `discipline_get_session`
 

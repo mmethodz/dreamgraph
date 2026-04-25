@@ -1,5 +1,5 @@
-/**
- * DreamGraph Architect LLM Provider — Layer 2 (Context Orchestration).
+﻿/**
+ * DreamGraph Architect LLM Provider â€” Layer 2 (Context Orchestration).
  *
  * Calls the Architect model (Anthropic, OpenAI, or Ollama) with
  * structured prompts assembled from the context orchestration layer.
@@ -88,6 +88,97 @@ export const OPENAI_MODELS = [
   "o3",
   "o4-mini",
 ];
+
+
+/* ------------------------------------------------------------------ */
+/*  Emergency input-budget brakes                                     */
+/* ------------------------------------------------------------------ */
+/**
+ * Hard ceilings on the serialized request body sent to any LLM provider.
+ * Exists to prevent runaway context regressions (e.g. accidental inclusion of
+ * generated docs/, full graph JSON, or unbounded chat history) from silently
+ * burning into the long-context pricing tier.
+ *
+ * If the budget is exceeded the request is aborted with a descriptive error
+ * BEFORE the network call — failing fast is cheaper than failing slowly.
+ *
+ * Tunable via the `dreamgraph.architect.maxRequestChars` setting; default is
+ * 320_000 chars (~80k tokens) which comfortably fits a fully-loaded
+ * Architect prompt + 20-turn history but rejects 300k-char accidents.
+ */
+const DEFAULT_MAX_REQUEST_CHARS = 320_000;
+/** Per-section warning threshold (chars). */
+const SECTION_WARN_CHARS = 80_000;
+
+/**
+ * Optional sink that receives structured budget summaries.
+ * Set by extension activation via `setRequestBudgetSink(inspector.logRequestBudget.bind(inspector))`
+ * so output appears in the "DreamGraph Context" output channel.
+ * Falls back to console.log/warn if no sink is registered.
+ */
+type RequestBudgetSink = (summary: {
+  callsite: string;
+  model: string;
+  inputChars: number;
+  approxTokens: number;
+  sections: Array<{ name: string; chars: number; approxTokens: number }>;
+  warn?: boolean;
+}) => void;
+let _budgetSink: RequestBudgetSink | undefined;
+export function setRequestBudgetSink(sink: RequestBudgetSink | undefined): void {
+  _budgetSink = sink;
+}
+
+function _logRequestBudget(callsite: string, model: string, body: Record<string, unknown>, serialized: string): void {
+  // Per-section breakdown: top-level keys + system + per-message char counts.
+  const sections: Array<{ name: string; chars: number; approxTokens: number }> = [];
+  const push = (name: string, content: unknown): void => {
+    const s = typeof content === 'string' ? content : JSON.stringify(content ?? '');
+    const chars = s.length;
+    sections.push({ name, chars, approxTokens: Math.ceil(chars / 4) });
+  };
+  if (typeof body.system === 'string') push('system', body.system);
+  const messages = (body as { messages?: unknown[] }).messages;
+  if (Array.isArray(messages)) {
+    messages.forEach((m, i) => {
+      const role = (m as { role?: string }).role ?? 'unknown';
+      push(`messages[${i}].${role}`, (m as { content?: unknown }).content);
+    });
+  }
+  const tools = (body as { tools?: unknown[] }).tools;
+  if (Array.isArray(tools)) push('tools', tools);
+
+  const inputChars = serialized.length;
+  const approxTokens = Math.ceil(inputChars / 4);
+  const oversizedSections = sections.filter((s) => s.chars > SECTION_WARN_CHARS);
+  const warn = oversizedSections.length > 0 || inputChars > 200_000;
+  const topSections = sections.sort((a, b) => b.chars - a.chars).slice(0, 10);
+
+  if (_budgetSink) {
+    _budgetSink({ callsite, model, inputChars, approxTokens, sections: topSections, warn });
+    return;
+  }
+  // Fallback: console output if no sink registered yet (early activation).
+  const summary = { callsite, model, inputChars, approxTokens, sections: topSections };
+  if (warn) console.warn('[DreamGraph][llm_input_budget]', JSON.stringify(summary));
+  else console.log('[DreamGraph][llm_input_budget]', JSON.stringify({ callsite, model, inputChars, approxTokens }));
+}
+
+function _enforceRequestBudget(callsite: string, model: string, body: Record<string, unknown>): string {
+  const serialized = JSON.stringify(body);
+  _logRequestBudget(callsite, model, body, serialized);
+  const cfg = vscode.workspace.getConfiguration('dreamgraph.architect');
+  const max = cfg.get<number>('maxRequestChars') ?? DEFAULT_MAX_REQUEST_CHARS;
+  if (serialized.length > max) {
+    throw new Error(
+      `LLM request budget exceeded at ${callsite}: ${serialized.length.toLocaleString()} chars ` +
+      `(~${Math.ceil(serialized.length / 4).toLocaleString()} tokens) > limit ${max.toLocaleString()}. ` +
+      `Likely culprits: generated docs/ pulled into context, full graph JSON injected, unbounded chat history, ` +
+      `or duplicated context sections. Raise dreamgraph.architect.maxRequestChars to override.`,
+    );
+  }
+  return serialized;
+}
 
 export class ArchitectLlm implements vscode.Disposable {
   private _config: ArchitectConfig | null = null;
@@ -425,7 +516,7 @@ export class ArchitectLlm implements vscode.Disposable {
         "x-api-key": config.apiKey,
         "anthropic-version": "2023-06-01",
       },
-      body: JSON.stringify(requestBody),
+      body: _enforceRequestBudget('callAnthropic', config.model, requestBody),
       signal,
     });
 
@@ -465,7 +556,7 @@ export class ArchitectLlm implements vscode.Disposable {
         "x-api-key": config.apiKey,
         "anthropic-version": "2023-06-01",
       },
-      body: JSON.stringify(requestBody),
+      body: _enforceRequestBudget('callAnthropicWithTools', config.model, requestBody),
       signal,
     });
 
@@ -517,7 +608,7 @@ export class ArchitectLlm implements vscode.Disposable {
         "Content-Type": "application/json",
         Authorization: `Bearer ${config.apiKey}`,
       },
-      body: JSON.stringify({
+      body: _enforceRequestBudget('callOpenAIWithTools', config.model, {
         model: config.model,
         max_completion_tokens: 16384,
         messages: apiMessages,
@@ -574,7 +665,7 @@ export class ArchitectLlm implements vscode.Disposable {
         "x-api-key": config.apiKey,
         "anthropic-version": "2023-06-01",
       },
-      body: JSON.stringify(requestBody),
+      body: _enforceRequestBudget('streamAnthropic', config.model, requestBody),
       signal,
     });
 
@@ -594,7 +685,7 @@ export class ArchitectLlm implements vscode.Disposable {
         "Content-Type": "application/json",
         Authorization: `Bearer ${config.apiKey}`,
       },
-      body: JSON.stringify({
+      body: _enforceRequestBudget('callOpenAI', config.model, {
         model: config.model,
         max_completion_tokens: 16384,
         messages: messages.map((m) => ({ role: m.role, content: this._toOpenAIContent(m.content) })),
@@ -630,7 +721,7 @@ export class ArchitectLlm implements vscode.Disposable {
         "Content-Type": "application/json",
         Authorization: `Bearer ${config.apiKey}`,
       },
-      body: JSON.stringify({
+      body: _enforceRequestBudget('streamOpenAI', config.model, {
         model: config.model,
         max_completion_tokens: 16384,
         stream: true,
@@ -643,6 +734,7 @@ export class ArchitectLlm implements vscode.Disposable {
     return this._readSSEStream(res, onChunk, start, "openai");
   }
 
+
   private async _callOllama(
     config: ArchitectConfig,
     messages: ArchitectMessage[],
@@ -652,7 +744,7 @@ export class ArchitectLlm implements vscode.Disposable {
     const res = await fetch(`${config.baseUrl}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+      body: _enforceRequestBudget('callOllama', config.model, {
         model: config.model,
         messages: messages.map((m) => ({ role: m.role, content: this._toOllamaContent(m.content) })),
         stream: false,
@@ -686,7 +778,7 @@ export class ArchitectLlm implements vscode.Disposable {
     const res = await fetch(`${config.baseUrl}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+      body: _enforceRequestBudget('streamOllama', config.model, {
         model: config.model,
         messages: messages.map((m) => ({ role: m.role, content: this._toOllamaContent(m.content) })),
         stream: true,

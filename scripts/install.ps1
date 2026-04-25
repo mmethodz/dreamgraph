@@ -306,7 +306,8 @@ if ($pkg.devDependencies -and $pkg.devDependencies.PSObject.Properties.Name -con
     $binPkg.dependencies["@modelcontextprotocol/sdk"] = $pkg.devDependencies."@modelcontextprotocol/sdk"
 }
 $binPkgJson = $binPkg | ConvertTo-Json -Depth 10
-Set-Content -Path (Join-Path $BinDir "package.json") -Value $binPkgJson -Encoding UTF8
+# Use [System.IO.File]::WriteAllText with UTF8 (no BOM); PS5.1 -Encoding UTF8 emits a BOM that breaks JSON.parse in Node.
+[System.IO.File]::WriteAllText((Join-Path $BinDir "package.json"), $binPkgJson, (New-Object System.Text.UTF8Encoding $false))
 Write-Ok "package.json created"
 
 Write-Host "  Installing dependencies..." -ForegroundColor Cyan
@@ -359,7 +360,7 @@ if (Test-CanBuildVsCodeExtension) {
     } else {
         $extPkg  = Get-Content $ExtPkgJson -Raw | ConvertFrom-Json
         $extensionId = "$($extPkg.publisher).$($extPkg.name)"
-        $legacyExtensionVersion = "7.0.0"
+        $legacyExtensionVersion = "7"
         $vsixName = "$($extPkg.name)-$($extPkg.version).vsix"
         $vsixPath = Join-Path $ExtSourceDir $vsixName
 
@@ -402,7 +403,8 @@ $versionInfo = [ordered]@{
     source       = $SourceDir
     node_version = $nodeVersion
 } | ConvertTo-Json
-Set-Content -Path (Join-Path $BinDir "version.json") -Value $versionInfo -Encoding UTF8
+# UTF-8 without BOM (Node JSON.parse chokes on the BOM emitted by PS5.1's -Encoding UTF8).
+[System.IO.File]::WriteAllText((Join-Path $BinDir "version.json"), $versionInfo, (New-Object System.Text.UTF8Encoding $false))
 
 # -- Create shims --------------------------------------------------
 Write-Step "Creating command shims..."
@@ -470,4 +472,6 @@ Write-Host ""
 Write-Host " Binary:   $BinDir" -ForegroundColor White
 Write-Host " Run:      dg --help" -ForegroundColor White
 Write-Host " Start:    dg start <instance> --http" -ForegroundColor White
+Write-Host ""
+Write-Host " Reminder: restart any running DreamGraph and VS Code instances to load the updated installation." -ForegroundColor Yellow
 Write-Host ""

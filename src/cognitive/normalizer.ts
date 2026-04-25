@@ -52,6 +52,24 @@ import type { LlmMessage } from "./llm.js";
 import { getActiveCognitiveTuning } from "../instance/index.js";
 
 // ---------------------------------------------------------------------------
+// Event-loop yielding (ADR-052)
+// ---------------------------------------------------------------------------
+// Synchronous CPU-bound passes over candidate edges/nodes can block the
+// daemon's event loop on large dream graphs (1k+ items). We yield to the
+// event loop every NORMALIZER_YIELD_BATCH iterations so HTTP requests,
+// dashboard polling, and other async work stay responsive during a
+// normalization cycle.
+//
+// TODO(F-12 worker-thread follow-up): if profiling shows CPU saturation
+// dominating wall time, move PASS 1 scoring into a worker_threads pool.
+// FactLookup needs serialization helpers (Maps/Sets → arrays) before that
+// is viable. Tracked as a future iteration of ADR-052.
+const NORMALIZER_YIELD_BATCH = 100;
+
+const yieldToEventLoop = (): Promise<void> =>
+  new Promise<void>((resolve) => setImmediate(resolve));
+
+// ---------------------------------------------------------------------------
 // Fact Graph lookup structures
 // ---------------------------------------------------------------------------
 
@@ -912,6 +930,7 @@ export async function normalize(
   const edgeAssessments: Array<{ edge: DreamEdge; result: ValidationResult }> = [];
   const newResults: ValidationResult[] = [];
 
+  let edgeIter = 0;
   for (const edge of dreamGraph.edges) {
     if (edge.interrupted) continue;
 
@@ -936,6 +955,10 @@ export async function normalize(
 
     edgeAssessments.push({ edge, result });
     newResults.push(result);
+
+    // ADR-052: yield to event loop periodically so the daemon stays
+    // responsive on large dream graphs (1k+ edges).
+    if (++edgeIter % NORMALIZER_YIELD_BATCH === 0) await yieldToEventLoop();
   }
 
   // PASS 2: LLM semantic validation on latent edges
@@ -968,6 +991,7 @@ export async function normalize(
   const promotedEdges: ValidatedEdge[] = [];
   let blockedByGate = 0;
 
+  let gateIter = 0;
   for (const { edge, result } of edgeAssessments) {
     // Update edge status in dream graph to reflect normalization outcome
     edge.status = result.status === "validated" ? "validated" :
@@ -992,10 +1016,14 @@ export async function normalize(
         blockedByGate++;
       }
     }
+
+    // ADR-052: yield to event loop periodically.
+    if (++gateIter % NORMALIZER_YIELD_BATCH === 0) await yieldToEventLoop();
   }
 
   // Validate all eligible nodes
   const promotableNodes: DreamNode[] = [];
+  let nodeIter = 0;
   for (const node of dreamGraph.nodes) {
     if (node.interrupted) continue;
     if (node.promoted_at) continue; // Already promoted to fact graph
@@ -1030,6 +1058,9 @@ export async function normalize(
     if (result.status === "validated") {
       promotableNodes.push(node);
     }
+
+    // ADR-052: yield to event loop periodically.
+    if (++nodeIter % NORMALIZER_YIELD_BATCH === 0) await yieldToEventLoop();
   }
 
   // ---------- Multi-file promotion with rollback protection ----------

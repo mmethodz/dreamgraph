@@ -1,6 +1,6 @@
 # DreamGraph Architecture
 
-Version: **7.1.0**
+Version: **8.0.0**
 License: **DreamGraph Source-Available Community License v2.0**
 
 ## Overview

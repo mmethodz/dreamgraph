@@ -1,6 +1,6 @@
 # Security Policy
 
-> System-maintained SECURITY.md document. Covers network behavior (localhost-only), API key handling, filesystem access boundaries, static analysis false positive resolutions (SafeSkill v7.1.0 scan), threat model, and vulnerability reporting procedure. Auto-reconciled by the DreamGraph cognitive system on architectural change.
+> System-maintained SECURITY.md document. Covers network behavior (localhost-only), API key handling, filesystem access boundaries, static analysis false positive resolutions (SafeSkill v7.0.0 scan), threat model, and vulnerability reporting procedure. Auto-reconciled by the DreamGraph cognitive system on architectural change.
 
 **Repository:**   
 **Domain:** core  

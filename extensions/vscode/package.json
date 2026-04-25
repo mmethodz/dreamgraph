@@ -2,7 +2,7 @@
   "name": "dreamgraph-vscode",
   "displayName": "DreamGraph",
   "description": "DreamGraph-native development agent — intentional context, architectural discipline, knowledge-grounded AI.",
-  "version": "7.1.0",
+  "version": "8.0.0",
   "icon": "media/dreamgraph-icon.png",
   "publisher": "siteledger-solutions",
   "license": "DreamGraph License v1.0",
@@ -227,6 +227,11 @@
           "default": 16000,
           "description": "Maximum token budget for Architect context assembly."
         },
+        "dreamgraph.architect.maxRequestChars": {
+          "type": "number",
+          "default": 320000,
+          "description": "Hard ceiling on the serialized LLM request body (chars). Requests exceeding this are aborted before the network call to prevent runaway long-context costs. ~320k chars ≈ 80k tokens."
+        },
         "dreamgraph.architect.reportingMode": {
           "type": "string",
           "enum": ["quiet", "standard", "deep", "forensic"],
@@ -280,8 +285,10 @@
     }
   },
   "scripts": {
-    "build": "npm run build:webview && tsc -p ./tsconfig.json",
+    "build": "npm run build:webview && tsc -p ./tsconfig.json && npm run build:extension && npm run build:vendor",
     "build:webview": "esbuild src/webview/index.ts --bundle --outfile=dist/webview.js --format=iife --platform=browser",
+    "build:extension": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --format=cjs --platform=node --target=node18 --external:vscode --minify",
+    "build:vendor": "node -e \"const fs=require('fs'),path=require('path');const out=path.join('dist','vendor');fs.mkdirSync(out,{recursive:true});for(const [src,dst] of [['node_modules/markdown-it/dist/markdown-it.min.js','markdown-it.min.js'],['node_modules/dompurify/dist/purify.min.js','purify.min.js']]){fs.copyFileSync(src,path.join(out,dst));console.log('copied',src,'->',path.join(out,dst));}\"",
     "watch": "tsc -watch -p ./tsconfig.json",
     "package": "vsce package",
     "lint": "eslint src --ext ts",

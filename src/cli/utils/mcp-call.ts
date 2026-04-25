@@ -35,7 +35,7 @@ export async function mcpCallTool(
 
   const client = new Client({
     name: "dreamgraph-cli",
-    version: "7.1.0",
+    version: "8.0.0",
   });
 
   try {
@@ -70,7 +70,7 @@ export async function mcpListTools(
 
   const client = new Client({
     name: "dreamgraph-cli",
-    version: "7.1.0",
+    version: "8.0.0",
   });
 
   try {

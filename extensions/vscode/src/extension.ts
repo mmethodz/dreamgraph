@@ -20,7 +20,7 @@ import { McpClient } from "./mcp-client.js";
 import { HealthMonitor } from "./health-monitor.js";
 import { StatusBarManager } from "./status-bar.js";
 import { ContextInspector } from "./context-inspector.js";
-import { ArchitectLlm } from "./architect-llm.js";
+import { ArchitectLlm, setRequestBudgetSink } from "./architect-llm.js";
 import { ContextBuilder } from "./context-builder.js";
 import { ChatPanel } from "./chat-panel.js";
 import { DashboardViewProvider } from "./dashboard-view.js";
@@ -65,7 +65,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // VS Code may move views out of their declared container on reinstall,
   // hiding the activity bar icon. Reset once per version to fix this.
   const versionKey = "dreamgraph.lastActivatedVersion";
-  const currentVersion = "7.1.0";
+  const currentVersion = "8.0.0";
   const lastVersion = context.globalState.get<string>(versionKey);
   if (lastVersion !== currentVersion) {
     void vscode.commands.executeCommand("workbench.action.resetViewLocations");
@@ -126,15 +126,19 @@ export function activate(context: vscode.ExtensionContext): void {
   const statusBar = new StatusBarManager();
   const contextInspector = new ContextInspector();
   chatPanel.setContextInspector(contextInspector);
+  // Route the architect-llm input-budget guard to the "DreamGraph Context" output channel.
+  setRequestBudgetSink((summary) => contextInspector.logRequestBudget(summary));
 
   // ---- Keep DreamGraph container visible / recoverable ----
+  // We only update the status-bar restore button here. We do NOT call
+  // ensureContainerVisible() — it runs workbench.action.resetViewLocations
+  // and several *.focus commands, which are heavyweight UI operations.
+  // Firing them on every editor click / focus change locks the UI thread
+  // for several seconds at a time. Recovery is initiated by the user
+  // clicking the restore button (statusBar.setRestoreSidebarVisible).
   const syncDreamGraphVisibility = (): void => {
     const shouldShowRestore = !chatPanel.isVisible && !dashboardView.isVisible;
     statusBar.setRestoreSidebarVisible(shouldShowRestore);
-
-    if (shouldShowRestore) {
-      void dashboardView.ensureContainerVisible();
-    }
   };
 
   context.subscriptions.push(

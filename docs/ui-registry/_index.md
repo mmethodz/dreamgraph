@@ -40,6 +40,7 @@
 | [tool-activity-log](tool-activity-log.md) | Tool Activity Log | active | Legacy parallel task/tool reporting entry retained only for … | - |
 | [tension-list](tension-list.md) | Tension List | active | Legacy parallel graph-signal feedback entry retained only fo… | - |
 | [remediation-plan-viewer](remediation-plan-viewer.md) | Remediation Plan Viewer | active | Legacy parallel remediation/task summary entry retained only… | - |
+| [anchor_state_badge](anchor-state-badge.md) | Anchor State Badge | active | Communicates the lifecycle migration state of a semantic anc… | react |
 
 ## layout
 

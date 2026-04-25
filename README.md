@@ -1,10 +1,10 @@
-# DreamGraph v7.1.0 — El Alarife
+# DreamGraph v8.0.0 — Vishnu
 
 DreamGraph is a graph-first cognitive daemon for MCP-enabled development environments. It maintains an instance-scoped knowledge graph of features, workflows, data models, architectural decisions, UI registry elements, and tensions so the graph—not any single file—serves as the system’s source of truth.
 
 ## Status
 
-- Current package version: **7.1.0**
+- Current package version: **8.0.0**
 - License: **DreamGraph Source-Available Community License v2.0**
 - Runtime model: instance-scoped daemon with dashboard, CLI, MCP tools, and VS Code extension integration
 
@@ -83,6 +83,8 @@ DreamGraph instance status can show two different version concepts:
 - **Daemon Version** — the version of the currently running daemon binary
 
 Those values can differ after upgrades, and that is expected.
+
+> After installing or updating DreamGraph, restart any running DreamGraph daemon instances and VS Code windows so the updated binaries and extension code are loaded.
 
 ## License
 

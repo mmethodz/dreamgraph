@@ -7,6 +7,7 @@
 
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
 import type { EventRouterConfig, NarrativeConfig, SchedulerConfig } from "../cognitive/types.js";
 import {
   DEFAULT_EVENT_ROUTER_CONFIG,
@@ -18,6 +19,27 @@ import { parseLlmConfig } from "../cognitive/llm.js";
 
 /** Project root — two levels up from dist/config/config.js */
 const PROJECT_ROOT = resolve(fileURLToPath(import.meta.url), "..", "..", "..");
+
+/**
+ * Read the package version from package.json at startup.
+ * Single source of truth — bumping package.json is enough.
+ * Falls back to "0.0.0-unknown" if the file cannot be read.
+ */
+function readPackageVersion(): string {
+  try {
+    const pkgPath = resolve(PROJECT_ROOT, "package.json");
+    // Strip UTF-8 BOM if present (PowerShell 5.1's `Set-Content -Encoding UTF8` writes one).
+    const raw = readFileSync(pkgPath, "utf8").replace(/^\uFEFF/, "");
+    const pkg = JSON.parse(raw) as { version?: string };
+    return typeof pkg.version === "string" && pkg.version.length > 0
+      ? pkg.version
+      : "0.0.0-unknown";
+  } catch {
+    return "0.0.0-unknown";
+  }
+}
+
+const PACKAGE_VERSION = readPackageVersion();
 
 /**
  * Resolve the data directory.
@@ -79,7 +101,7 @@ export const config = {
   /** Server metadata */
   server: {
     name: "dreamgraph",
-    version: "7.1.0",
+    version: PACKAGE_VERSION,
   },
 
   /**

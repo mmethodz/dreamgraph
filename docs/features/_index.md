@@ -20,7 +20,7 @@
 | dreamgraph_tests | Tests | testing | active | dreamgraph |
 | dreamgraph | . | core | active | dreamgraph |
 | feature_mcp_server_runtime | MCP Server Runtime | core | active | dreamgraph |
-| feature_tool_registry | Tool Registry | core | active | dreamgraph |
+| feature_tool_registry | Tool Registry | core | active |  |
 | feature_resource_registry | Resource Registry | core | active | dreamgraph |
 | feature_seed_graph_storage | Seed Graph Storage | core | active | dreamgraph |
 | feature_graph_bootstrap | Graph Bootstrap | core | active | dreamgraph |
@@ -258,3 +258,18 @@
 | feature_architect_structured_webview | Architect Structured Webview | core | active |  |
 | feature_webview_clickable_references | Webview Clickable References | core | active |  |
 | feature_provider_multimodal_attachment_translation | Provider Multimodal Attachment Translation | core | active |  |
+| feature_semantic_evidence_provenance_handling | Semantic Evidence and Provenance Handling | core | active |  |
+| audit_logging_framework | Audit Logging Framework | security | discovered |  |
+| security_policy_enforcement | Security Policy Enforcement Framework | security | discovered |  |
+| permission_granting_framework | Permission Granting Framework | security | discovered |  |
+| semantic-anchor-promotion | Semantic Anchor Promotion | core | active |  |
+| symbol-bounded-excerpt | Symbol-Bounded Code Excerpt | core | active |  |
+| graph-relevance-propagation | Graph Relevance Propagation | context-assembly | active |  |
+| graph-context-canonical-anchor-persistence | Graph Context Canonical Anchor Persistence | context-assembly | active |  |
+| plugin_management_hub | Plugin Management Hub | extensions | discovered |  |
+| abstraction_1776812536474_421 | Unified VS Code Extension Integration feature Hub |  | discovered |  |
+| user_experience_layer | User Experience Layer | user | discovered |  |
+| security_audit_service | Security Audit Service | security | discovered |  |
+| access_control_service | Access Control Service | security | discovered |  |
+| security_compliance_framework | Security Compliance Framework | security | discovered |  |
+| policy_registry_framework | Policy Registry Framework | policy | discovered |  |

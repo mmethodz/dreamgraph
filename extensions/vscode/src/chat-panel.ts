@@ -33,6 +33,7 @@ import type { ContextBuilder } from './context-builder';
 import type { ChangedFilesView, ChangeType } from './changed-files-view';
 import { LOCAL_TOOL_DEFINITIONS, isLocalTool, executeLocalTool } from './local-tools.js';
 import { assemblePrompt, inferTask } from './prompts/index.js';
+import { selectToolGroups } from './tool-groups.js';
 import {
   createAutonomyState,
   deriveAutonomyStatusView,
@@ -43,8 +44,96 @@ import {
 import { analyzePass, advanceAutonomyStateIfContinued, buildContinuationPrompt } from './autonomy-loop.js';
 import { extractStructuredPassEnvelope } from './autonomy-structured.js';
 import { getAutonomyMode, getAutonomyPassBudget, parseAutonomyRequest } from './reporting.js';
+import * as helpers from './chat-panel/helpers.js';
+import {
+  type ImplicitEntityDetectionResult,
+  type VerdictBanner,
+  type ToolTraceEntry,
+} from './chat-panel/helpers.js';
+import {
+  REQUEST_TIMEOUT_MS as TIMEOUT_REQUEST_MS,
+  getLlmTimeoutMs as _getLlmTimeoutMsPure,
+  isTimeoutError as _isTimeoutErrorPure,
+  buildTimeoutRecoveryPrompt as _buildTimeoutRecoveryPromptPure,
+  createTimeoutAbortSignal,
+} from './chat-panel/timeout.js';
 
 type ChatRole = 'user' | 'assistant' | 'system';
+
+/* ------------------------------------------------------------------ */
+/*  Conversation-history bounding                                     */
+/* ------------------------------------------------------------------ */
+/**
+ * Per-message char caps for what we send to the LLM (display copies are kept full).
+ * Without these, a 20-message slice of structured-envelope assistant replies +
+ * code-laden user prompts can easily exceed 300KB on its own — before the system
+ * prompt and tool schemas are even added — and overflow the request-budget brake.
+ */
+const HISTORY_RECENT_KEEP = 2;        // Last N messages keep full content.
+const HISTORY_RECENT_MAX_CHARS = 16_000;
+const HISTORY_OLDER_MAX_CHARS = 4_000;
+
+function _truncateHistoryMessage(content: string, cap: number): string {
+  if (content.length <= cap) return content;
+  const head = content.slice(0, cap);
+  return `${head}\n\n[... ${(content.length - cap).toLocaleString()} chars omitted from history to bound LLM input ...]`;
+}
+
+function buildBoundedConversationMessages(
+  messages: Array<{ role: ChatRole; content: string }>,
+  maxRecent: number = 20,
+): Array<{ role: 'user' | 'assistant'; content: string }> {
+  const filtered = messages.filter((m) => m.role === 'user' || m.role === 'assistant') as Array<{ role: 'user' | 'assistant'; content: string }>;
+  const sliced = filtered.slice(-maxRecent);
+  const recentStart = sliced.length - HISTORY_RECENT_KEEP;
+  return sliced.map((m, i) => {
+    const cap = i >= recentStart ? HISTORY_RECENT_MAX_CHARS : HISTORY_OLDER_MAX_CHARS;
+    return { role: m.role, content: _truncateHistoryMessage(m.content, cap) };
+  });
+}
+
+/**
+ * Replaces the `content` of tool_result blocks in older user-role messages
+ * with a short stub. Keeps the last `keepLastPairs` assistant→tool_result
+ * pairs intact (those are still being reasoned over). Older results stay
+ * in the message array (so tool_use_id references remain valid) but no
+ * longer carry their full payload.
+ */
+function _elideStaleToolResults(rawMessages: unknown[], keepLastPairs: number): void {
+  // Find indices of user-role messages whose content looks like tool_result blocks.
+  const toolResultIdx: number[] = [];
+  for (let i = 0; i < rawMessages.length; i++) {
+    const m = rawMessages[i] as { role?: string; content?: unknown };
+    if (m?.role === 'user' && Array.isArray(m.content) && m.content.length > 0 && (m.content[0] as { type?: string })?.type === 'tool_result') {
+      toolResultIdx.push(i);
+    }
+  }
+  if (toolResultIdx.length <= keepLastPairs) return;
+  const elideUpTo = toolResultIdx.length - keepLastPairs;
+  // Threshold below which we leave the content fully intact — small tool results
+  // are cheap and stripping them removes essential reasoning context.
+  const ELIDE_MIN_CHARS = 2_000;
+  // Head/tail snippet sizes preserve enough of the result that the model still
+  // remembers what the call returned (signature, key fields, error tail) rather
+  // than facing an opaque "[elided]" marker that forces it to re-issue the call.
+  const HEAD_KEEP = 800;
+  const TAIL_KEEP = 400;
+  for (let n = 0; n < elideUpTo; n++) {
+    const idx = toolResultIdx[n];
+    const msg = rawMessages[idx] as { content: Array<{ type: string; tool_use_id: string; content: string; is_error?: boolean }> };
+    msg.content = msg.content.map((b) => {
+      if (typeof b.content !== 'string' || b.content.length <= ELIDE_MIN_CHARS) return b;
+      const omitted = b.content.length - HEAD_KEEP - TAIL_KEEP;
+      const head = b.content.slice(0, HEAD_KEEP);
+      const tail = b.content.slice(-TAIL_KEEP);
+      return {
+        ...b,
+        content: `${head}\n\n[... ${omitted.toLocaleString()} chars elided from earlier pass ...]\n\n${tail}`,
+      };
+    });
+  }
+}
+
 
 interface ChatMessage {
   id?: string;
@@ -109,24 +198,6 @@ interface EntityVerification {
   status: 'verified' | 'latent' | 'unverified' | 'tension';
   confidence: number;
   lastValidated?: string;
-}
-
-interface ImplicitEntityDetectionResult {
-  names: string[];
-  truncated: boolean;
-}
-
-interface VerdictBanner {
-  level: 'verified' | 'partial' | 'speculative';
-  summary: string;
-}
-
-interface ToolTraceEntry {
-  tool: string;
-  argsSummary: string;
-  filesAffected: string[];
-  durationMs: number;
-  status: 'completed' | 'failed';
 }
 
 type ExtensionToWebviewMessage =
@@ -238,6 +309,9 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
   private _lastRecommendedActions: RecommendedAction[] = [];
   /** Whether an autonomy continuation loop is currently running. */
   private _autonomyContinuing = false;
+  /** Task state captured at loop stop time. Injected into the next turn's system prompt
+   * so that "resume" re-enters from a known task position rather than a fresh context. */
+  private _lastStopContext: { summary?: string; nextSteps: Array<{ label: string; rationale?: string }> } | null = null;
 
   private static readonly MAX_RENDERED_MESSAGE_CHARS = 100_000;
   private static readonly MAX_ENTITY_LINKS_PER_MESSAGE = 100;
@@ -246,21 +320,9 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
   private static readonly MAX_TEXT_ATTACHMENT_BYTES = 100_000;
   private static readonly MAX_IMAGE_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 
-  /** Hard timeout per LLM provider request (ms). Prevents infinite hangs. */
-  private static readonly REQUEST_TIMEOUT_MS = 90_000;
-
-  /** Per-tool timeout overrides (ms). Tools not listed use _default. */
-  private static readonly TOOL_TIMEOUT_MS: Record<string, number> = {
-    dream_cycle: 120_000,
-    nightmare_cycle: 120_000,
-    metacognitive_analysis: 120_000,
-    run_command: 60_000,
-    write_file: 30_000,
-    edit_file: 30_000,
-    read_source_code: 30_000,
-    read_local_file: 30_000,
-    _default: 60_000,
-  };
+  /** Hard timeout per LLM provider request (ms). Prevents infinite hangs.
+   *  Re-exported from chat-panel/timeout.ts so existing call sites keep working. */
+  private static readonly REQUEST_TIMEOUT_MS = TIMEOUT_REQUEST_MS;
 
   private static readonly TEXT_EXTENSIONS = new Set([
     '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.json', '.md', '.txt', '.py', '.cs', '.java', '.go', '.rs', '.yml', '.yaml', '.xml', '.html', '.css', '.scss', '.sql', '.sh'
@@ -274,20 +336,8 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
     '.gif': 'image/gif',
   };
 
-  private static readonly TOOL_RESULT_LIMITS: Record<string, number> = {
-    read_source_code: 12_000,
-    read_local_file: 12_000,
-    query_api_surface: 10_000,
-    run_command: 8_000,
-    edit_entity: 6_000,
-    edit_file: 6_000,
-    modify_entity: 6_000,
-    write_file: 4_000,
-    _default: 4_000,
-  };
-
   private static _toolResultLimit(toolName: string): number {
-    return ChatPanel.TOOL_RESULT_LIMITS[toolName] ?? ChatPanel.TOOL_RESULT_LIMITS._default;
+    return helpers.toolResultLimit(toolName);
   }
 
   constructor(private readonly context: vscode.ExtensionContext) {}
@@ -530,176 +580,252 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
     while (this.disposables.length > 0) this.disposables.pop()?.dispose();
   }
 
-  private async handleUserMessage(text: string): Promise<void> {
-    this._detectAutonomyRequest(text);
+  async handleUserMessage(text: string): Promise<void> {
+  if (this.streaming) {
+    this.steeringQueue.push(text);
+    return;
+  }
 
-    const attachmentSummary = this._attachmentSummaryForUserMessage();
-    const envelope = this.contextBuilder ? await this.contextBuilder.buildEnvelope(text) : null;
-    const liveAnchor = envelope?.activeFile?.selection?.anchor ?? envelope?.activeFile?.cursorAnchor;
-    let assistantMessage: ChatMessage | undefined;
-    const userMessage: ChatMessage = {
+  const trimmed = text.trim();
+  if (!trimmed && this.attachments.length === 0) return;
+
+  const provider = this.architectLlm?.provider ?? 'anthropic';
+  const envelope = this.contextBuilder ? await this.contextBuilder.buildEnvelope(trimmed, 'chat') : null;
+  const liveAnchor = envelope?.activeFile?.selection?.anchor ?? envelope?.activeFile?.cursorAnchor;
+  const userMessage: ChatMessage = {
+    id: this._createMessageId(),
+    role: 'user',
+    content: trimmed,
+    fullContent: trimmed,
+    timestamp: new Date().toISOString(),
+    instanceId: this.currentInstanceId,
+    anchor: liveAnchor,
+  };
+  this.messages.push(userMessage);
+  if (this.contextBuilder) {
+    await this._persistMessagesWithCanonicalAnchorRefresh(envelope);
+  } else {
+    await this.persistMessages();
+  }
+
+  this._lastToolTrace = [];
+  this._lastVerdict = null;
+  await this.postState();
+  await this.postMessage({ type: 'toolTrace', calls: [] });
+  this._autonomyEnabled = getAutonomyMode() !== 'cautious' || (getAutonomyPassBudget() ?? 0) > 0;
+  this._autonomyState = createAutonomyState(getAutonomyMode(), getAutonomyPassBudget());
+  this._lastRecommendedActions = [];
+  this._autonomyContinuing = false;
+  // Capture task continuation context before clearing it — it will be injected
+  // into this turn's system prompt so "resume" re-enters from the known task position.
+  const stopContextForThisTurn = this._lastStopContext;
+  this._lastStopContext = null;
+  this._broadcastAutonomyStatus();
+
+  const autonomyRequest = parseAutonomyRequest(trimmed, this._autonomyState);
+  if (
+    autonomyRequest.mode !== this._autonomyState.mode ||
+    autonomyRequest.totalAuthorizedPasses !== this._autonomyState.totalAuthorizedPasses
+  ) {
+    this._autonomyEnabled = true;
+    this._autonomyState = {
+      mode: autonomyRequest.mode,
+      remainingAutoPasses: autonomyRequest.remainingAutoPasses,
+      completedAutoPasses: autonomyRequest.completedAutoPasses,
+      totalAuthorizedPasses: autonomyRequest.totalAuthorizedPasses,
+    };
+    this._broadcastAutonomyStatus();
+  }
+
+  if (!this.architectLlm || !this.contextBuilder || !envelope) {
+    const missing = !this.architectLlm ? 'Architect LLM' : !this.contextBuilder ? 'ContextBuilder' : 'Context envelope';
+    const assistantMessage: ChatMessage = {
       id: this._createMessageId(),
-      role: 'user',
-      content: attachmentSummary ? `${text}\n\n${attachmentSummary}` : text,
+      role: 'assistant',
+      content: `${missing} is not configured.`,
       timestamp: new Date().toISOString(),
       instanceId: this.currentInstanceId,
-      anchor: liveAnchor,
+      verdict: { level: 'speculative', summary: `${missing} unavailable` },
     };
+    this.messages.push(assistantMessage);
+    await this.persistMessages();
+    await this.postState();
+    return;
+  }
 
-    this.messages.push(userMessage);
-    await this._persistMessagesWithCanonicalAnchorRefresh(envelope);
-    await this.postMessage({ type: 'addMessage', message: userMessage, actions: this._buildMessageActions(userMessage), roleMeta: this._roleMetaFor(userMessage), contextFooter: this._contextFooterFor(userMessage) });
+  const task = inferTask(envelope.intentMode ?? 'ask_dreamgraph', undefined, trimmed);
+  const contextResult = await this._buildPromptContext(task, envelope, trimmed, 'chat');
 
-    if (!this.architectLlm || !this.architectLlm.isConfigured) {
-      const errMsg: ChatMessage = {
-        id: this._createMessageId(),
-        role: 'system',
-        content: 'Architect LLM is not configured. Select provider and model in the header dropdowns, then set your API key.',
-        timestamp: new Date().toISOString(),
-        instanceId: this.currentInstanceId,
-      };
-      this.messages.push(errMsg);
-      await this.persistMessages();
-      await this.postMessage({ type: 'addMessage', message: errMsg, actions: this._buildMessageActions(errMsg), roleMeta: this._roleMetaFor(errMsg), contextFooter: this._contextFooterFor(errMsg) });
-      return;
+  await this._logContextToOutput(envelope, contextResult.reasoningPacket);
+
+  const attachmentInstruction = this._attachmentSummaryForUserMessage();
+  // If a previous autonomy loop stopped with task state, inject it as a
+  // continuation context block so the model knows where to resume from.
+  const continuationContext = stopContextForThisTurn
+    ? this._formatStopContextBlock(stopContextForThisTurn)
+    : '';
+  const additionalInstructions = [attachmentInstruction, continuationContext].filter(Boolean).join('\n\n');
+  const autonomyInstructionState = this._autonomyEnabled
+    ? { ...this._autonomyState, enabled: true }
+    : undefined;
+  const prompt = assemblePrompt(
+    task,
+    envelope,
+    contextResult.assembledContext,
+    additionalInstructions || undefined,
+    autonomyInstructionState,
+    provider,
+  );
+
+  const conversation: ArchitectMessage[] = [
+    { role: 'system', content: prompt.system },
+    // Cap conversation history at the most recent 20 user/assistant turns AND
+    // truncate per-message content (most-recent 2 keep up to 16KB, older capped at 4KB).
+    // Without these caps a single prompt can pull in 200-600KB of prior assistant
+    // envelopes + tool-trace text and tip the request into long-context pricing.
+    ...buildBoundedConversationMessages(this.messages, 20)
+      .map((message) => ({ role: message.role, content: message.content }) as ArchitectMessage),
+  ];
+
+  this.streaming = true;
+  this.streamingContent = '';
+  this.abortController = new AbortController();
+
+  try {
+    await this.postMessage({ type: 'stream-start' });
+
+    let fullContent = '';
+    const mcpTools = this.mcpClient ? await this.mcpClient.listTools() : [];
+    const allTools: ToolDefinition[] = [
+      ...mcpTools.map((tool) => ({
+        name: tool.name,
+        description: tool.description ?? '',
+        inputSchema: (tool.inputSchema ?? {}) as Record<string, unknown>,
+      })),
+      ...LOCAL_TOOL_DEFINITIONS.map((tool) => ({
+        name: tool.name,
+        description: tool.description ?? '',
+        inputSchema: tool.inputSchema as Record<string, unknown>,
+      })),
+    ];
+
+    // Tool whitelisting: send only an intent-appropriate subset (typically 6-14 tools)
+    // instead of all 70+. The full schemas are ~82KB / ~20k tokens — sent on every
+    // pass of the agentic loop. This is the dominant input-cost driver.
+    const toolDecision = selectToolGroups({
+      task,
+      intentMode: envelope?.intentMode,
+      prompt: trimmed,
+      autonomy: this._autonomyEnabled,
+      availableToolNames: allTools.map((t) => t.name),
+    });
+    const selectedSet = new Set(toolDecision.selected);
+    const tools: ToolDefinition[] = allTools.filter((t) => selectedSet.has(t.name));
+    this.contextInspector?.appendContextLine(
+      `Tool selection: ${tools.length}/${allTools.length} tools — groups=[${toolDecision.groups.join(', ')}] mutating=${toolDecision.mutating} autonomy=${toolDecision.autonomy}; ${toolDecision.rationale}`,
+    );
+
+    if (tools.length > 0) {
+      fullContent = await this.runAgenticLoop(conversation, tools);
+    } else {
+      const req = this._createRequestSignal(this._getLlmTimeoutMs({ mode: 'stream' }));
+      try {
+        await this.architectLlm.stream(conversation, (chunk: string) => {
+          const safeChunk = this._redactSecrets(chunk);
+          fullContent += safeChunk;
+          this.streamingContent += safeChunk;
+          void this.postMessage({ type: 'stream-chunk', chunk: safeChunk });
+        }, req.signal);
+      } finally {
+        req.dispose();
+      }
     }
 
-    try {
-      this.streaming = true;
-      this.streamingContent = '';
-      this.steeringQueue = [];
-      this._lastToolTrace = [];
-      this._lastVerdict = null;
-      this.abortController = new AbortController();
-
-      const task = inferTask(envelope?.intentMode ?? 'ask_dreamgraph');
-      const autonomyInstruction: AutonomyInstructionState | undefined = this._autonomyEnabled
-        ? { ...this._autonomyState, enabled: true }
-        : undefined;
-      const provider = this.architectLlm?.provider ?? undefined;
-      const { system } = assemblePrompt(task, envelope, undefined, undefined, autonomyInstruction, provider);
-
-      const llmMessages: ArchitectMessage[] = [{ role: 'system', content: system }];
-      const recentMessages = this.messages.slice(-20);
-      for (const msg of recentMessages) {
-        if (msg.role === 'user' || msg.role === 'assistant') llmMessages.push({ role: msg.role, content: msg.content });
-      }
-
-      const userContentBlocks = this._buildUserContentBlocks(text);
-      if (llmMessages.length > 1 && llmMessages[llmMessages.length - 1].role === 'user') {
-        llmMessages[llmMessages.length - 1] = { role: 'user', content: userContentBlocks };
-      } else {
-        llmMessages.push({ role: 'user', content: userContentBlocks });
-      }
-
-      let packet: import('./types.js').ReasoningPacket | null = null;
-      if (envelope && this.contextBuilder) {
-        try {
-          packet = await this.contextBuilder.buildReasoningPacket(envelope, {
-            prompt: text,
-          });
-        } catch {
-          packet = null;
-        }
-      }
-      await this._logContextToOutput(envelope, packet);
-
-      await this.postMessage({ type: 'stream-start' });
-
-      let tools: ToolDefinition[] = [];
-      if (this.mcpClient?.isConnected) {
-        try {
-          const raw = await this.mcpClient.listTools();
-          tools = raw.map((t) => ({ name: t.name, description: t.description ?? '', inputSchema: (t.inputSchema ?? {}) as Record<string, unknown> }));
-        } catch {
-          // proceed without MCP tools
-        }
-      }
-      for (const lt of LOCAL_TOOL_DEFINITIONS) {
-        tools.push({ name: lt.name, description: lt.description, inputSchema: lt.inputSchema as Record<string, unknown> });
-      }
-
-      let fullContent = '';
-      if (tools.length > 0) {
-        fullContent = await this.runAgenticLoop(llmMessages, tools);
-      } else {
-        const timeoutMs = this._getLlmTimeoutMs({ mode: 'stream' });
-        const req = this._createRequestSignal(timeoutMs);
-        try {
-          await this.architectLlm.stream(llmMessages, (chunk: string) => {
-            const safeChunk = this._redactSecrets(chunk);
-            fullContent += safeChunk;
-            this.streamingContent += safeChunk;
-            void this.postMessage({ type: 'stream-chunk', chunk: safeChunk });
-          }, req.signal);
-        } catch (err) {
-          this._logTimeoutDiagnostics({
-            provider: this.architectLlm.provider ?? 'unknown',
-            model: this.architectLlm.currentConfig?.model,
-            mode: 'stream',
-            timeoutMs,
-            recoveryAttempted: this._isTimeoutError(err),
-            recovered: false,
-            toolCount: 0,
-            usedReducedContext: false,
-            errorMessage: err instanceof Error ? err.message : String(err),
-          });
-          throw err;
-        } finally {
-          req.dispose();
-        }
-      }
-
-      const redactedFullContent = this._redactSecrets(fullContent);
-      this._lastVerdict = this._deriveVerdict(redactedFullContent, this._lastToolTrace);
-      const finalContent = this._applyRenderLimits(redactedFullContent);
-      const implicitEntities = this._detectImplicitEntities(redactedFullContent);
-      const implicitEntityNotice = implicitEntities.names.length > 0
-        ? this._formatImplicitEntityNotice(implicitEntities)
-        : undefined;
-      assistantMessage = {
+    const cleaned = fullContent.trim() || '(No response)';
+    const assistantMessage: ChatMessage = {
+      id: this._createMessageId(),
+      role: 'assistant',
+      content: cleaned,
+      fullContent: cleaned,
+      timestamp: new Date().toISOString(),
+      instanceId: this.currentInstanceId,
+      verdict: this._lastVerdict ?? undefined,
+      toolTrace: this._lastToolTrace.length > 0 ? [...this._lastToolTrace] : undefined,
+    };
+    this.messages.push(assistantMessage);
+    if (this.contextBuilder) {
+      await this._persistMessagesWithCanonicalAnchorRefresh(envelope);
+    } else {
+      await this.persistMessages();
+    }
+    await this.postState();
+    if (this._lastVerdict) {
+      await this.postMessage({ type: 'verdict', verdict: this._lastVerdict });
+    }
+    await this.postMessage({ type: 'toolTrace', calls: this._lastToolTrace });
+    if (this._autonomyEnabled && assistantMessage.id) {
+      // Pass cleaned (with envelope intact) so the parser can extract goal_status etc.
+      await this._handleAutonomyPassComplete(
+        cleaned,
+        assistantMessage.id,
+        conversation,
+        tools,
+      );
+    }
+  } catch (err) {
+    const recovered = await this._recoverFromLlmTimeout(err, trimmed, envelope);
+    if (!recovered) {
+      const message = err instanceof Error ? err.message : String(err);
+      const assistantMessage: ChatMessage = {
         id: this._createMessageId(),
         role: 'assistant',
-        content: finalContent.content,
-        fullContent: redactedFullContent,
-        implicitEntityNotice,
+        content: `Error: ${message}`,
         timestamp: new Date().toISOString(),
         instanceId: this.currentInstanceId,
-        verdict: this._lastVerdict ?? undefined,
+        verdict: { level: 'speculative', summary: 'Request failed before completion' },
         toolTrace: this._lastToolTrace.length > 0 ? [...this._lastToolTrace] : undefined,
       };
       this.messages.push(assistantMessage);
       await this.persistMessages();
-      this.attachments = [];
-      await this._syncAttachments();
-
-      if (this._autonomyEnabled) {
-        await this._handleAutonomyPassComplete(redactedFullContent, assistantMessage.id ?? '', llmMessages, tools);
-      }
-    } catch (err: unknown) {
-      const recovered = await this._recoverFromLlmTimeout(err, text, envelope);
-      if (!recovered) {
-        const errorText = err instanceof Error ? err.message : String(err);
-        const isAbort = err instanceof DOMException && err.name === 'AbortError';
-        const displayText = isAbort ? 'Generation stopped.' : `Error: ${errorText}`;
-        const errMsg: ChatMessage = { id: this._createMessageId(), role: 'system', content: displayText, timestamp: new Date().toISOString(), instanceId: this.currentInstanceId };
-        this.messages.push(errMsg);
-        await this.persistMessages();
-        await this.postMessage({ type: 'addMessage', message: errMsg, actions: this._buildMessageActions(errMsg), roleMeta: this._roleMetaFor(errMsg), contextFooter: this._contextFooterFor(errMsg) });
-      }
-    } finally {
-      this.resetStreamState();
-      if (assistantMessage) {
-        void this.postMessage({
-          type: 'addMessage',
-          message: assistantMessage,
-          actions: this._buildMessageActions(assistantMessage),
-          roleMeta: this._roleMetaFor(assistantMessage),
-          contextFooter: this._contextFooterFor(assistantMessage),
-        });
-      }
+      await this.postState();
+      await this.postMessage({ type: 'error', error: message });
     }
+  } finally {
+    this.resetStreamState();
   }
+}
+
+  private async _buildPromptContext(
+  task: ReturnType<typeof inferTask>,
+  envelope: import('./types.js').EditorContextEnvelope,
+  promptText?: string,
+  commandSource?: string,
+): Promise<{ assembledContext: string; reasoningPacket: import('./types.js').ReasoningPacket | null }> {
+  if (!this.contextBuilder) {
+    return { assembledContext: '', reasoningPacket: null };
+  }
+
+  if (task === 'patch') {
+    const reasoningPacket = await this.contextBuilder.buildReasoningPacket(envelope, {
+      prompt: promptText,
+      commandSource,
+    });
+    return {
+      assembledContext: this.contextBuilder.renderReasoningPacket(reasoningPacket).text,
+      reasoningPacket,
+    };
+  }
+
+  const assembled = await this.contextBuilder.assembleContextBlock(
+    envelope,
+    promptText ?? null,
+    new Map(),
+  );
+  return {
+    assembledContext: assembled.text,
+    reasoningPacket: null,
+  };
+}
 
   private _buildUserContentBlocks(text: string): ArchitectContentBlock[] {
     const capabilities = this.architectLlm?.getModelCapabilities() ?? { textAttachments: false, imageAttachments: false };
@@ -855,64 +981,19 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
    * to prevent timer leaks.
    */
   private _createRequestSignal(timeoutMs = ChatPanel.REQUEST_TIMEOUT_MS): { signal: AbortSignal; dispose: () => void } {
-    const child = new AbortController();
-    const timer = setTimeout(() => child.abort(new Error(`LLM request timed out after ${timeoutMs / 1000}s`)), timeoutMs);
-
-    const onParentAbort = () => {
-      clearTimeout(timer);
-      child.abort(this.abortController?.signal.reason ?? 'User stopped generation');
-    };
-
-    if (this.abortController?.signal.aborted) {
-      clearTimeout(timer);
-      child.abort(this.abortController.signal.reason);
-    } else {
-      this.abortController?.signal.addEventListener('abort', onParentAbort, { once: true });
-    }
-
-    return {
-      signal: child.signal,
-      dispose: () => {
-        clearTimeout(timer);
-        this.abortController?.signal.removeEventListener('abort', onParentAbort);
-      },
-    };
+    return createTimeoutAbortSignal(this.abortController, timeoutMs);
   }
 
   private _getLlmTimeoutMs(options: { mode: 'stream' | 'tool'; toolCount?: number; reducedContext?: boolean }): number {
-    const provider = this.architectLlm?.provider ?? 'anthropic';
-    const baseByProvider: Record<string, { stream: number; tool: number }> = {
-      anthropic: { stream: 90_000, tool: 120_000 },
-      openai: { stream: 150_000, tool: 210_000 },
-      ollama: { stream: 180_000, tool: 180_000 },
-    };
-    const selected = baseByProvider[provider] ?? { stream: ChatPanel.REQUEST_TIMEOUT_MS, tool: ChatPanel.REQUEST_TIMEOUT_MS };
-    let timeoutMs = options.mode === 'tool' ? selected.tool : selected.stream;
-    if (options.toolCount && options.toolCount > 12) {
-      timeoutMs += 30_000;
-    }
-    if (options.reducedContext) {
-      timeoutMs = Math.max(60_000, timeoutMs - 30_000);
-    }
-    return timeoutMs;
+    return _getLlmTimeoutMsPure({ ...options, provider: this.architectLlm?.provider ?? 'anthropic' });
   }
 
   private _isTimeoutError(err: unknown): boolean {
-    const message = err instanceof Error ? err.message : String(err);
-    return /timed out after \d+s/i.test(message) || /request timed out/i.test(message);
+    return _isTimeoutErrorPure(err);
   }
 
   private _buildTimeoutRecoveryPrompt(originalText: string): string {
-    return [
-      originalText,
-      '',
-      'Continue using an alternative method because the previous LLM request timed out.',
-      'Use a faster recovery strategy:',
-      '1. Prefer the knowledge graph over long source reads.',
-      '2. Use at most 8 recent messages of history.',
-      '3. Avoid broad tool use unless strictly necessary.',
-      '4. Produce a concise useful result first, then suggest a follow-up if needed.',
-    ].join('\n');
+    return _buildTimeoutRecoveryPromptPure(originalText);
   }
 
   private async _recoverFromLlmTimeout(
@@ -1044,7 +1125,7 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
   }
 
   private _createMessageId(): string {
-    return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    return helpers.createMessageId();
   }
 
   private async _logContextToOutput(
@@ -1095,33 +1176,8 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
   }
 
     private _formatAnchorFooterStatus(anchor: import('./types.js').SemanticAnchor): string {
-    const status = anchor.migrationStatus ?? 'native';
-    const label = anchor.canonicalId
-      ? `${anchor.canonicalKind ?? 'entity'}:${anchor.canonicalId}`
-      : anchor.symbolPath ?? anchor.label;
-
-    // Embed a sentinel token that renderContextFooter() in the webview
-    // will parse into a styled badge. Format: [anchor-status:STATE:LABEL]
-    // The sentinel is kept at the end so the human-readable prefix still
-    // renders correctly in any context that doesn't strip it.
-    const sentinel = `[anchor-status:${status}:${label ?? ''}]`;
-
-    switch (status) {
-      case 'promoted':
-        return `Anchor: promoted to ${label} ${sentinel}`;
-      case 'rebound':
-        return `Anchor: rebound to ${label} ${sentinel}`;
-      case 'drifted':
-        return `Anchor: drifted near ${label} ${sentinel}`;
-      case 'archived':
-        return `Anchor: archived (${label}) ${sentinel}`;
-      case 'native':
-      default:
-        return anchor.canonicalId
-          ? `Anchor: canonical ${label} ${sentinel}`
-          : `Anchor: native ${label} ${sentinel}`;
+      return helpers.formatAnchorFooterStatus(anchor);
     }
-  }
 
     private _contextFooterFor(message: ChatMessage): string {
     const scope = message.instanceId ?? this.currentInstanceId;
@@ -1139,14 +1195,7 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
   }
 
   private _applyRenderLimits(content: string): { content: string; truncated: boolean } {
-    if (content.length <= ChatPanel.MAX_RENDERED_MESSAGE_CHARS) {
-      return { content, truncated: false };
-    }
-    const clipped = content.slice(0, ChatPanel.MAX_RENDERED_MESSAGE_CHARS);
-    return {
-      content: `${clipped}\n\n[Response truncated]`,
-      truncated: true,
-    };
+    return helpers.applyRenderLimits(content, ChatPanel.MAX_RENDERED_MESSAGE_CHARS);
   }
 
   private _buildMessageActions(message: ChatMessage): MessageAction[] {
@@ -1170,25 +1219,11 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
   }
 
   private _detectImplicitEntities(content: string): ImplicitEntityDetectionResult {
-    const explicitUris = new Set(Array.from(content.matchAll(/\b[a-z-]+:\/\/([A-Za-z0-9._/-]+)/g)).map((match) => match[1]));
-    const candidates = Array.from(content.matchAll(/\b(?:feature|workflow|ADR|tension|entity|data model)\s+([A-Z][A-Za-z0-9._-]{1,80})\b/g))
-      .map((match) => match[1])
-      .filter((name) => !explicitUris.has(name));
-    const deduped = Array.from(new Set(candidates));
-    return {
-      names: deduped.slice(0, ChatPanel.MAX_ENTITY_LINKS_PER_MESSAGE),
-      truncated: deduped.length > ChatPanel.MAX_ENTITY_LINKS_PER_MESSAGE,
-    };
+    return helpers.detectImplicitEntities(content, ChatPanel.MAX_ENTITY_LINKS_PER_MESSAGE);
   }
 
   private _formatImplicitEntityNotice(result: ImplicitEntityDetectionResult): string {
-    if (result.names.length === 0) {
-      return '';
-    }
-    const prefix = 'Implicit entity references detected: ';
-    const body = result.names.join(', ');
-    const suffix = result.truncated ? ' … [Entity link cap reached]' : '';
-    return `${prefix}${body}${suffix}`;
+    return helpers.formatImplicitEntityNotice(result);
   }
 
   private async _copyMessage(messageId: string): Promise<void> {
@@ -1403,7 +1438,9 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
   private _sendModelUpdate(): void {
     const provider = this.architectLlm?.currentConfig?.provider ?? '';
     const model = this.architectLlm?.currentConfig?.model ?? '';
-    const models = provider === 'anthropic' ? ANTHROPIC_MODELS : provider === 'openai' ? OPENAI_MODELS : [];
+    const models = provider === 'anthropic' ? ANTHROPIC_MODELS
+      : provider === 'openai' ? OPENAI_MODELS
+      : [];
     const capabilities = this.architectLlm?.getModelCapabilities(provider as ArchitectProvider, model) ?? { textAttachments: false, imageAttachments: false };
     void this.postMessage({
       type: 'updateModels',
@@ -1421,7 +1458,9 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
   private async _changeProvider(provider: ArchitectProvider): Promise<void> {
     // Update in-memory config immediately so _sendModelUpdate reads the new value.
     if (this.architectLlm) {
-      const models = provider === 'anthropic' ? ANTHROPIC_MODELS : provider === 'openai' ? OPENAI_MODELS : [];
+      const models = provider === 'anthropic' ? ANTHROPIC_MODELS
+        : provider === 'openai' ? OPENAI_MODELS
+        : [];
       const defaultModel = models[0] ?? '';
       const apiKey = (provider !== 'ollama')
         ? (await this.architectLlm.getApiKey(provider) ?? '')
@@ -1548,17 +1587,11 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
     this._lastRecommendedActions = actions;
 
     // Run pass analysis to get continuation decision
-    const result = analyzePass(this._autonomyState, { content, actions });
+    const result = analyzePass(this._autonomyState, { content, actions, envelope });
 
-    // Broadcast actions to webview
-    if (result.actionSet.actions.length > 0) {
-      void this.postMessage({
-        type: 'recommendedActions',
-        messageId,
-        actions: result.actionSet.actions.map((a) => ({ id: a.id, label: a.label, rationale: a.rationale })),
-        doAllEligible: result.actionSet.doAllEligible,
-      });
-    }
+    // Note: action chips are rendered inline by the SUMMARY envelope card
+    // (see card-renderer.ts renderEnvelope). No separate broadcast needed —
+    // it would duplicate the buttons below the assistant message.
 
     if (result.decision.shouldContinue && !this.abortController?.signal.aborted) {
       // Advance state and continue
@@ -1599,11 +1632,15 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       const continuationPrompt = result.nextPrompt ?? buildContinuationPrompt(selectedAction?.label);
       await this._runAutonomyContinuationPass(continuationPrompt, llmMessages, tools);
     } else {
-      // Stopped — update status and show reason
+      // Stopped — persist task state so the next turn can resume from a known position.
+      this._lastStopContext = {
+        summary: envelope.summary,
+        nextSteps: result.actionSet.actions.slice(0, 3).map((a) => ({ label: a.label, rationale: a.rationale })),
+      };
       this._broadcastAutonomyStatus();
       if (result.decision.reason) {
         const statusView = deriveAutonomyStatusView(this._autonomyState);
-        const stopText = `*${result.decision.reason}* ${statusView.countingActive ? `[${statusView.summary}]` : ''}`;
+        const stopText = `${result.decision.reason}${statusView.countingActive ? ` [${statusView.summary}]` : ''}`;
         const stopMsg: ChatMessage = {
           id: this._createMessageId(),
           role: 'system',
@@ -1623,7 +1660,17 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
     baseLlmMessages: ArchitectMessage[],
     tools: ToolDefinition[],
   ): Promise<void> {
-    if (this._autonomyContinuing) return; // prevent re-entrancy
+    if (this._autonomyContinuing) {
+      console.warn('[DreamGraph] _runAutonomyContinuationPass: re-entrant call dropped — a continuation is already in progress.');
+      // F-08: surface the dropped re-entrant call so the user knows their
+      // input wasn't lost silently. Soft notification — no modal.
+      void this.postMessage({
+        type: 'tool-progress',
+        tool: 'autonomy',
+        message: 'A continuation pass is already running — additional trigger ignored.',
+      });
+      return; // prevent re-entrancy
+    }
     this._autonomyContinuing = true;
 
     try {
@@ -1650,12 +1697,17 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       const task = inferTask(envelope?.intentMode ?? 'ask_dreamgraph');
       const autonomyInstruction: AutonomyInstructionState = { ...this._autonomyState, enabled: true };
       const provider = this.architectLlm?.provider ?? undefined;
-      const { system } = assemblePrompt(task, envelope, undefined, undefined, autonomyInstruction, provider);
+      // Build full context for the continuation pass so the model has the same
+      // grounding it would have in a normal user-initiated turn.
+      const contextResult = envelope
+        ? await this._buildPromptContext(task, envelope, prompt, 'continuation')
+        : { assembledContext: '', reasoningPacket: null };
+      const { system } = assemblePrompt(task, envelope, contextResult.assembledContext || undefined, undefined, autonomyInstruction, provider);
 
       const llmMessages: ArchitectMessage[] = [{ role: 'system', content: system }];
-      const recentMessages = this.messages.slice(-20);
-      for (const msg of recentMessages) {
-        if (msg.role === 'user' || msg.role === 'assistant') llmMessages.push({ role: msg.role, content: msg.content });
+      // Bounded history: same caps as handleUserMessage (last 20 turns, per-message char caps).
+      for (const msg of buildBoundedConversationMessages(this.messages, 20)) {
+        llmMessages.push({ role: msg.role, content: msg.content });
       }
 
       await this.postMessage({ type: 'stream-start' });
@@ -1733,6 +1785,19 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
     }
   }
 
+  /**
+   * Strip the structured pass envelope JSON fence from content before displaying.
+   * The fence is parsed by extractStructuredPassEnvelope and should not render in chat.
+   * Only strips blocks that contain the autonomy contract fields (goal_status).
+   */
+  private _stripStructuredEnvelope(content: string): string {
+    return helpers.stripStructuredEnvelope(content);
+  }
+
+  private _formatStopContextBlock(ctx: { summary?: string; nextSteps: Array<{ label: string; rationale?: string }> }): string {
+    return helpers.formatStopContextBlock(ctx);
+  }
+
   private async _executeRecommendedAction(actionId: string): Promise<void> {
     const action = this._lastRecommendedActions.find((a) => a.id === actionId);
     if (!action) return;
@@ -1747,11 +1812,8 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
     const combined = `Execute these steps sequentially:\n${labels.map((l, i) => `${i + 1}. ${l}`).join('\n')}`;
     await this.handleUserMessage(combined);
   }
-  private static readonly SECRET_PATTERNS = [
-    /(?:api[_-]?key|secret|token|password|passwd|auth)\s*[:=]\s*\S+/gi,
-    /(?:sk-|pk-|ghp_|gho_|github_pat_)\S+/g,
-    /-----BEGIN (?:RSA |EC )?PRIVATE KEY-----[\s\S]*?-----END/g,
-  ];
+  /** Re-exported from helpers.ts. */
+  private static readonly SECRET_PATTERNS = helpers.SECRET_PATTERNS;
   /** Cap on accumulated streaming content to prevent context window overflow
    *  when the agent runs many iterations. Content beyond this is still executed
    *  but not accumulated into streamingContent (the webview already received it). */
@@ -1788,7 +1850,7 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
   }
 
   private static _toolTimeoutMs(toolName: string): number {
-    return ChatPanel.TOOL_TIMEOUT_MS[toolName] ?? ChatPanel.TOOL_TIMEOUT_MS._default;
+    return helpers.toolTimeoutMs(toolName);
   }
 
   private async runAgenticLoop(initialMessages: ArchitectMessage[], tools: ToolDefinition[]): Promise<string> {
@@ -1797,12 +1859,17 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
   }
 
   const llmMessages = [...initialMessages];
-  let rawMessages: unknown[] = llmMessages.map((message) => {
-    if (Array.isArray(message.content)) {
+  // Anthropic does not accept role:"system" in the messages array — it must be
+  // a top-level parameter. Strip system messages here; _callAnthropicWithTools
+  // re-extracts and injects the system prompt via _splitSystem + _buildAnthropicMessagesRequest.
+  let rawMessages: unknown[] = llmMessages
+    .filter((message) => message.role !== 'system')
+    .map((message) => {
+      if (Array.isArray(message.content)) {
+        return { role: message.role, content: message.content };
+      }
       return { role: message.role, content: message.content };
-    }
-    return { role: message.role, content: message.content };
-  });
+    });
   let finalText = '';
   let pass = 0;
   const maxPasses = 12;
@@ -1856,6 +1923,9 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
             tool_use_id: toolCall.id,
             content: normalized,
           });
+          // F-04: invalidate context-builder caches when this tool is known to
+          // mutate cognitive state, so the next envelope reflects the new graph.
+          this.contextBuilder?.maybeInvalidateForTool(toolCall.name);
           this._lastToolTrace.push({
             tool: toolCall.name,
             argsSummary: this._summarizeToolArgs(toolCall.input ?? {}),
@@ -1884,6 +1954,11 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       }
 
       rawMessages.push({ role: 'user', content: toolResultBlocks });
+      // Bound rawMessages growth across passes: tool_results from passes that are
+      // already 2+ passes behind have been consumed by the model — replace their
+      // content with a short stub. This prevents quadratic growth when the loop
+      // runs many passes (each pass otherwise re-sends every prior tool_result in full).
+      _elideStaleToolResults(rawMessages, /*keepLastPairs*/ 6);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       const isTimeout = this._isTimeoutError(err);
@@ -1932,6 +2007,47 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
     }
   }
 
+  // Wrap-up fallback: the loop ran to maxPasses without the model emitting an
+  // empty-toolCall response. If we have prior tool activity but no final text,
+  // the chat would render "(No response)" and the autonomy parser would find no
+  // structured envelope — leading to a spurious "Paused: no clear next step"
+  // even though the model did real work. Force one no-tools pass so the model
+  // is required to summarize what it did and what to do next.
+  if (!finalText.trim() && rawMessages.length > llmMessages.length) {
+    try {
+      const wrapNote = '\n\n_(Wrapping up: agentic loop hit pass limit — requesting summary…)_\n';
+      this.streamingContent += wrapNote;
+      await this.postMessage({ type: 'stream-chunk', chunk: wrapNote });
+
+      const wrapPrompt: Array<Record<string, unknown>> = [
+        { type: 'text', text: 'You have used the available tool budget for this turn. Stop calling tools. In your reply, briefly summarize what you discovered, what you changed (if anything), the current state, and one clear recommended next step. If autonomy is enabled, emit the structured JSON envelope as instructed by the system prompt.' },
+      ];
+      const wrapMessages = [...rawMessages, { role: 'user', content: wrapPrompt }];
+
+      const wrapTimeout = this._getLlmTimeoutMs({ mode: 'stream' });
+      const wrapReq = this._createRequestSignal(wrapTimeout);
+      try {
+        await this.postMessage({ type: 'stream-thinking', active: true });
+        const wrapResponse = await this.architectLlm.callWithTools(wrapMessages as ArchitectMessage[], [], wrapMessages as unknown[], wrapReq.signal);
+        if (wrapResponse.content) {
+          const safeChunk = this._redactSecrets(wrapResponse.content);
+          finalText += safeChunk;
+          this.streamingContent += safeChunk;
+          await this.postMessage({ type: 'stream-chunk', chunk: safeChunk });
+        }
+      } finally {
+        wrapReq.dispose();
+        await this.postMessage({ type: 'stream-thinking', active: false });
+      }
+    } catch (wrapErr) {
+      // Best-effort fallback — don't mask the original loop result if wrap-up fails.
+      const note = `\n\n⚠️ Could not generate wrap-up summary: ${wrapErr instanceof Error ? wrapErr.message : String(wrapErr)}\n`;
+      finalText += note;
+      this.streamingContent += note;
+      await this.postMessage({ type: 'stream-chunk', chunk: note });
+    }
+  }
+
   return finalText;
 }
 
@@ -1946,18 +2062,29 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       this._domPurifySource !== null
     ) return;
     const extPath = this.context.extensionPath;
-    const libs: Array<{ key: 'md' | 'dp'; relPath: string; name: string }> = [
-      { key: 'md', relPath: path.join('node_modules', 'markdown-it', 'dist', 'markdown-it.min.js'), name: 'markdown-it' },
-      { key: 'dp', relPath: path.join('node_modules', 'dompurify', 'dist', 'purify.min.js'), name: 'DOMPurify' },
+    // Vendor JS is copied to dist/vendor/ during build (see package.json `build:vendor`).
+    // node_modules/** is excluded from the packaged VSIX, so loading from dist/vendor/ is the only reliable source at runtime.
+    const libs: Array<{ key: 'md' | 'dp'; relPaths: string[]; name: string }> = [
+      { key: 'md', relPaths: [path.join('dist', 'vendor', 'markdown-it.min.js'), path.join('node_modules', 'markdown-it', 'dist', 'markdown-it.min.js')], name: 'markdown-it' },
+      { key: 'dp', relPaths: [path.join('dist', 'vendor', 'purify.min.js'), path.join('node_modules', 'dompurify', 'dist', 'purify.min.js')], name: 'DOMPurify' },
     ];
     for (const lib of libs) {
-      try {
-        const fullPath = path.join(extPath, lib.relPath);
-        const src = fs.readFileSync(fullPath, 'utf-8');
-        if (lib.key === 'md') this._markdownItSource = src;
-        else this._domPurifySource = src;
-      } catch (err) {
-        console.error(`[DreamGraph] Failed to load ${lib.name} browser build — falling back to plaintext rendering. ${err instanceof Error ? err.message : String(err)}`);
+      let loaded = false;
+      let lastErr: unknown;
+      for (const rel of lib.relPaths) {
+        try {
+          const fullPath = path.join(extPath, rel);
+          const src = fs.readFileSync(fullPath, 'utf-8');
+          if (lib.key === 'md') this._markdownItSource = src;
+          else this._domPurifySource = src;
+          loaded = true;
+          break;
+        } catch (err) {
+          lastErr = err;
+        }
+      }
+      if (!loaded) {
+        console.error(`[DreamGraph] Failed to load ${lib.name} browser build from ${lib.relPaths.join(' or ')} — falling back to plaintext rendering. ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`);
         if (lib.key === 'md') this._markdownItSource = '';
         else this._domPurifySource = '';
       }
@@ -1977,16 +2104,7 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
   }
 
   private _redactSecrets(content: string): string {
-    return ChatPanel.SECRET_PATTERNS.reduce((text, pattern) =>
-      text.replace(pattern, (match) => {
-        const sepMatch = match.match(/[:=]\s*/);
-        if (sepMatch && typeof sepMatch.index === 'number') {
-          return match.slice(0, sepMatch.index + sepMatch[0].length) + '****';
-        }
-        return match.slice(0, 8) + '****';
-      }),
-      content,
-    );
+    return helpers.redactSecrets(content);
   }
 
   private async _executeMessageActionTool(toolName: string, input: Record<string, unknown>): Promise<unknown> {
@@ -2015,80 +2133,23 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
   }
 
   private _stringifyToolResult(result: unknown): string {
-    if (typeof result === 'string') {
-      return result;
-    }
-    if (result === undefined) {
-      return 'undefined';
-    }
-    try {
-      return JSON.stringify(result, null, 2);
-    } catch {
-      return String(result);
-    }
+    return helpers.stringifyToolResult(result);
   }
 
   private _truncateToolResult(toolName: string, content: string): string {
-    const limit = ChatPanel._toolResultLimit(toolName);
-    if (content.length <= limit) {
-      return content;
-    }
-    return `${content.slice(0, limit)}\n\n[Tool result truncated to ${limit} chars]`;
+    return helpers.truncateToolResult(content, ChatPanel._toolResultLimit(toolName));
   }
 
   private _summarizeToolArgs(input: unknown): string {
-    if (!input || typeof input !== 'object') return 'no args';
-    const keys = Object.keys(input as Record<string, unknown>).slice(0, 4);
-    return keys.length > 0 ? keys.join(', ') : 'no args';
+    return helpers.summarizeToolArgs(input);
   }
 
   private _deriveVerdict(content: string, trace: ToolTraceEntry[]): VerdictBanner {
-    const normalized = content.toLowerCase();
-    const failedCount = trace.filter((t) => t.status === 'failed').length;
-    if (normalized.includes('verified:') || normalized.includes('confirmed:') || (trace.length > 0 && failedCount === 0)) {
-      return {
-        level: 'verified',
-        summary: failedCount === 0 && trace.length > 0
-          ? `Verified with ${trace.length} executed tool call${trace.length === 1 ? '' : 's'}.`
-          : 'Verified based on explicit evidence in the response.',
-      };
-    }
-    if (failedCount > 0 || normalized.includes('likely') || normalized.includes('partial')) {
-      return {
-        level: 'partial',
-        summary: failedCount > 0
-          ? `Partial confidence: ${failedCount} tool call${failedCount === 1 ? '' : 's'} failed during evidence gathering.`
-          : 'Partial confidence: the response includes uncertainty or incomplete evidence.',
-      };
-    }
-    return {
-      level: 'speculative',
-      summary: 'Speculative synthesis: no strong verification signals were detected.',
-    };
+    return helpers.deriveVerdict(content, trace);
   }
 
   private _extractFilesAffected(toolNameOrInput: unknown, inputOrResult?: unknown, maybeResult?: string): string[] {
-    const input = typeof toolNameOrInput === 'string' ? inputOrResult : toolNameOrInput;
-    const result = typeof toolNameOrInput === 'string' ? (maybeResult ?? '') : (typeof inputOrResult === 'string' ? inputOrResult : '');
-    const found = new Set<string>();
-    const visit = (value: unknown): void => {
-      if (typeof value === 'string') {
-        if (/^[A-Za-z]:\\|^\.|^src\/|^extensions\//.test(value) || /\.(ts|tsx|js|jsx|json|md|css|html)$/i.test(value)) {
-          found.add(value);
-        }
-        return;
-      }
-      if (Array.isArray(value)) {
-        value.forEach(visit);
-        return;
-      }
-      if (value && typeof value === 'object') {
-        Object.values(value as Record<string, unknown>).forEach(visit);
-      }
-    };
-    visit(input);
-    if (found.size === 0) visit(result);
-    return Array.from(found).slice(0, 5);
+    return helpers.extractFilesAffected(toolNameOrInput, inputOrResult, maybeResult);
   }
 
   private async _verifyEntities(names: string[]): Promise<Record<string, EntityVerification>> {

@@ -146,7 +146,9 @@ export function shouldContinueAfterPass(
     return { shouldContinue: false, reason: 'Stopped: blocking failure encountered.', selectionMode: 'none' };
   }
   if (!signal.hasClearNextStep) {
-    return { shouldContinue: false, reason: 'Stopped: no clear next step exists.', selectionMode: 'none' };
+    // Pause for user selection rather than hard-stopping. The webview will show
+    // any action chips that were broadcast; the user can select one or type "resume".
+    return { shouldContinue: false, reason: 'Paused: no clear next step identified — select an action or type "resume" to continue.', selectionMode: 'user' };
   }
   if (!signal.nextStepWithinScope) {
     return { shouldContinue: false, reason: 'Stopped: next step is outside current scope.', selectionMode: 'none' };

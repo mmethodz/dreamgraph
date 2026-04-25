@@ -161,7 +161,7 @@ async function shell(title: string, body: string, activeTab: string): Promise<st
   </nav>
   <main>${body}</main>
   <footer>
-    <span>${BRAND} v${VERSION} "El Alarife"</span>
+    <span>${BRAND} v${VERSION} "Vishnu"</span>
     <span>Instance: ${instanceId}</span>
     <span>Generated: ${new Date().toISOString()}</span>
   </footer>

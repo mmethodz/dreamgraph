@@ -58,7 +58,11 @@ export function getRenderScript(): string {
        * Stage 2: DOMPurify explicit allowlist → safe HTML
        */
       window.renderMarkdown = function(content) {
-        const raw = md.render(content);
+        var src = content;
+        if (typeof window.normalizeEnvelopeFence === 'function') {
+          try { src = window.normalizeEnvelopeFence(content); } catch (_e) { src = content; }
+        }
+        const raw = md.render(src);
         var clean = DOMPurify.sanitize(raw, {
           ALLOWED_TAGS: [
             'h1','h2','h3','h4','h5','h6',

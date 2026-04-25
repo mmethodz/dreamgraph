@@ -1,6 +1,6 @@
 # DreamGraph Data Model
 
-> All 17 data stores that make up DreamGraph's persistent state.
+> All 20 data stores that make up DreamGraph's persistent state.
 
 ---
 

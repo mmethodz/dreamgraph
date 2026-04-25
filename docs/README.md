@@ -1,6 +1,6 @@
 # DreamGraph Documentation
 
-> **v7.1.0 "El Alarife"** — Documentation generated from DreamGraph's own knowledge graph.
+> **v8.0.0 "Vishnu"** — Documentation generated from DreamGraph's own knowledge graph.
 
 ---
 
@@ -20,7 +20,7 @@ It thinks in cycles: **dream → validate → learn → repeat** — and schedul
 | [Cognitive Engine](cognitive-engine.md) | State machine, 10 dream strategies, normalization, tensions, adversarial, temporal, metacognition, scheduling |
 | [Architect 5-Slice Implementation Story](architect-5-slice-implementation-story.md) | Detailed implementation story for cognitive output rendering slices 1–5 in the VS Code extension |
 | [LLM Setup](setup-llm.md) | Configure providers, API keys, and engine settings for DreamGraph instances |
-| [Tools Reference](tools-reference.md) | Complete 68-tool catalog with parameter tables and 26 resource URIs |
+| [Tools Reference](tools-reference.md) | Complete 69-tool catalog with parameter tables and 26 resource URIs |
 | [Data Model](data-model.md) | All 21 data store schemas and relationship map |
 | [Workflows](workflows.md) | 15 step-by-step operational process flows |
 | [The Chronicle](narrative.md) | Auto-generated system autobiography — written by DreamGraph about itself |
@@ -54,12 +54,12 @@ After starting the daemon, configure your LLM (dashboard or `engine.env`), then 
 
 | Metric | Value |
 |---|---|
-| MCP tools | 68 (28 cognitive · 31 sense/knowledge · 9 discipline) |
+| MCP tools | 69 (28 cognitive · 31 sense/knowledge · 10 discipline) |
 | MCP resources | 26 |
 | Dream strategies | 10 (auto-adapting) |
 | CLI commands | 16 |
 | Cognitive states | 5 |
-| Data stores | 21 |
+| Data stores | 20 |
 | Workflows | 15 |
 | Promotion threshold | ≥ 0.62 combined confidence |
 

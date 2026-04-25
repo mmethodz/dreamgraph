@@ -300,7 +300,7 @@ if can_build_vscode_extension; then
         EXT_NAME=$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('$EXT_PKG','utf8')).name)")
         EXT_VER=$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('$EXT_PKG','utf8')).version)")
         EXTENSION_ID="${EXT_PUBLISHER}.${EXT_NAME}"
-        LEGACY_EXTENSION_VERSION="7.0.0"
+        LEGACY_EXTENSION_VERSION="7"
         VSIX_PATH="$EXT_SOURCE/${EXT_NAME}-${EXT_VER}.vsix"
 
         ensure_extension_build_dependencies
@@ -436,4 +436,6 @@ echo " Binary:  $BIN_DIR"
 echo " Links:   $LINK_DIR/dg, $LINK_DIR/dreamgraph"
 echo " Run:     dg --help"
 echo " Start:   dg start <instance-name> --http"
+echo ""
+echo -e "${YELLOW} Reminder: restart any running DreamGraph and VS Code instances to load the updated installation.${NC}"
 echo ""

@@ -1,11 +1,6 @@
 # VS Code Assisted Reasoning
 
-> Auto-generated primary workflow doc. Canonical structured source: data/workflows.json.
-
-> Brings DreamGraph context into the editor through extension-hosted panels, status indicators, daemon communication, and contextual prompt building.
-
-**Trigger:** VS Code extension activation or user interaction  
-**Source files:** extensions/vscode/src/extension.ts, extensions/vscode/src/chat-panel.ts, extensions/vscode/src/context-builder.ts, extensions/vscode/src/daemon-client.ts  
+**Trigger:**   
 
 ## Flowchart
 
@@ -20,27 +15,21 @@ flowchart TD
     S3 --> S4
     S5["Reflect daemon health and status through lightweight UI signals such as the status bar."]
     S4 --> S5
+    S6["When a local run_command tool execution times out, automatically retry once with a longer timeout before escalating to the user."]
+    S5 --> S6
 ```
 
 ## Steps
 
 ### 1. Activate the VS Code extension and establish daemon communication.
 
-Start the extension and connect to the DreamGraph daemon so editor features have live project context.
-
 ### 2. Build or retrieve relevant DreamGraph context for the current editing situation.
-
-Collect contextual project knowledge relevant to the active file, selection, or user intent.
 
 ### 3. Render conversational or dashboard surfaces inside VS Code.
 
-Show DreamGraph-driven chat or dashboard UI inside the extension host surfaces.
-
 ### 4. Let the user ask questions, inspect context, and monitor DreamGraph state from the editor.
-
-Support interactive reasoning and system inspection directly from the IDE.
 
 ### 5. Reflect daemon health and status through lightweight UI signals such as the status bar.
 
-Expose connectivity and health state so the user can see whether DreamGraph services are available.
+### 6. When a local run_command tool execution times out, automatically retry once with a longer timeout before escalating to the user.
 

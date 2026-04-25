@@ -599,6 +599,8 @@ export interface DreamHistoryEntry {
   tensions_expired: number;
   /** Tensions that had urgency/TTL decayed this cycle */
   tensions_decayed: number;
+  /** Resolved tensions reactivated by contradictory evidence */
+  tensions_reactivated?: number;
 }
 
 export interface DreamHistoryFile {

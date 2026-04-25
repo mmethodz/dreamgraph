@@ -93,6 +93,7 @@ const FeatureEntrySchema = z.object({
   source_repo: z.string().default(""),
   source_files: z.array(SourceFileItem).default([]),
   status: z.string().default("active"),
+  superseded_by: z.string().optional(),
   category: z.string().default("core"),
   tags: z.array(z.string()).default([]),
   domain: z.string().default("core"),
@@ -126,6 +127,7 @@ const WorkflowEntrySchema = z.object({
   domain: z.string().default("core"),
   keywords: z.array(z.string()).default([]),
   status: z.string().default("active"),
+  superseded_by: z.string().optional(),
   steps: z.array(WorkflowStepLenient).default([]),
   links: z.array(GraphLinkLenient).default([]),
 }).passthrough();
@@ -165,6 +167,7 @@ const DataModelEntrySchema = z.object({
   domain: z.string().default("core"),
   keywords: z.array(z.string()).default([]),
   status: z.string().default("active"),
+  superseded_by: z.string().optional(),
   key_fields: z.array(EntityFieldLenient).default([]),
   relationships: z.array(EntityRelationshipLenient).default([]),
   links: z.array(GraphLinkLenient).default([]),
@@ -178,6 +181,7 @@ const CapabilityEntrySchema = z.object({
   source_files: z.array(SourceFileItem).default([]),
   category: z.string().default("core"),
   status: z.string().default("active"),
+  superseded_by: z.string().optional(),
   tags: z.array(z.string()).default([]),
   domain: z.string().default("core"),
   keywords: z.array(z.string()).default([]),
@@ -196,6 +200,134 @@ const TARGET_FILES: Record<SeedTarget, string> = {
   data_model: "data_model.json",
   capabilities: "capabilities.json",
 };
+
+// ---------------------------------------------------------------------------
+// Adapters: parsed Zod entry → domain interface (F-01)
+//
+// The Zod schemas above use `.passthrough()` and `.transform()`, so their
+// inferred types are structurally close to the domain interfaces but not
+// identical (TS cannot see through the unions/transforms). These adapters
+// are the single, explicit boundary where validated input becomes a typed
+// domain entity. Removes the `as unknown as Feature` chain.
+// ---------------------------------------------------------------------------
+
+type FeatureEntry = z.infer<typeof FeatureEntrySchema>;
+type WorkflowEntry = z.infer<typeof WorkflowEntrySchema>;
+type DataModelEntry = z.infer<typeof DataModelEntrySchema>;
+type CapabilityEntry = z.infer<typeof CapabilityEntrySchema>;
+
+function toGraphLink(raw: FeatureEntry["links"][number]): GraphLink {
+  // Both branches of GraphLinkLenient already produce the GraphLink shape,
+  // but the union type loses the precise `type` literal. Re-narrow here.
+  const link = raw as GraphLink;
+  return {
+    target: link.target,
+    type: link.type,
+    relationship: link.relationship,
+    description: link.description,
+    strength: link.strength,
+    ...(link.meta ? { meta: link.meta } : {}),
+  };
+}
+
+function toGraphLinkArray(raw: FeatureEntry["links"]): GraphLink[] {
+  return raw.map(toGraphLink);
+}
+
+function entryToFeature(entry: FeatureEntry): Feature {
+  // `.passthrough()` keeps unknown fields, so cast for the extras while
+  // keeping known fields explicit.
+  const passthrough = entry as unknown as Record<string, unknown>;
+  return {
+    ...passthrough,
+    id: entry.id,
+    name: entry.name,
+    description: entry.description,
+    source_repo: entry.source_repo,
+    source_files: entry.source_files,
+    status: entry.status,
+    ...(entry.superseded_by ? { superseded_by: entry.superseded_by } : {}),
+    category: entry.category,
+    tags: entry.tags,
+    domain: entry.domain,
+    keywords: entry.keywords,
+    links: toGraphLinkArray(entry.links),
+  } as Feature;
+}
+
+function entryToWorkflow(entry: WorkflowEntry): Workflow {
+  const passthrough = entry as unknown as Record<string, unknown>;
+  const steps: WorkflowStep[] = entry.steps.map((s) => ({
+    order: s.order,
+    name: s.name,
+    description: s.description,
+  }));
+  return {
+    ...passthrough,
+    id: entry.id,
+    name: entry.name,
+    description: entry.description,
+    trigger: entry.trigger,
+    source_repo: entry.source_repo,
+    source_files: entry.source_files,
+    domain: entry.domain,
+    keywords: entry.keywords,
+    status: entry.status,
+    ...(entry.superseded_by ? { superseded_by: entry.superseded_by } : {}),
+    steps,
+    links: toGraphLinkArray(entry.links),
+  } as Workflow;
+}
+
+function entryToDataModel(entry: DataModelEntry): DataModelEntity {
+  const passthrough = entry as unknown as Record<string, unknown>;
+  const keyFields: EntityField[] = entry.key_fields.map((f) => ({
+    name: f.name,
+    type: f.type,
+    description: f.description,
+  }));
+  const relationships: EntityRelationship[] = entry.relationships.map((r) => ({
+    type: r.type,
+    target: r.target,
+    via: r.via,
+  }));
+  return {
+    ...passthrough,
+    id: entry.id,
+    name: entry.name,
+    description: entry.description,
+    table_name: entry.table_name,
+    storage: entry.storage,
+    source_repo: entry.source_repo,
+    source_files: entry.source_files,
+    domain: entry.domain,
+    keywords: entry.keywords,
+    status: entry.status,
+    ...(entry.superseded_by ? { superseded_by: entry.superseded_by } : {}),
+    key_fields: keyFields,
+    relationships,
+    links: toGraphLinkArray(entry.links),
+  } as DataModelEntity;
+}
+
+function entryToCapability(entry: CapabilityEntry): CapabilityEntity {
+  const passthrough = entry as unknown as Record<string, unknown>;
+  return {
+    ...passthrough,
+    id: entry.id,
+    name: entry.name,
+    description: entry.description,
+    source_repo: entry.source_repo,
+    source_files: entry.source_files,
+    category: entry.category,
+    status: entry.status,
+    ...(entry.superseded_by ? { superseded_by: entry.superseded_by } : {}),
+    tags: entry.tags,
+    domain: entry.domain,
+    keywords: entry.keywords,
+    links: toGraphLinkArray(entry.links),
+  } as CapabilityEntity;
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -351,8 +483,17 @@ export function registerEnrichSeedDataTool(server: McpServer): void {
           "replace: wipe existing data and write only the incoming entries. " +
           "Use replace when you have a complete view and want to clean out stale init_graph entries.",
         ),
+      strict: z
+        .boolean()
+        .default(false)
+        .describe(
+          "When true, the entire batch is rejected if ANY entry fails schema validation — " +
+          "nothing is persisted and the seed file is left untouched. Use this for trusted, " +
+          "all-or-nothing imports. Default false preserves the legacy behaviour of accepting " +
+          "valid entries and reporting the rest as warnings.",
+        ),
     },
-    async ({ target, entries, mode }) => {
+    async ({ target, entries, mode, strict }) => {
       // ---- Validate target and mode server-side (no client enum caching) ----
       const VALID_TARGETS = Object.keys(TARGET_FILES);
       if (!VALID_TARGETS.includes(target)) {
@@ -395,7 +536,7 @@ export function registerEnrichSeedDataTool(server: McpServer): void {
               for (const raw of entries) {
                 const parsed = FeatureEntrySchema.safeParse(raw);
                 if (parsed.success) {
-                  validated.push(parsed.data as unknown as Feature);
+                  validated.push(entryToFeature(parsed.data));
                 } else {
                   validationErrors.push(
                     `Feature entry '${(raw as Record<string, unknown>).id ?? "?"}': ${parsed.error.issues.map((i) => i.message).join("; ")}`,
@@ -410,7 +551,7 @@ export function registerEnrichSeedDataTool(server: McpServer): void {
                 const parsed = WorkflowEntrySchema.safeParse(raw);
                 if (parsed.success) {
                   // Re-number steps that have order=0 (from string coercion or missing order)
-                  const wf = parsed.data as unknown as Workflow;
+                  const wf = entryToWorkflow(parsed.data);
                   if (wf.steps?.length) {
                     const needsRenumber = wf.steps.some((s: WorkflowStep) => s.order === 0);
                     if (needsRenumber) {
@@ -431,7 +572,7 @@ export function registerEnrichSeedDataTool(server: McpServer): void {
               for (const raw of entries) {
                 const parsed = DataModelEntrySchema.safeParse(raw);
                 if (parsed.success) {
-                  validated.push(parsed.data as unknown as DataModelEntity);
+                  validated.push(entryToDataModel(parsed.data));
                 } else {
                   validationErrors.push(
                     `Data model entry '${(raw as Record<string, unknown>).id ?? "?"}': ${parsed.error.issues.map((i) => i.message).join("; ")}`,
@@ -445,7 +586,7 @@ export function registerEnrichSeedDataTool(server: McpServer): void {
               for (const raw of entries) {
                 const parsed = CapabilityEntrySchema.safeParse(raw);
                 if (parsed.success) {
-                  validated.push(parsed.data as unknown as CapabilityEntity);
+                  validated.push(entryToCapability(parsed.data));
                 } else {
                   validationErrors.push(
                     `Capability entry '${(raw as Record<string, unknown>).id ?? "?"}': ${parsed.error.issues.map((i) => i.message).join("; ")}`,
@@ -463,6 +604,15 @@ export function registerEnrichSeedDataTool(server: McpServer): void {
             return error(
               "NO_VALID_ENTRIES",
               `All ${entries.length} entries failed validation: ${validationErrors.join(" | ")}`,
+            );
+          }
+
+          // ----- Strict mode: any validation failure rejects the whole batch -----
+          if (strict && validationErrors.length > 0) {
+            return error(
+              "STRICT_VALIDATION_FAILED",
+              `strict=true: ${validationErrors.length} of ${entries.length} entries failed validation; ` +
+                `nothing was persisted. Errors: ${validationErrors.join(" | ")}`,
             );
           }
 

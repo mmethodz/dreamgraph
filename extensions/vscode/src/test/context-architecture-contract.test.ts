@@ -490,6 +490,8 @@ test('evaluation fixture plan: representative task packets preserve sufficiency 
       source: 'heuristic',
     },
     secondaryAnchors: [],
+    contextText: '## Environment Context\nWorkspace runtime: Monorepo with daemon/backend root and VS Code extension subpackage',
+    safetyWarnings: [],
     evidence: [
       {
         kind: 'environment',

@@ -2,6 +2,15 @@
 src/**
 prompts/**
 tsconfig.json
+tsconfig.test.json
 **/*.ts
 **/*.map
 .gitignore
+node_modules/**
+dist/test/**
+dist/**/*.d.ts
+dist/**/*.d.ts.map
+dist-test/**
+tmp/**
+*.tgz
+*.vsix

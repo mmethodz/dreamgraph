@@ -66,11 +66,35 @@ export interface SystemOverview extends ResourceEntry {
 }
 
 // ---------------------------------------------------------------------------
+// Entity lifecycle (per ADR-010, ADR-013)
+//
+// Non-destructive identity-consolidation: legacy/duplicate entities can be
+// marked transitional/deprecated/retired and point at a canonical replacement
+// via `superseded_by`. The literal set is advisory — `status` remains a free
+// string for back-compat with historical values (e.g. "experimental").
+// ---------------------------------------------------------------------------
+
+export type EntityLifecycleStatus =
+  | "active"
+  | "transitional"
+  | "deprecated"
+  | "retired";
+
+export const ENTITY_LIFECYCLE_STATUSES: readonly EntityLifecycleStatus[] = [
+  "active",
+  "transitional",
+  "deprecated",
+  "retired",
+];
+
+// ---------------------------------------------------------------------------
 // Features
 // ---------------------------------------------------------------------------
 
 export interface Feature extends ResourceEntry {
   status: string;
+  /** Canonical entity ID this entry has been superseded by (per ADR-010). */
+  superseded_by?: string;
   category: string;
   tags: string[];
   domain: string;
@@ -94,6 +118,8 @@ export interface Workflow extends ResourceEntry {
   domain: string;
   keywords: string[];
   status: string;
+  /** Canonical entity ID this entry has been superseded by (per ADR-010). */
+  superseded_by?: string;
   links: GraphLink[];
 }
 
@@ -122,6 +148,8 @@ export interface DataModelEntity extends ResourceEntry {
   domain: string;
   keywords: string[];
   status: string;
+  /** Canonical entity ID this entry has been superseded by (per ADR-010). */
+  superseded_by?: string;
   links: GraphLink[];
   constraints?: string[];
   rls?: string;
@@ -137,6 +165,8 @@ export interface DataModelEntity extends ResourceEntry {
 export interface CapabilityEntity extends ResourceEntry {
   category: string;
   status: string;
+  /** Canonical entity ID this entry has been superseded by (per ADR-010). */
+  superseded_by?: string;
   tags: string[];
   domain: string;
   keywords: string[];

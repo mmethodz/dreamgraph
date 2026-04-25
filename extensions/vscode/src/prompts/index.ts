@@ -253,8 +253,29 @@ export function assemblePrompt(
 export function inferTask(
   intentMode: string,
   commandSource?: string,
+  prompt?: string,
 ): ArchitectTask {
-  // Command source overrides
+  const normalizedPrompt = (prompt ?? "").toLowerCase();
+  const isPatchLikePrompt = [
+    "fix",
+    "patch",
+    "edit",
+    "change",
+    "modify",
+    "update",
+    "refactor",
+    "implement",
+    "rewrite",
+    "rename",
+    "remove",
+    "replace",
+    "make it compile",
+    "make build pass",
+    "build pass",
+    "compile",
+    "add support",
+  ].some((phrase) => normalizedPrompt.includes(phrase));
+
   if (commandSource) {
     switch (commandSource) {
       case "explainFile":
@@ -265,10 +286,17 @@ export function inferTask(
         return "validate";
       case "suggestNextAction":
         return "suggest";
+      case "applyPatch":
+      case "modifyCurrentFile":
+      case "fixCurrentFile":
+        return "patch";
     }
   }
 
-  // Intent-based inference
+  if (isPatchLikePrompt) {
+    return "patch";
+  }
+
   switch (intentMode) {
     case "active_file":
       return "explain";

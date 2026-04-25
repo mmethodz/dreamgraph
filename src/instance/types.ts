@@ -214,17 +214,27 @@ export const INSTANCE_DIRS = [
  * Data filenames that should be created as empty stubs for a new instance.
  * Cognitive files start empty; seed files start with `[]`.
  */
+/**
+ * Emergency-only fallback stubs used when [templates/default/](../../templates/default/)
+ * is unavailable (e.g. broken install).
+ *
+ * **Per ADR-051**, these are intentionally minimal — empty containers, no schema
+ * docs, no `_schema`/`_fields` keys. The rich, documented seed content lives in
+ * [templates/default/*.json](../../templates/default/) and is the single source of truth used
+ * during normal `dg init`. ADR-008 requires the fallback to remain (so `dg init`
+ * never hard-fails), but ADR-051 narrows its job to "produce a writable instance"
+ * rather than "duplicate the template".
+ *
+ * If you find yourself adding fields here, you almost certainly want to edit the
+ * matching file under `templates/default/` instead.
+ */
 export const DATA_STUBS: Record<string, unknown> = {
   "dream_graph.json":       { nodes: [], edges: [] },
   "candidate_edges.json":   [],
   "validated_edges.json":   [],
   "tension_log.json":       { tensions: [] },
   "dream_history.json":     { cycles: [] },
-  "adr_log.json":           {
-    _schema: "ADR Log — Architecture Decision Records",
-    _fields: { id: "ADR-NNN", title: "string", status: "accepted|deprecated|superseded", context: "string", decision: "string", consequences: "string", date: "ISO 8601" },
-    decisions: [],
-  },
+  "adr_log.json":           { decisions: [] },
   "ui_registry.json":       { elements: [] },
   "event_log.json":         { events: [] },
   "meta_log.json":          { analyses: [] },
@@ -233,31 +243,9 @@ export const DATA_STUBS: Record<string, unknown> = {
   "threat_log.json":        [],
   "dream_archetypes.json":  [],
   "capabilities.json":      [],
-
-  /* Seed files — schema-documented stubs, populated by init_graph */
-  "system_overview.json":   {
-    _schema: "SystemOverview — project description with repository inventory",
-    id: "system_overview", name: "", description: "", source_repo: "", source_files: [],
-    repositories: [],
-  },
-  "features.json":          [{
-    _schema: "Feature — discoverable capability of the target project",
-    _fields: { id: "snake_case", name: "string", description: "string", source_repo: "string", source_files: ["paths"], status: "active|planned|deprecated", category: "string", tags: ["strings"], domain: "string", keywords: ["strings"], links: [{ target: "id", type: "feature|workflow|data_model", relationship: "verb", description: "string", strength: "strong|moderate|weak" }] },
-    _note: "DELETE after init_graph populates",
-  }],
-  "workflows.json":         [{
-    _schema: "Workflow — process flow in the target project",
-    _fields: { id: "snake_case", name: "string", description: "string", trigger: "string", source_repo: "string", source_files: ["paths"], domain: "string", keywords: ["strings"], status: "active|planned|deprecated", steps: [{ order: 1, name: "string", description: "string" }], links: [{ target: "id", type: "feature|workflow|data_model", relationship: "verb", description: "string", strength: "strong|moderate|weak" }] },
-    _note: "DELETE after init_graph populates",
-  }],
-  "data_model.json":        [{
-    _schema: "DataModelEntity — data store or persistent structure",
-    _fields: { id: "snake_case", name: "string", description: "string", table_name: "string", storage: "postgresql|json_file|sqlite|redis", source_repo: "string", source_files: ["paths"], domain: "string", keywords: ["strings"], status: "active|planned|deprecated", key_fields: [{ name: "string", type: "string", description: "string" }], relationships: [{ type: "has_many|belongs_to", target: "id", via: "fk" }], links: [] },
-    _note: "DELETE after init_graph populates",
-  }],
-  "index.json":             {
-    _schema: "ResourceIndex — fast lookup map of all entities",
-    _fields: { "<entity_id>": { type: "feature|workflow|data_model", uri: "dreamgraph://resource/<type>/<id>", name: "string", source_repo: "string" } },
-    entities: {},
-  },
+  "system_overview.json":   { id: "system_overview", name: "", description: "", source_repo: "", source_files: [], repositories: [] },
+  "features.json":          [],
+  "workflows.json":         [],
+  "data_model.json":        [],
+  "index.json":             { entities: {} },
 };

@@ -256,24 +256,100 @@ export function registerADRTools(server: McpServer): void {
       .join(" ");
   }
 
+  function scoreADRSearch(d: ArchitectureDecisionRecord, query: string): number {
+    const normalizedQuery = normalizeSearchText(query);
+    const queryTokens = tokenizeSearchText(query);
+    const corpus = adrSearchCorpus(d);
+    const normalizedCorpus = normalizeSearchText(corpus);
+    const corpusTokens = new Set(tokenizeSearchText(corpus));
+
+    if (!normalizedQuery) {
+      return 0;
+    }
+
+    let score = 0;
+
+    if (normalizeSearchText(d.id) === normalizedQuery) {
+      score += 200;
+    } else if (normalizeSearchText(d.id).includes(normalizedQuery)) {
+      score += 120;
+    }
+
+    if (normalizeSearchText(d.title) === normalizedQuery) {
+      score += 180;
+    } else if (normalizeSearchText(d.title).includes(normalizedQuery)) {
+      score += 100;
+    }
+
+    if (normalizedCorpus.includes(normalizedQuery)) {
+      score += 80;
+    }
+
+    const matchedVariants = new Set<string>();
+    let exactTokenMatches = 0;
+    let synonymTokenMatches = 0;
+
+    for (const token of queryTokens) {
+      const variants = expandTokenVariants(token);
+      const exactMatch = corpusTokens.has(token);
+      const matchedVariant = variants.find((variant) => corpusTokens.has(variant));
+
+      if (exactMatch) {
+        exactTokenMatches += 1;
+        score += 18;
+        matchedVariants.add(token);
+        continue;
+      }
+
+      if (matchedVariant) {
+        synonymTokenMatches += 1;
+        score += 12;
+        matchedVariants.add(matchedVariant);
+      }
+    }
+
+    if (queryTokens.length > 0) {
+      const coverage = (exactTokenMatches + synonymTokenMatches) / queryTokens.length;
+      score += Math.round(coverage * 40);
+
+      if (coverage === 1) {
+        score += 25;
+      } else if (coverage >= 0.8) {
+        score += 15;
+      } else if (coverage >= 0.6) {
+        score += 8;
+      }
+    }
+
+    const queryBigrams = new Set<string>();
+    for (let i = 0; i < queryTokens.length - 1; i += 1) {
+      queryBigrams.add(`${queryTokens[i]} ${queryTokens[i + 1]}`);
+    }
+
+    for (const bigram of queryBigrams) {
+      if (normalizedCorpus.includes(bigram)) {
+        score += 14;
+      }
+    }
+
+    return score;
+  }
+
   function matchesADRSearch(d: ArchitectureDecisionRecord, query: string): boolean {
-    const corpusTokens = new Set(tokenizeSearchText(adrSearchCorpus(d)));
     const queryTokens = tokenizeSearchText(query);
 
     if (queryTokens.length === 0) {
       return normalizeSearchText(adrSearchCorpus(d)).includes(normalizeSearchText(query));
     }
 
-    const matchedCount = queryTokens.filter((token) => {
-      const variants = expandTokenVariants(token);
-      return variants.some((variant) => corpusTokens.has(variant));
-    }).length;
+    const score = scoreADRSearch(d, query);
+    const minimumScore = queryTokens.length <= 2
+      ? 30
+      : queryTokens.length <= 4
+        ? 45
+        : 55;
 
-    const minimumMatches = queryTokens.length <= 3
-      ? queryTokens.length
-      : Math.max(queryTokens.length - 1, Math.ceil(queryTokens.length * 0.75));
-
-    return matchedCount >= minimumMatches;
+    return score >= minimumScore;
   }
 
   // =========================================================================
@@ -435,9 +511,18 @@ export function registerADRTools(server: McpServer): void {
             filtered = filtered.filter((d) => d.status === params.status);
           }
 
-          // Free text search
+          // Free text search with relevance ranking
           if (params.search) {
-            filtered = filtered.filter((d) => matchesADRSearch(d, params.search!));
+            filtered = filtered
+              .map((d) => ({ decision: d, score: scoreADRSearch(d, params.search!) }))
+              .filter(({ decision, score }) => matchesADRSearch(decision, params.search!) && score > 0)
+              .sort((a, b) => {
+                if (b.score !== a.score) {
+                  return b.score - a.score;
+                }
+                return a.decision.id.localeCompare(b.decision.id);
+              })
+              .map(({ decision }) => decision);
           }
 
           // Guard rail check
@@ -486,7 +571,7 @@ export function registerADRTools(server: McpServer): void {
     "deprecate_architecture_decision",
     "Mark an Architecture Decision Record as deprecated or superseded. Required when an ADR's guard rails no longer apply. The original content is preserved; only the status changes.",
     {
-      adr_id: z.string().describe('The ADR ID to deprecate, e.g. "ADR-001"'),
+      adr_id: z.string().describe("The ADR ID to deprecate, e.g. 'ADR-001'"),
       new_status: z
         .enum(["deprecated", "superseded"])
         .describe("New status for the ADR"),
@@ -503,20 +588,10 @@ export function registerADRTools(server: McpServer): void {
         async (): Promise<ToolResponse<DeprecateADROutput>> =>
           withFileLock("adr_log.json", async () => {
             const log = await loadADRLog();
-            const adr = log.decisions.find((d) => d.id === params.adr_id);
+            const idx = log.decisions.findIndex((d) => d.id === params.adr_id);
 
-            if (!adr) {
-              return error(
-                "NOT_FOUND",
-                `ADR "${params.adr_id}" not found. Available: ${log.decisions.map((d) => d.id).join(", ") || "none"}`
-              );
-            }
-
-            if (adr.status !== "accepted") {
-              return error(
-                "INVALID_INPUT",
-                `ADR "${params.adr_id}" is already ${adr.status}.`
-              );
+            if (idx === -1) {
+              return error("NOT_FOUND", `ADR not found: ${params.adr_id}`);
             }
 
             if (
@@ -524,26 +599,32 @@ export function registerADRTools(server: McpServer): void {
               !params.superseded_by
             ) {
               return error(
-                "INVALID_INPUT",
-                "superseded_by is required when new_status is \"superseded\"."
+                "VALIDATION_ERROR",
+                "superseded_by is required when new_status is 'superseded'"
               );
             }
 
-            adr.status = params.new_status;
-            adr.deprecated_at = new Date().toISOString();
-            adr.deprecation_reason = params.reason;
-            if (params.new_status === "superseded") {
-              adr.superseded_by = params.superseded_by;
-            }
+            const existing = log.decisions[idx];
+            const newStatus: DeprecateADROutput["new_status"] = params.new_status;
+            const updated: ArchitectureDecisionRecord = {
+              ...existing,
+              status: newStatus,
+              superseded_by:
+                newStatus === "superseded"
+                  ? params.superseded_by
+                  : undefined,
+              deprecation_reason: params.reason,
+            };
 
+            log.decisions[idx] = updated;
             await saveADRLog(log);
 
             return success({
-              adr_id: adr.id,
-              previous_status: "accepted",
-              new_status: adr.status,
-              superseded_by: adr.superseded_by,
-              message: `ADR ${adr.id} marked as ${adr.status}. Reason: ${params.reason}`,
+              adr_id: updated.id,
+              new_status: newStatus,
+              superseded_by: updated.superseded_by,
+              reason: params.reason,
+              message: `ADR ${updated.id} marked as ${newStatus}.`,
             });
           })
       );

@@ -27,6 +27,12 @@ import {
 } from "../cognitive/llm.js";
 import { loadJsonData, loadJsonArray } from "../utils/cache.js";
 import {
+  loadJsonValidated,
+  isMissingFileError,
+  MissingFileError,
+} from "../utils/json-store.js";
+import { z } from "zod";
+import {
   getActiveScope,
   isInstanceMode,
   getToolCallCount,
@@ -40,6 +46,88 @@ import type {
   UIRegistryFile,
   ApiSurface,
 } from "../types/index.js";
+
+// ---------------------------------------------------------------------------
+// Minimal load-time validation schemas (F-01)
+//
+// We don't re-declare every nested ADR / UI / ApiSurface field in zod —
+// the existing TS interfaces are the source of truth. These schemas only
+// assert the *structural* shape (top-level fields that downstream code
+// depends on), then pass through the rest. That gives us:
+//   * a clear `ValidationError` instead of a runtime TypeError when a file
+//     is corrupt / version-drifted,
+//   * no maintenance burden when ADR / UI fields evolve.
+// ---------------------------------------------------------------------------
+
+const AdrLogFileSchema = z
+  .object({
+    metadata: z
+      .object({
+        description: z.string().default(""),
+        schema_version: z.string().default(""),
+        total_decisions: z.number().default(0),
+        last_updated: z.string().nullable().default(null),
+      })
+      .passthrough(),
+    decisions: z.array(z.unknown()).default([]),
+  })
+  .passthrough();
+
+const UiRegistryFileSchema = z
+  .object({
+    metadata: z
+      .object({
+        description: z.string().default(""),
+        schema_version: z.string().default(""),
+        total_elements: z.number().default(0),
+        total_categories: z.number().default(0),
+        last_updated: z.string().nullable().default(null),
+      })
+      .passthrough(),
+    elements: z.array(z.unknown()).default([]),
+  })
+  .passthrough();
+
+const EMPTY_ADR_LOG: ADRLogFile = {
+  metadata: {
+    description: "",
+    schema_version: "",
+    total_decisions: 0,
+    last_updated: null,
+  },
+  decisions: [],
+};
+
+const EMPTY_UI_REGISTRY: UIRegistryFile = {
+  metadata: {
+    description: "",
+    schema_version: "",
+    total_elements: 0,
+    total_categories: 0,
+    last_updated: null,
+  },
+  elements: [],
+};
+
+/** Wrap `loadJsonValidated` so missing files map to a typed empty default. */
+async function loadOrEmpty<T>(
+  loader: () => Promise<T>,
+  empty: T,
+  context: string,
+): Promise<T> {
+  try {
+    return await loader();
+  } catch (err) {
+    if (isMissingFileError(err) || err instanceof MissingFileError) {
+      return empty;
+    }
+    // Validation failures (and unexpected errors) propagate — the route
+    // handler turns them into HTTP 500. Silently substituting empty would
+    // mask data corruption.
+    logger.warn(`[api] ${context} load failed: ${(err as Error).message}`);
+    throw err;
+  }
+}
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -115,10 +203,7 @@ async function handleGetInstance(
 
     json(res, 200, {
       uuid: scope?.uuid ?? config.instance.uuid ?? "legacy",
-      name: scope
-        ? (scope as unknown as Record<string, unknown>)["name"] ??
-          scope.uuid.slice(0, 8)
-        : "legacy",
+      name: scope ? scope.name ?? scope.uuid.slice(0, 8) : "legacy",
       project_root: scope?.projectRoot ?? null,
       mode: isInstanceMode() ? "instance" : "legacy",
       policy_profile: "balanced",
@@ -186,11 +271,19 @@ async function handlePostGraphContext(
         loadJsonArray<Feature>("features.json"),
         loadJsonArray<Workflow>("workflows.json"),
         includeAdrs
-          ? loadJsonData<ADRLogFile>("adr_log.json").catch(() => ({ decisions: [] } as unknown as ADRLogFile))
-          : Promise.resolve({ decisions: [] } as unknown as ADRLogFile),
+          ? loadOrEmpty(
+              () => loadJsonValidated("adr_log.json", AdrLogFileSchema) as Promise<ADRLogFile>,
+              EMPTY_ADR_LOG,
+              "adr_log.json",
+            )
+          : Promise.resolve(EMPTY_ADR_LOG),
         includeUi
-          ? loadJsonData<UIRegistryFile>("ui_registry.json").catch(() => ({ elements: [] } as unknown as UIRegistryFile))
-          : Promise.resolve({ elements: [] } as unknown as UIRegistryFile),
+          ? loadOrEmpty(
+              () => loadJsonValidated("ui_registry.json", UiRegistryFileSchema) as Promise<UIRegistryFile>,
+              EMPTY_UI_REGISTRY,
+              "ui_registry.json",
+            )
+          : Promise.resolve(EMPTY_UI_REGISTRY),
         includeTensions
           ? engine.loadTensions().catch(() => ({ signals: [], resolved_tensions: [] }))
           : Promise.resolve({ signals: [], resolved_tensions: [] }),

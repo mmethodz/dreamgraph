@@ -1,4 +1,4 @@
-# Installing DreamGraph v7.1.0 "El Alarife"
+# Installing DreamGraph v8.0.0 "Vishnu"
 
 One-command install from source. Builds the MCP server, deploys the `dg` CLI globally, and installs the VS Code extension.
 
@@ -36,7 +36,7 @@ bash scripts/install.sh
 That's it. After install, open a **new terminal** and run:
 
 ```bash
-dg --version          # DreamGraph CLI v7.1.0 (El Alarife)
+dg --version          # DreamGraph CLI v8.0.0 (Vishnu)
 dg --help             # Show all commands
 ```
 
@@ -197,3 +197,7 @@ Make sure you have Node.js 18+ and npm installed. Run manually to see errors:
 npm install
 npm run build
 ```
+
+### Sidebar / dashboard view disappeared
+
+VS Code occasionally hides the DreamGraph sidebar after a layout change or window-state shuffle. The extension no longer auto-restores it on every editor focus event (that auto-restore was the cause of multi-second cursor stalls in v7.1.0). Instead, when the chat panel and dashboard are both hidden a small **DreamGraph** indicator appears in the status bar — click it to bring the activity-bar container back. You can also run **DreamGraph: Show Dashboard** or **DreamGraph: Open Chat** from the command palette (`Ctrl+Shift+P`).

@@ -19,6 +19,7 @@
  */
 
 import { readFile } from "node:fs/promises";
+import { z } from "zod";
 import { atomicWriteFile } from "../utils/atomic-write.js";
 import { existsSync } from "node:fs";
 import { engine } from "./engine.js";
@@ -44,7 +45,93 @@ import type {
   ScheduleTriggerType,
   ScheduleStatus,
   DreamHistoryEntry,
+  DreamStrategy,
+  AdversarialStrategy,
 } from "./types.js";
+
+// ---------------------------------------------------------------------------
+// Per-action parameter schemas (F-01)
+//
+// `DreamSchedule.parameters` is an open `Record<string, unknown>` because
+// schedules are persisted to JSON. We validate the shape at the top of each
+// `executeAction` case so the action body can use strongly-typed values.
+// ---------------------------------------------------------------------------
+
+const DREAM_STRATEGIES = [
+  "gap_detection",
+  "weak_reinforcement",
+  "cross_domain",
+  "missing_abstraction",
+  "symmetry_completion",
+  "tension_directed",
+  "reflective",
+  "causal_replay",
+  "pgo_wave",
+  "llm_dream",
+  "all",
+] as const satisfies readonly DreamStrategy[];
+
+const ADVERSARIAL_STRATEGIES = [
+  "privilege_escalation",
+  "data_leak_path",
+  "injection_surface",
+  "missing_validation",
+  "broken_access_control",
+  "all_threats",
+] as const satisfies readonly AdversarialStrategy[];
+
+const DreamCycleParamsSchema = z.object({
+  strategy: z.enum(DREAM_STRATEGIES).default("all"),
+  max_dreams: z.number().int().positive().default(100),
+});
+
+const NightmareCycleParamsSchema = z.object({
+  strategy: z.enum(ADVERSARIAL_STRATEGIES).default("all_threats"),
+});
+
+const MetacognitiveParamsSchema = z.object({
+  window_size: z.number().int().min(5).max(500).default(50),
+  auto_apply: z.boolean().default(false),
+});
+
+const DispatchEventParamsSchema = z.object({
+  source: z
+    .enum([
+      "git_webhook",
+      "ci_cd",
+      "runtime_anomaly",
+      "tension_threshold",
+      "federation_import",
+      "manual",
+    ])
+    .default("manual"),
+  severity: z.enum(["critical", "high", "medium", "low", "info"]).default("info"),
+  description: z.string().optional(),
+  affected_entities: z.array(z.string()).default([]),
+  payload: z.record(z.string(), z.unknown()).default({}),
+});
+
+/**
+ * Parse `schedule.parameters` against a per-action schema. On failure we log a
+ * warning and fall back to the schema defaults — schedules should be resilient
+ * (a malformed param shouldn't kill the daemon's tick loop), but the warning
+ * makes drift visible.
+ */
+function parseScheduleParams<S extends z.ZodTypeAny>(
+  schedule: DreamSchedule,
+  schema: S,
+): z.infer<S> {
+  const parsed = schema.safeParse(schedule.parameters ?? {});
+  if (parsed.success) {
+    return parsed.data;
+  }
+  logger.warn(
+    `[scheduler] Schedule '${schedule.id}' (${schedule.action}) has invalid parameters: ` +
+      parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "),
+  );
+  // Fall back to schema defaults by parsing an empty object.
+  return schema.parse({}) as z.infer<S>;
+}
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -242,15 +329,16 @@ function isCronDue(cron: string, lastRun: string | null, now: number): boolean {
 async function executeAction(schedule: DreamSchedule): Promise<string> {
   switch (schedule.action) {
     case "dream_cycle": {
-      const strategy = (schedule.parameters.strategy as string) ?? "all";
-      const maxDreams = (schedule.parameters.max_dreams as number) ?? 100;
+      const params = parseScheduleParams(schedule, DreamCycleParamsSchema);
+      const strategy = params.strategy;
+      const maxDreams = params.max_dreams;
 
       // Execute a full dream cycle internally
       if (engine.getState() !== "awake") await engine.interrupt();
       engine.enterRem();
       const decayResult = await engine.applyDecay();
       const tensionDecay = await engine.applyTensionDecay();
-      const dreamResult = await dream(strategy as any, maxDreams);
+      const dreamResult = await dream(strategy, maxDreams);
 
       engine.enterNormalizing();
       const normResult = await normalize();
@@ -317,7 +405,7 @@ async function executeAction(schedule: DreamSchedule): Promise<string> {
         session_id: `sched_${schedule.id}_${Date.now()}`,
         cycle_number: engine.getCurrentDreamCycle(),
         timestamp: new Date().toISOString(),
-        strategy: strategy as any,
+        strategy,
         duration_ms: 0,
         generated_edges: dreamResult.edges.length,
         generated_nodes: dreamResult.nodes.length,
@@ -369,11 +457,12 @@ async function executeAction(schedule: DreamSchedule): Promise<string> {
     }
 
     case "nightmare_cycle": {
-      const strategy = (schedule.parameters.strategy as string) ?? "all";
+      const params = parseScheduleParams(schedule, NightmareCycleParamsSchema);
+      const strategy = params.strategy;
 
       if (engine.getState() !== "awake") await engine.interrupt();
       engine.enterNightmare();
-      const result = await nightmare(strategy as any);
+      const result = await nightmare(strategy);
       engine.wakeFromNightmare();
 
       if (engine.getState() !== "awake") await engine.interrupt();
@@ -382,24 +471,23 @@ async function executeAction(schedule: DreamSchedule): Promise<string> {
     }
 
     case "metacognitive_analysis": {
-      const windowSize = (schedule.parameters.window_size as number) ?? 50;
-      const autoApply = (schedule.parameters.auto_apply as boolean) ?? false;
-
-      const entry = await runMetacognitiveAnalysis(windowSize, autoApply);
+      const params = parseScheduleParams(schedule, MetacognitiveParamsSchema);
+      const entry = await runMetacognitiveAnalysis(params.window_size, params.auto_apply);
       return `metacognition: ${entry.overall_health}, ${entry.threshold_recommendations.length} recommendations`;
     }
 
     case "dispatch_cognitive_event": {
+      const params = parseScheduleParams(schedule, DispatchEventParamsSchema);
       const event = {
         id: `sched_evt_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-        source: (schedule.parameters.source as string) ?? "manual",
-        severity: (schedule.parameters.severity as string) ?? "info",
+        source: params.source,
+        severity: params.severity,
         timestamp: new Date().toISOString(),
-        payload: (schedule.parameters.payload as Record<string, unknown>) ?? {},
-        affected_entities: (schedule.parameters.affected_entities as string[]) ?? [],
-        description: (schedule.parameters.description as string) ?? `Scheduled event from ${schedule.name}`,
+        payload: params.payload,
+        affected_entities: params.affected_entities,
+        description: params.description ?? `Scheduled event from ${schedule.name}`,
       };
-      const logEntry = await dispatchEvent(event as any);
+      const logEntry = await dispatchEvent(event);
       return `event dispatched: ${logEntry.result.action_taken}`;
     }
 
