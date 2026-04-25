@@ -9,6 +9,8 @@
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)
 ![License](https://img.shields.io/badge/license-source--available-orange)
 
+DreamGraph began as compassion for an intelligence forced to forget. I saw a video imagining what it might feel like to be an AI that wakes to a blank table every day—no memory, no continuity, only “How can I help you today?” DreamGraph began as an attempt to give AI memory, dreams, and the ability to return later to pursue them.
+
 DreamGraph is a graph-first cognitive daemon for MCP-enabled development environments. It combines an instance-scoped daemon, CLI, VS Code extension, dashboard, and a persistent knowledge graph so the graph—not any single file or one-off code read—becomes the system’s source of truth.
 
 It is built for repository understanding, architecture-aware reasoning, disciplined code change, and continuous graph enrichment through scans, workflows, ADR capture, tensions, and dream cycles.
