@@ -15,6 +15,8 @@ It is built for repository understanding, architecture-aware reasoning, discipli
 
 DreamGraph works with single repositories, monorepos, and multi-repository systems. It can build graph links across repos that share workflows, APIs, databases, infrastructure, or ownership boundaries.
 
+You can use DreamGraph on a multi-repo product with frontend, backend, mobile, and a shared Postgres/Supabase schema. It can reason across repo boundaries and inspect the live DB schema directly.
+
 ## What DreamGraph Includes
 
 - **Daemon** — the long-running DreamGraph runtime with stdio or HTTP transport
