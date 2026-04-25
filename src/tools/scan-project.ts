@@ -53,6 +53,7 @@ import {
   generateStructuralWorkflows,
   generateStructuralDataModel,
 } from "./structural-generators.js";
+import { shouldSkipScanDirectory } from "./scanner-artifact-policy.js";
 import type {
   Feature,
   Workflow,
@@ -90,14 +91,6 @@ const MANIFEST_FILES = new Set([
   "*.csproj", "*.sln", "*.fsproj",
   "docker-compose.yml", "dockerfile",
   "makefile", "justfile",
-]);
-
-/** Directories to skip */
-const SKIP_DIRS = new Set([
-  "node_modules", ".git", "dist", "build", "out", ".next",
-  "__pycache__", ".venv", "venv", "target", "coverage",
-  ".turbo", ".cache", ".parcel-cache", "bin", "obj",
-  ".vs", ".idea", "packages", "artifacts",
 ]);
 
 /** UI file extensions / patterns */
@@ -169,7 +162,8 @@ async function scanProject(
   try {
     const topEntries = await fs.readdir(repoRoot, { withFileTypes: true });
     for (const e of topEntries) {
-      if (e.isDirectory() && !SKIP_DIRS.has(e.name) && !e.name.startsWith(".")) {
+      const entryPath = path.join(repoRoot, e.name);
+      if (e.isDirectory() && !shouldSkipScanDirectory({ repoRoot, absDir: entryPath, entryName: e.name })) {
         topLevelDirs.push(e.name);
       }
     }
@@ -206,14 +200,15 @@ async function scanProject(
     } catch { return; }
 
     for (const entry of entries) {
+      const entryPath = path.join(dir, entry.name);
       if (entry.isDirectory()) {
-        if (!SKIP_DIRS.has(entry.name) && !entry.name.startsWith(".")) {
-          await walk(path.join(dir, entry.name), depth + 1);
+        if (!shouldSkipScanDirectory({ repoRoot, absDir: entryPath, entryName: entry.name })) {
+          await walk(entryPath, depth + 1);
         }
       } else if (entry.isFile()) {
         const ext = path.extname(entry.name).toLowerCase();
         if (CODE_EXTENSIONS.has(ext)) {
-          const abs = path.join(dir, entry.name);
+          const abs = entryPath;
           const rel = path.relative(repoRoot, abs).replace(/\\/g, "/");
           let size = 0;
           try { size = (await fs.stat(abs)).size; } catch { /* ignore */ }

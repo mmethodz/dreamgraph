@@ -31,6 +31,7 @@ import { invalidateCache } from "../utils/cache.js";
 import { success, error, safeExecute } from "../utils/errors.js";
 import { logger } from "../utils/logger.js";
 import { getLlmConfig } from "../cognitive/llm.js";
+import { shouldSkipScanDirectory } from "./scanner-artifact-policy.js";
 import type {
   Feature,
   Workflow,
@@ -208,14 +209,23 @@ async function scanRepo(repoName: string, repoRoot: string): Promise<ScanResult>
     }
 
     for (const entry of entries) {
+      const entryPath = path.join(dir, entry.name);
       if (entry.isDirectory()) {
-        if (!SKIP_DIRS.has(entry.name) && !entry.name.startsWith(".")) {
-          await walk(path.join(dir, entry.name));
+        if (
+          entry.name.startsWith(".") ||
+          shouldSkipScanDirectory({
+            repoRoot,
+            absDir: entryPath,
+            entryName: entry.name,
+          })
+        ) {
+          continue;
         }
+        await walk(entryPath);
       } else if (entry.isFile()) {
         const ext = path.extname(entry.name).toLowerCase();
         if (CODE_EXTENSIONS.has(ext)) {
-          const abs = path.join(dir, entry.name);
+          const abs = entryPath;
           const rel = path.relative(repoRoot, abs).replace(/\\/g, "/");
           files.push({
             abs,
