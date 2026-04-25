@@ -158,7 +158,17 @@ const PATCH_KEYWORDS = [
   'fix', 'patch', 'edit', 'change', 'modify', 'update', 'refactor',
   'implement', 'rewrite', 'rename', 'remove', 'replace', 'delete',
   'make it compile', 'make build pass', 'build pass', 'compile',
-  'add support', 'create a', 'add a',
+  'add support', 'create a', 'add a', 'insert', 'merge', 'repair',
+  'write file', 'file write', 'edit file', 'modify file', 'update file',
+  'add file', 'create file', 'rewrite file', 'replace file', 'delete file',
+  'rename file', 'change file', 'update path', 'change path', 'path',
+];
+
+const EXECUTION_KEYWORDS = [
+  'run command', 'run a command', 'shell command', 'shell-capable session',
+  'terminal', 'powershell', 'bash', 'cmd', 'ripgrep', 'grep', 'rg ',
+  'repo-wide search', 'search the repo', 'find callers', 'run npm',
+  'npm run', 'pnpm', 'yarn', 'build', 'test', 'lint',
 ];
 
 const GRAPH_WRITE_KEYWORDS = [
@@ -257,6 +267,11 @@ export function selectToolGroups(args: {
     groups.push('core_write');
     mutating = true;
     reasons.push('keyword[patch] → core_write');
+  }
+  if (_hasAny(prompt, EXECUTION_KEYWORDS) && !mutating) {
+    groups.push('core_write');
+    mutating = true;
+    reasons.push('keyword[execution] → core_write');
   }
   if (_hasAny(prompt, GRAPH_WRITE_KEYWORDS)) {
     groups.push('graph_write', 'adr');

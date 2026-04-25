@@ -183,13 +183,20 @@ export class McpClient implements vscode.Disposable {
   }
 
   /**
-   * Query a DreamGraph resource by type (feature, workflow, etc.)
+   * Query a DreamGraph resource by URI and optional top-level field filter.
+   *
+   * Examples:
+   * - queryResource("system://features")
+   * - queryResource("dream://adrs", { status: "accepted" })
    */
   async queryResource(
-    type: string,
-    name?: string,
+    uri: string,
+    filter?: Record<string, unknown>,
   ): Promise<unknown> {
-    return this.callTool("query_resource", { type, name });
+    return this.callTool("query_resource", {
+      uri,
+      ...(filter && Object.keys(filter).length > 0 ? { filter } : {}),
+    });
   }
 
   /**
