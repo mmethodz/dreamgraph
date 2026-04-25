@@ -13,6 +13,8 @@ DreamGraph is a graph-first cognitive daemon for MCP-enabled development environ
 
 It is built for repository understanding, architecture-aware reasoning, disciplined code change, and continuous graph enrichment through scans, workflows, ADR capture, tensions, and dream cycles.
 
+DreamGraph works with single repositories, monorepos, and multi-repository systems. It can build graph links across repos that share workflows, APIs, databases, infrastructure, or ownership boundaries.
+
 ## What DreamGraph Includes
 
 - **Daemon** — the long-running DreamGraph runtime with stdio or HTTP transport
@@ -101,7 +103,7 @@ dg init --name my-project --project /path/to/your/repo --transport http --port 8
 
 What this does:
 - creates a named DreamGraph instance
-- records the project root
+- records the initial project root or workspace attachment
 - configures the daemon transport
 - prepares the instance for CLI, dashboard, and VS Code attachment
 
@@ -143,7 +145,7 @@ This shows:
 
 ### 5. Attach an existing project later
 
-If you created the instance first and want to bind a repo afterward:
+If you created the instance first and want to attach a repository or workspace afterward:
 
 ```bash
 dg attach /path/to/your/repo --instance my-project
@@ -188,7 +190,7 @@ dg scan my-project
 
 1. Install DreamGraph and the VS Code extension
 2. Start or connect to a DreamGraph instance
-3. Open the attached repository in VS Code
+3. Open the attached repository or workspace in VS Code
 4. Use the DreamGraph sidebar for chat, dashboard, and file-change context
 
 ## Core Commands
