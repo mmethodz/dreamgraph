@@ -182,6 +182,12 @@ const DISCIPLINE_KEYWORDS = [
   'plan-do-verify',
 ];
 
+const PROJECT_SCAN_KEYWORDS = [
+  'scan', 'rescan', 're-scan', 'init graph', 'rebuild graph',
+  'refresh graph', 'reindex', 're-index', 'bootstrap graph',
+  'extract api surface',
+];
+
 function _hasAny(prompt: string, keywords: string[]): boolean {
   const lower = prompt.toLowerCase();
   return keywords.some((k) => lower.includes(k));
@@ -269,6 +275,11 @@ export function selectToolGroups(args: {
     groups.push('discipline');
     reasons.push('keyword[discipline] → discipline');
   }
+  if (_hasAny(prompt, PROJECT_SCAN_KEYWORDS)) {
+    groups.push('project_scan', 'graph_write', 'cognitive_read');
+    mutating = true;
+    reasons.push('keyword[project_scan] → project_scan+graph_write+cognitive_read');
+  }
 
   // Autonomy mode: include ops_debug + adr for richer reasoning.
   if (autonomy) {
@@ -292,6 +303,18 @@ export function selectToolGroups(args: {
   // Filter to what's actually available (case-insensitive guard against minor naming drift).
   const availableSet = new Set(availableToolNames);
   let selected = candidates.filter((n) => availableSet.has(n));
+
+  // Direct tool-name mention overlay — if the user explicitly named a tool in the
+  // prompt (e.g. "run scan_project", "call enrich_seed_data"), force it in even
+  // if no keyword group matched. Prevents the whitelist from silently hiding
+  // tools the user is asking for by name.
+  const lowerPrompt = prompt.toLowerCase();
+  for (const toolName of availableToolNames) {
+    if (lowerPrompt.includes(toolName.toLowerCase()) && !selected.includes(toolName)) {
+      selected.unshift(toolName);
+      reasons.push(`name-mention[${toolName}]`);
+    }
+  }
 
   // Apply cap.
   const cap = autonomy ? MAX_TOOLS_AUTONOMY : mutating ? MAX_TOOLS_MUTATION : MAX_TOOLS_DEFAULT;
