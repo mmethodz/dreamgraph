@@ -168,13 +168,13 @@ const EXECUTION_KEYWORDS = [
   'run command', 'run a command', 'shell command', 'shell-capable session',
   'terminal', 'powershell', 'bash', 'cmd', 'ripgrep', 'grep', 'rg ',
   'repo-wide search', 'search the repo', 'find callers', 'run npm',
-  'npm run', 'pnpm', 'yarn', 'build', 'test', 'lint',
+  'npm run', 'pnpm', 'yarn', 'build', 'test', 'lint', 'commandline', 'execute',
 ];
 
 const GRAPH_WRITE_KEYWORDS = [
   'update dreamgraph', 'enrich', 'register entity', 'add entity',
   'seed data', 'capture decision', 'record adr', 'document decision',
-  'add adr', 'graph node', 'register ui',
+  'add adr', 'graph node', 'register ui', 'scan ui', 'ui element',
 ];
 
 const COGNITIVE_RUN_KEYWORDS = [
@@ -184,7 +184,7 @@ const COGNITIVE_RUN_KEYWORDS = [
 
 const DOCS_KEYWORDS = [
   'export docs', 'living doc', 'mermaid', 'diagram', 'visualize',
-  'visualise', 'visual flow', 'render diagram', 'archetype',
+  'visualise', 'visual flow', 'render diagram', 'archetype', 'autodocs',
 ];
 
 const DISCIPLINE_KEYWORDS = [
