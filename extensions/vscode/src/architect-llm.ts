@@ -6,6 +6,14 @@
  */
 
 import * as vscode from "vscode";
+import {
+  buildOpenAIResponsesRequest,
+  extractOpenAIResponsesText,
+  extractOpenAIResponsesToolCalls,
+  toOpenAIResponsesContent,
+  translateRawToOpenAIResponses,
+  usesOpenAIResponsesApi,
+} from "./openai-responses-adapter";
 
 export type ArchitectProvider = "anthropic" | "openai" | "ollama";
 export type AnthropicEffort = "low" | "medium" | "high" | "xhigh" | "max";
@@ -80,6 +88,7 @@ export const ANTHROPIC_MODELS = [
 
 export const OPENAI_MODELS = [
   "gpt-5",
+  "gpt-5.5",
   "gpt-5.4",
   "gpt-4.1",
   "gpt-4.1-mini",
@@ -580,6 +589,144 @@ export class ArchitectLlm implements vscode.Disposable {
     };
   }
 
+    private _usesOpenAIResponsesApi(model: string): boolean {
+    return usesOpenAIResponsesApi(model);
+  }
+
+  private _getOpenAIReasoningEffort(): "low" | "medium" | "high" | "xhigh" {
+    const cfg = vscode.workspace.getConfiguration("dreamgraph.architect");
+    const configured = (cfg.get<string>("openai.reasoningEffort") ?? "").trim().toLowerCase();
+    if (configured === "low" || configured === "medium" || configured === "high" || configured === "xhigh") {
+      return configured;
+    }
+    return "medium";
+  }
+
+  private _getOpenAITextVerbosity(): "low" | "medium" | "high" {
+    const cfg = vscode.workspace.getConfiguration("dreamgraph.architect");
+    const configured = (cfg.get<string>("openai.verbosity") ?? "").trim().toLowerCase();
+    if (configured === "low" || configured === "medium" || configured === "high") {
+      return configured;
+    }
+
+    const reportingMode = (cfg.get<string>("reportingMode") ?? "standard").trim().toLowerCase();
+    if (reportingMode === "deep" || reportingMode === "forensic") {
+      return "medium";
+    }
+    return "low";
+  }
+
+    private _toOpenAIResponsesContent(content: string | ArchitectContent[]): unknown {
+    return toOpenAIResponsesContent(content);
+  }
+
+    private _translateRawToOpenAIResponses(raw: unknown[]): unknown[] {
+    return translateRawToOpenAIResponses(raw);
+  }
+
+    private _buildOpenAIResponsesRequest(
+    config: ArchitectConfig,
+    messages: ArchitectMessage[],
+    rawMessages?: unknown[],
+    tools?: ToolDefinition[],
+  ): Record<string, unknown> {
+    return buildOpenAIResponsesRequest(messages, {
+      model: config.model,
+      reasoningEffort: this._getOpenAIReasoningEffort(),
+      textVerbosity: this._getOpenAITextVerbosity(),
+      rawMessages,
+      tools,
+    });
+  }
+
+    private _extractOpenAIResponsesText(data: {
+    output_text?: string;
+    output?: Array<Record<string, unknown>>;
+  }): string {
+    return extractOpenAIResponsesText(data);
+  }
+
+    private _extractOpenAIResponsesToolCalls(data: { output?: Array<Record<string, unknown>> }): ToolUseRequest[] {
+    return extractOpenAIResponsesToolCalls(data);
+  }
+
+  private async _callOpenAIResponses(
+    config: ArchitectConfig,
+    messages: ArchitectMessage[],
+    start: number,
+    signal?: AbortSignal,
+  ): Promise<ArchitectResponse> {
+    const requestBody = this._buildOpenAIResponsesRequest(config, messages);
+    const res = await fetch(`${config.baseUrl}/responses`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${config.apiKey}`,
+      },
+      body: _enforceRequestBudget('callOpenAIResponses', config.model, requestBody),
+      signal,
+    });
+
+    if (!res.ok) throw new Error(`OpenAI Responses API error (${res.status}): ${await res.text()}`);
+
+    const data = (await res.json()) as {
+      output_text?: string;
+      output?: Array<Record<string, unknown>>;
+      usage?: { input_tokens?: number; output_tokens?: number };
+    };
+
+    return {
+      content: this._extractOpenAIResponsesText(data),
+      promptTokens: data.usage?.input_tokens ?? 0,
+      completionTokens: data.usage?.output_tokens ?? 0,
+      durationMs: Date.now() - start,
+    };
+  }
+
+  private async _callOpenAIResponsesWithTools(
+    config: ArchitectConfig,
+    messages: ArchitectMessage[],
+    tools: ToolDefinition[],
+    start: number,
+    rawMessages?: unknown[],
+    signal?: AbortSignal,
+  ): Promise<ArchitectToolResponse> {
+    const requestBody = this._buildOpenAIResponsesRequest(config, messages, rawMessages, tools);
+    const res = await fetch(`${config.baseUrl}/responses`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${config.apiKey}`,
+      },
+      body: _enforceRequestBudget('callOpenAIResponsesWithTools', config.model, requestBody),
+      signal,
+    });
+
+    if (!res.ok) throw new Error(`OpenAI Responses API error (${res.status}): ${await res.text()}`);
+
+    const data = (await res.json()) as {
+      output_text?: string;
+      output?: Array<Record<string, unknown>>;
+      usage?: { input_tokens?: number; output_tokens?: number };
+      status?: string;
+      incomplete_details?: { reason?: string };
+    };
+    const toolCalls = this._extractOpenAIResponsesToolCalls(data);
+
+    return {
+      content: this._extractOpenAIResponsesText(data),
+      promptTokens: data.usage?.input_tokens ?? 0,
+      completionTokens: data.usage?.output_tokens ?? 0,
+      durationMs: Date.now() - start,
+      toolCalls,
+      stopReason: toolCalls.length > 0
+        ? "tool_use"
+        : data.incomplete_details?.reason === "max_output_tokens"
+          ? "max_tokens"
+          : data.status ?? "end_turn",
+    };
+  }
+
   private async _callOpenAIWithTools(
     config: ArchitectConfig,
     messages: ArchitectMessage[],
@@ -588,6 +735,10 @@ export class ArchitectLlm implements vscode.Disposable {
     rawMessages?: unknown[],
     signal?: AbortSignal,
   ): Promise<ArchitectToolResponse> {
+    if (this._usesOpenAIResponsesApi(config.model)) {
+      return this._callOpenAIResponsesWithTools(config, messages, tools, start, rawMessages, signal);
+    }
+
     const openaiTools = tools.map((t) => ({
       type: "function" as const,
       function: { name: t.name, description: t.description, parameters: t.inputSchema },
@@ -679,6 +830,10 @@ export class ArchitectLlm implements vscode.Disposable {
     start: number,
     signal?: AbortSignal,
   ): Promise<ArchitectResponse> {
+    if (this._usesOpenAIResponsesApi(config.model)) {
+      return this._callOpenAIResponses(config, messages, start, signal);
+    }
+
     const res = await fetch(`${config.baseUrl}/chat/completions`, {
       method: "POST",
       headers: {

@@ -244,6 +244,18 @@
           "default": "compact",
           "description": "Controls how much tool trace detail Architect surfaces."
         },
+        "dreamgraph.architect.openai.reasoningEffort": {
+          "type": "string",
+          "enum": ["low", "medium", "high", "xhigh"],
+          "default": "medium",
+          "description": "OpenAI GPT-5.5 Responses API reasoning effort for Architect calls. Use low for efficient reasoning, medium for balanced latency/performance, high for complex agentic tasks, and xhigh for hardest asynchronous/evaluation workloads."
+        },
+        "dreamgraph.architect.openai.verbosity": {
+          "type": "string",
+          "enum": ["low", "medium", "high"],
+          "default": "low",
+          "description": "OpenAI GPT-5.5 Responses API text verbosity for Architect calls. Low produces concise responses; medium and high allow progressively more detail."
+        },
         "dreamgraph.architect.autonomyMode": {
           "type": "string",
           "enum": ["cautious", "conscientious", "eager", "autonomous"],
