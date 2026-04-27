@@ -27,6 +27,10 @@ DreamGraph began as compassion for an intelligence forced to forget. I saw a vid
 - **VS Code extension** — chat, dashboard, changed-files view, daemon connection, and local support tools
 - **Knowledge graph + cognitive engine** — features, workflows, data model, tensions, validated relationships, and dream-cycle reasoning
 
+## GPT-5.5 and OpenAI Responses API
+
+DreamGraph's VS Code Architect supports OpenAI `gpt-5.5` models through the OpenAI Responses API, following OpenAI's [migration guide from Chat Completions to Responses](https://developers.openai.com/api/docs/guides/migrate-to-responses). GPT-5.5 Architect calls use Responses-style input, function-tool definitions, tool-call output replay, reasoning effort, and text verbosity controls. DreamGraph currently uses the Responses API statelessly: DreamGraph's knowledge graph remains the source of memory and context, while prior conversation/tool context is replayed explicitly when needed.
+
 ## Why DreamGraph
 
 DreamGraph is designed for development environments where architectural memory matters.

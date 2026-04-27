@@ -94,7 +94,21 @@ Important:
 - VS Code Architect settings control the editor chat agent
 - they are related but separate configuration surfaces
 
-## 3. Installer behavior
+## 3. OpenAI GPT-5.5 / Responses API notes
+
+The VS Code Architect supports OpenAI `gpt-5.5` models through the OpenAI Responses API, following OpenAI's [migration guide from Chat Completions to Responses](https://developers.openai.com/api/docs/guides/migrate-to-responses).
+
+For GPT-5.5 Architect calls, DreamGraph uses:
+
+- Responses-style `input` instead of Chat Completions `messages`
+- Responses function-tool definitions
+- `function_call` / `function_call_output` replay for tool interactions
+- `reasoning.effort` via `dreamgraph.architect.openai.reasoningEffort`
+- `text.verbosity` via `dreamgraph.architect.openai.verbosity`
+
+DreamGraph uses the Responses API statelessly initially. DreamGraph's knowledge graph remains the source of memory and context; `previous_response_id` / stored Responses state is deferred as a possible future optimization after GPT-5.5 tool-call correctness remains stable.
+
+## 4. Installer behavior
 
 The install scripts bootstrap required build tooling automatically on fresh machines, including the TypeScript compiler via npm install when needed.
 
@@ -104,7 +118,7 @@ VS Code is optional:
 - if VS Code is not present, the installer skips extension build/install
 - CLI, MCP server, and dashboard installation still succeed without VS Code
 
-## 4. Anthropic / Opus 4.7 notes
+## 5. Anthropic / Opus 4.7 notes
 
 If using Anthropic in the Architect, also see:
 
@@ -116,7 +130,7 @@ Key Anthropic extension settings:
 - `dreamgraph.architect.anthropic.adaptiveThinking`
 - `dreamgraph.architect.anthropic.showThinkingSummary`
 
-## 5. Common setup mistakes
+## 6. Common setup mistakes
 
 ### Wrong variable prefix
 
@@ -142,7 +156,7 @@ These are different:
 
 Some Architect UI changes may persist to VS Code user settings rather than workspace settings.
 
-## 6. Quick verification checklist
+## 7. Quick verification checklist
 
 - `engine.env` exists under the correct instance `config/` directory
 - variables use the `DREAMGRAPH_LLM_*` prefix
