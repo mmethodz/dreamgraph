@@ -130,15 +130,101 @@ export function getStyles(): string {
 
     /* ── Thinking indicator ── */
     #thinking-indicator {
-      padding: 8px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding: 8px 14px 10px;
       color: var(--vscode-descriptionForeground);
       font-size: 12px;
-      font-style: italic;
-      animation: thinking-pulse 1.5s ease-in-out infinite;
+      font-style: normal;
+      border-top: 1px solid color-mix(in srgb, var(--vscode-panel-border) 75%, transparent);
+      background: color-mix(in srgb, var(--vscode-editorWidget-background) 94%, transparent);
+      flex-shrink: 0;
+      overflow: hidden;
     }
+    #thinking-indicator .thinking-label-row {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 18px;
+      color: var(--vscode-descriptionForeground);
+      font-size: 0.92em;
+      font-style: italic;
+    }
+    #thinking-indicator #thinking-label {
+      line-height: 1;
+    }
+    #thinking-indicator .thinking-dots {
+      display: inline-flex;
+      gap: 3px;
+      align-items: center;
+    }
+    #thinking-indicator .thinking-dots span {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--vscode-descriptionForeground);
+      opacity: 0.3;
+      animation: thinking-pulse 1.2s ease-in-out infinite;
+    }
+    #thinking-indicator .thinking-dots span:nth-child(1) { animation-delay: 0s; }
+    #thinking-indicator .thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
+    #thinking-indicator .thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
     @keyframes thinking-pulse {
-      0%, 100% { opacity: 0.4; }
-      50% { opacity: 1; }
+      0%, 80%, 100% { opacity: 0.3; transform: scale(1); }
+      40% { opacity: 1; transform: scale(1.25); }
+    }
+
+    /* Live tool-trace list: newest at top, older rows recede below. */
+    #tool-progress-list {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      max-height: 110px;
+      overflow: hidden;
+      pointer-events: none;
+      isolation: isolate;
+      padding-top: 2px;
+    }
+    #tool-progress-list:empty {
+      display: none;
+    }
+    #tool-progress-list .tool-row-live {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      min-width: 0;
+      padding: 1px 2px;
+      color: var(--vscode-foreground);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      transform-origin: left center;
+      opacity: var(--tool-progress-opacity, 1);
+      transform: scale(var(--tool-progress-scale, 1));
+      filter: blur(var(--tool-progress-blur, 0px));
+      transition: opacity 200ms ease, transform 200ms ease, filter 200ms ease, max-height 200ms ease;
+      will-change: transform, opacity, filter;
+    }
+    #tool-progress-list .tool-row-live.tool-row-enter {
+      opacity: 0;
+      transform: translateY(-6px) scale(1.02);
+      filter: blur(0);
+    }
+    #tool-progress-list .tool-row-live .tool-name {
+      flex: 0 0 auto;
+      font-family: var(--vscode-editor-font-family, monospace);
+      font-size: 0.95em;
+      color: var(--vscode-textPreformat-foreground, var(--vscode-foreground));
+    }
+    #tool-progress-list .tool-row-live .tool-message {
+      flex: 1 1 auto;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: var(--vscode-descriptionForeground);
+      font-size: 0.9em;
     }
 
     /* ── Attachments bar ── */
@@ -429,52 +515,6 @@ export function getStyles(): string {
       background: var(--vscode-button-secondaryHoverBackground, rgba(90,93,94,0.35));
     }
 
-    /* ── Slice 2: Thinking indicator overhaul ── */
-    #thinking-indicator {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 8px 12px;
-      color: var(--vscode-descriptionForeground);
-      font-size: 0.85em;
-      font-style: italic;
-    }
-    .thinking-dots {
-      display: inline-flex;
-      gap: 3px;
-      align-items: center;
-    }
-    .thinking-dots span {
-      width: 5px;
-      height: 5px;
-      border-radius: 50%;
-      background: var(--vscode-descriptionForeground);
-      animation: thinking-pulse 1.2s ease-in-out infinite;
-      opacity: 0.3;
-    }
-    .thinking-dots span:nth-child(1) { animation-delay: 0s; }
-    .thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
-    .thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
-    @keyframes thinking-pulse {
-      0%, 80%, 100% { opacity: 0.3; transform: scale(1); }
-      40% { opacity: 1; transform: scale(1.2); }
-    }
-    /* Tool progress rows inside thinking indicator */
-    #thinking-indicator .tool-row {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-style: normal;
-      font-size: 0.9em;
-      color: var(--vscode-foreground);
-      opacity: 0.8;
-    }
-    #thinking-indicator .tool-name {
-      font-family: var(--vscode-editor-font-family, monospace);
-      font-size: 0.88em;
-      color: var(--vscode-textPreformat-foreground, var(--vscode-foreground));
-    }
-
     /* ── Slice 3: Structured cards ── */
     .dg-card {
       margin: 0.7em 0;
@@ -536,6 +576,73 @@ export function getStyles(): string {
       font-size: 0.8em;
       background: var(--vscode-button-secondaryBackground, rgba(90,93,94,0.2));
       color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+    }
+    .tool-trace {
+      margin-top: 10px;
+      border: 1px solid color-mix(in srgb, var(--vscode-panel-border) 70%, transparent);
+      border-radius: 10px;
+      background: color-mix(in srgb, var(--vscode-editorWidget-background) 92%, transparent);
+      overflow: hidden;
+    }
+    .tool-trace summary {
+      cursor: pointer;
+      list-style: none;
+      padding: 8px 10px;
+      font-size: 0.82em;
+      color: var(--vscode-descriptionForeground);
+      user-select: none;
+    }
+    .tool-trace summary::-webkit-details-marker { display: none; }
+    .tool-trace-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 8px 10px 10px;
+    }
+    .tool-trace-item {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 0;
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid color-mix(in srgb, var(--vscode-panel-border) 62%, transparent);
+      background: color-mix(in srgb, var(--vscode-sideBar-background) 72%, transparent);
+      opacity: 1;
+      transform: none;
+      filter: none;
+      transition: border-color 160ms ease, background 160ms ease;
+      position: relative;
+      box-shadow: none;
+    }
+    .tool-trace-item-current {
+      border-color: color-mix(in srgb, var(--vscode-focusBorder, var(--vscode-button-background)) 58%, transparent);
+      background: color-mix(in srgb, var(--vscode-sideBar-background) 64%, transparent);
+    }
+    .tool-trace-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: 0.92em;
+      font-weight: 600;
+    }
+    .tool-trace-head span:first-child {
+      color: var(--vscode-foreground);
+      font-family: var(--vscode-editor-font-family, monospace);
+    }
+    .tool-trace-head span:last-child {
+      color: var(--vscode-descriptionForeground);
+      text-transform: capitalize;
+      flex: 0 0 auto;
+    }
+    .tool-trace-meta {
+      color: var(--vscode-descriptionForeground);
+      font-size: 0.8em;
+      line-height: 1.35;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .dg-card-body {
       white-space: normal;

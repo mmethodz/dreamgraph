@@ -48,27 +48,22 @@ export function getStructuredResponseContractBlock(): string {
   ].join('\n');
 }
 
+// Lenient extraction is delegated to the shared envelope-utils module so the
+// host parser stays in lockstep with the webview's renderer. Both ends accept
+// fenced ```json blocks, fenced blocks without a language hint, and bare
+// top-level JSON objects, and both apply the same string-aware repair pass
+// for smart quotes, NBSP, trailing commas, and // line comments. Without that
+// alignment the chat bubble could pretty-render an envelope while autonomy
+// silently failed to parse it (or vice-versa) — the symptom users report as
+// "summaries render as JSON and autonomy stops working".
+import { extractEnvelopes, extractPrimaryEnvelope } from './envelope-utils.js';
+
 export function extractJsonEnvelopeBlocks(content: string): StructuredActionEnvelope[] {
-  const blocks: StructuredActionEnvelope[] = [];
-  const regex = /```json\s*([\s\S]*?)```/gi;
-  for (const match of content.matchAll(regex)) {
-    const raw = match[1]?.trim();
-    if (!raw) continue;
-    try {
-      const parsed = JSON.parse(raw) as StructuredActionEnvelope;
-      if (parsed && typeof parsed === 'object') {
-        blocks.push(parsed);
-      }
-    } catch {
-      // Ignore malformed JSON blocks and allow fallback heuristics.
-    }
-  }
-  return blocks;
+  return extractEnvelopes(content);
 }
 
 export function extractPrimaryJsonEnvelope(content: string): StructuredActionEnvelope | undefined {
-  const blocks = extractJsonEnvelopeBlocks(content);
-  return blocks[0];
+  return extractPrimaryEnvelope(content);
 }
 
 export function hasStructuredEnvelope(content: string): boolean {

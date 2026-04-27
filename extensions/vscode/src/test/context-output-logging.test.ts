@@ -24,7 +24,7 @@ test('ChatPanel context logging uses the injected shared ContextInspector', () =
   );
   assert.match(
     chatPanelSource,
-    /private\s+async\s+_logContextToOutput\([\s\S]*?if\s*\(!envelope\s*\|\|\s*!this\.contextInspector\)\s*return;[\s\S]*?this\.contextInspector\.clearContextChannel\(\);[\s\S]*?this\.contextInspector\.logEnvelope\(envelope\);[\s\S]*?if\s*\(packet\)\s*\{[\s\S]*?this\.contextInspector\.logReasoningPacket\(packet\);[\s\S]*?\}[\s\S]*?\}/,
+    /private\s+async\s+_logContextToOutput\([\s\S]*?if\s*\(!envelope\s*\|\|\s*!this\.contextInspector\)\s*return;[\s\S]*?this\.contextInspector\.logContextRequestBoundary\(\{[\s\S]*?\}\);[\s\S]*?this\.contextInspector\.logEnvelope\(envelope\);[\s\S]*?if\s*\(packet\)\s*\{[\s\S]*?this\.contextInspector\.logReasoningPacket\(packet\);[\s\S]*?\}[\s\S]*?\}/,
   );
   assert.doesNotMatch(
     chatPanelSource,

@@ -531,12 +531,13 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
           break;
         }
         case 'selectRecommendedAction': {
-          const actionMsg = message as { type: 'selectRecommendedAction'; actionId: string };
-          await this._executeRecommendedAction(actionMsg.actionId);
+          const actionMsg = message as { type: 'selectRecommendedAction'; actionId: string; label?: string; labels?: string[] };
+          await this._executeRecommendedAction(actionMsg.actionId, actionMsg.label);
           break;
         }
         case 'doAllRecommendedActions': {
-          await this._executeAllRecommendedActions();
+          const actionMsg = message as { type: 'doAllRecommendedActions'; labels?: string[] };
+          await this._executeAllRecommendedActions(actionMsg.labels);
           break;
         }
         case 'envelopeAction': {
@@ -1798,16 +1799,21 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
     return helpers.formatStopContextBlock(ctx);
   }
 
-  private async _executeRecommendedAction(actionId: string): Promise<void> {
+  private async _executeRecommendedAction(actionId: string, fallbackLabel?: string): Promise<void> {
     const action = this._lastRecommendedActions.find((a) => a.id === actionId);
-    if (!action) return;
-    await this.handleUserMessage(action.label);
+    const label = action?.label || (typeof fallbackLabel === 'string' ? fallbackLabel.trim() : '');
+    if (!label) return;
+    await this.handleUserMessage(label);
   }
 
-  private async _executeAllRecommendedActions(): Promise<void> {
-    const labels = this._lastRecommendedActions
+  private async _executeAllRecommendedActions(fallbackLabels?: string[]): Promise<void> {
+    const liveLabels = this._lastRecommendedActions
       .filter((a) => a.eligible && a.withinScope)
-      .map((a) => a.label);
+      .map((a) => a.label)
+      .filter((label) => typeof label === 'string' && label.trim().length > 0);
+    const labels = liveLabels.length > 0
+      ? liveLabels
+      : (Array.isArray(fallbackLabels) ? fallbackLabels.map((label) => String(label || '').trim()).filter(Boolean) : []);
     if (labels.length === 0) return;
     const combined = `Execute these steps sequentially:\n${labels.map((l, i) => `${i + 1}. ${l}`).join('\n')}`;
     await this.handleUserMessage(combined);
@@ -2246,8 +2252,10 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
     </div>
   </div>
   <div id="thinking-indicator" style="display:none">
-    <span class="thinking-dots"><span></span><span></span><span></span></span>
-    <span id="thinking-label">Dreaming…</span>
+    <div class="thinking-label-row">
+      <span id="thinking-label">Dreaming…</span>
+      <span class="thinking-dots" aria-hidden="true"><span></span><span></span><span></span></span>
+    </div>
     <div id="tool-progress-list"></div>
   </div>
   <div id="attachments"></div>
@@ -2495,41 +2503,127 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
         if (typeof window.applyEntityLinks === 'function') {
           window.applyEntityLinks(node);
         }
-        // DOM-based envelope replacement: find <pre><code> containing JSON envelopes
+
+        function isStructuredEnvelope(obj) {
+          return !!(obj && typeof obj === 'object' && typeof obj.summary === 'string' &&
+            ('goal_status' in obj || 'recommended_next_steps' in obj));
+        }
+
+        function tryParseEnvelopeText(text) {
+          if (!text) return null;
+          const raw = String(text).trim();
+          if (!raw) return null;
+
+          const candidates = [];
+          candidates.push(raw);
+
+          if (raw.charCodeAt(0) === 96 && raw.charCodeAt(1) === 96 && raw.charCodeAt(2) === 96) {
+            let body = raw;
+            if (body.slice(0, 7) === String.fromCharCode(96, 96, 96, 106, 115, 111, 110)) {
+              body = body.slice(7);
+            } else {
+              body = body.slice(3);
+            }
+            if (body.length >= 3 && body.charCodeAt(body.length - 1) === 96 && body.charCodeAt(body.length - 2) === 96 && body.charCodeAt(body.length - 3) === 96) {
+              body = body.slice(0, -3);
+            }
+            body = body.trim();
+            if (body) candidates.push(body);
+          }
+
+          const firstBrace = raw.indexOf('{');
+          const lastBrace = raw.lastIndexOf('}');
+          if (firstBrace >= 0 && lastBrace > firstBrace) {
+            const objectText = raw.slice(firstBrace, lastBrace + 1).trim();
+            if (objectText) candidates.push(objectText);
+          }
+
+          for (const candidate of candidates) {
+            try {
+              const parsed = JSON.parse(candidate);
+              if (isStructuredEnvelope(parsed)) {
+                return parsed;
+              }
+            } catch (_e) {
+            }
+          }
+
+          return null;
+        }
+
+        function replaceEnvelopeElement(target, obj) {
+          if (!target || !obj || typeof window.renderEnvelope !== 'function') return false;
+          const wrapper = document.createElement('div');
+          wrapper.innerHTML = window.renderEnvelope(obj);
+          const rendered = wrapper.firstElementChild;
+          if (!rendered) return false;
+          if (obj && typeof obj === 'object') {
+            const steps = Array.isArray(obj.recommended_next_steps) ? obj.recommended_next_steps : [];
+            const labels = steps.map((step) => (step && typeof step.label === 'string' ? step.label : '')).filter(Boolean);
+            rendered.querySelectorAll('.dg-envelope-action').forEach((button, index) => {
+              const label = labels[index];
+              if (label) button.setAttribute('data-action-label', label);
+            });
+            const doAllButton = rendered.querySelector('.dg-envelope-do-all');
+            if (doAllButton && labels.length > 0) {
+              doAllButton.setAttribute('data-action-labels', JSON.stringify(labels));
+            }
+          }
+          target.replaceWith(rendered);
+          return true;
+        }
+
         if (typeof window.renderEnvelope === 'function') {
           node.querySelectorAll('pre').forEach((pre) => {
             const code = pre.querySelector('code');
-            if (!code) return;
-            try {
-              const text = code.textContent || '';
-              const obj = JSON.parse(text);
-              if (obj && typeof obj === 'object' && typeof obj.summary === 'string' &&
-                  ('goal_status' in obj || 'recommended_next_steps' in obj)) {
-                const wrapper = document.createElement('div');
-                wrapper.innerHTML = window.renderEnvelope(obj);
-                const rendered = wrapper.firstElementChild;
-                if (rendered) pre.replaceWith(rendered);
-              }
-            } catch(_e) {}
+            const text = code ? (code.textContent || '') : (pre.textContent || '');
+            const parsed = tryParseEnvelopeText(text);
+            if (parsed) {
+              replaceEnvelopeElement(pre, parsed);
+            }
+          });
+
+          node.querySelectorAll('code').forEach((code) => {
+            if (!code.parentElement || code.closest('.dg-envelope')) return;
+            const parsed = tryParseEnvelopeText(code.textContent || '');
+            if (parsed) {
+              replaceEnvelopeElement(code, parsed);
+            }
+          });
+
+          Array.from(node.children || []).forEach((child) => {
+            if (!child) return;
+            if (child.classList && child.classList.contains('dg-envelope')) return;
+            if (child.tagName === 'PRE' || child.tagName === 'CODE') return;
+            const parsed = tryParseEnvelopeText(child.textContent || '');
+            if (parsed) {
+              replaceEnvelopeElement(child, parsed);
+            }
           });
         }
+
         // Wire envelope action chip clicks
         node.querySelectorAll('.dg-envelope-action:not([data-wired])').forEach((btn) => {
           btn.setAttribute('data-wired', '1');
           btn.addEventListener('click', () => {
             const actionId = btn.getAttribute('data-action-id') || '';
-            const label = btn.textContent || actionId;
-            if (label) vscode.postMessage({ type: 'envelopeAction', label: label });
+            const label = btn.getAttribute('data-action-label') || '';
+            if (actionId || label) {
+              vscode.postMessage({ type: 'selectRecommendedAction', actionId, label });
+            }
           });
         });
         node.querySelectorAll('.dg-envelope-do-all:not([data-wired])').forEach((btn) => {
           btn.setAttribute('data-wired', '1');
           btn.addEventListener('click', () => {
-            const labels = [];
-            node.querySelectorAll('.dg-envelope-action').forEach((a) => {
-              if (a.textContent) labels.push(a.textContent);
-            });
-            if (labels.length > 0) vscode.postMessage({ type: 'envelopeDoAll', labels: labels });
+            let labels = [];
+            const raw = btn.getAttribute('data-action-labels') || '[]';
+            try {
+              const parsed = JSON.parse(raw);
+              if (Array.isArray(parsed)) labels = parsed.map((label) => String(label || '')).filter(Boolean);
+            } catch (_e) {
+            }
+            vscode.postMessage({ type: 'doAllRecommendedActions', labels });
           });
         });
         if (opts.verify !== false) {
@@ -2545,11 +2639,23 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       const wrapper = document.createElement('div');
       wrapper.className = 'markdown-body';
       const renderMarkdown = window.renderMarkdown || ((s) => escapeHtml(s));
-      let html = renderMarkdown(message.content || '');
-      if (typeof window.linkifyEntities === 'function') {
-        html = window.linkifyEntities(html) || html;
+      const rawContent = String(message && message.content ? message.content : '');
+      const normalizedCandidate = String(message && (message.fullContent || message.content) ? (message.fullContent || message.content) : '');
+      const normalizeEnvelopeFence = window.normalizeEnvelopeFence || ((s) => s);
+      const tryParseEnvelope = window.tryParseEnvelope || (() => null);
+      const normalizedContent = normalizeEnvelopeFence(rawContent);
+      const normalizedCandidateContent = normalizeEnvelopeFence(normalizedCandidate);
+      const envelope = tryParseEnvelope(normalizedContent) || tryParseEnvelope(normalizedCandidateContent);
+      if (envelope && typeof window.renderEnvelope === 'function') {
+        wrapper.innerHTML = window.renderEnvelope(envelope);
+      } else {
+        let html = renderMarkdown(normalizedContent);
+        if (typeof window.linkifyEntities === 'function') {
+          html = window.linkifyEntities(html) || html;
+        }
+        wrapper.innerHTML = html;
       }
-      wrapper.innerHTML = html;
+      schedulePostRenderWork(wrapper, { verify: false, stickToBottom: false });
       return wrapper;
     }
 
@@ -2574,7 +2680,6 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
         if (actionBlock) bubble.appendChild(actionBlock);
         const footer = renderContextFooter(contextFooter);
         if (footer) bubble.appendChild(footer);
-        schedulePostRenderWork(body);
       } else {
         if (roleMeta) {
           const body = document.createElement('div');
@@ -2629,11 +2734,19 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       if (!streamingBubble || !streamingMarkdownEl) return;
       streamingRaw += chunk;
       const renderMarkdown = window.renderMarkdown || ((s) => escapeHtml(s));
-      let html = renderMarkdown(streamingRaw);
-      if (typeof window.linkifyEntities === 'function') {
-        html = window.linkifyEntities(html) || html;
+      const normalizeEnvelopeFence = window.normalizeEnvelopeFence || ((s) => s);
+      const tryParseEnvelope = window.tryParseEnvelope || (() => null);
+      const normalizedContent = normalizeEnvelopeFence(streamingRaw);
+      const envelope = tryParseEnvelope(normalizedContent);
+      if (envelope && typeof window.renderEnvelope === 'function') {
+        streamingMarkdownEl.innerHTML = window.renderEnvelope(envelope);
+      } else {
+        let html = renderMarkdown(normalizedContent);
+        if (typeof window.linkifyEntities === 'function') {
+          html = window.linkifyEntities(html) || html;
+        }
+        streamingMarkdownEl.innerHTML = html;
       }
-      streamingMarkdownEl.innerHTML = html;
       schedulePostRenderWork(streamingMarkdownEl, { verify: false });
     }
 
@@ -2786,10 +2899,38 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
           endStreaming();
           break;
         case 'tool-progress': {
+          const visibleWindow = 5;
           const row = document.createElement('div');
-          row.className = 'tool-row';
-          row.innerHTML = '<span class="tool-name">' + escapeHtml(msg.tool || 'tool') + '</span><span>' + escapeHtml(msg.message || '') + '</span>';
-          toolProgressListEl.appendChild(row);
+          row.className = 'tool-row-live tool-row-enter';
+          row.innerHTML = '<span class="tool-name">' + escapeHtml(msg.tool || 'tool') + '</span><span class="tool-message">' + escapeHtml(msg.message || '') + '</span>';
+          // Newest on top: prepend.
+          if (toolProgressListEl.firstChild) {
+            toolProgressListEl.insertBefore(row, toolProgressListEl.firstChild);
+          } else {
+            toolProgressListEl.appendChild(row);
+          }
+          // Trigger enter animation on next frame.
+          requestAnimationFrame(() => {
+            row.classList.remove('tool-row-enter');
+          });
+
+          const liveRows = Array.from(toolProgressListEl.querySelectorAll('.tool-row-live'));
+          liveRows.forEach((item, depth) => {
+            if (depth >= visibleWindow) {
+              // Animate out then remove.
+              item.style.setProperty('--tool-progress-opacity', '0');
+              item.style.setProperty('--tool-progress-scale', '0.7');
+              item.style.setProperty('--tool-progress-blur', '3px');
+              setTimeout(() => { item.remove(); }, 220);
+              return;
+            }
+            const scale = Math.max(0.78, 1 - (depth * 0.07));
+            const opacity = Math.max(0.25, 1 - (depth * 0.22));
+            const blur = Math.min(2.0, depth * 0.45);
+            item.style.setProperty('--tool-progress-scale', String(scale));
+            item.style.setProperty('--tool-progress-opacity', String(opacity));
+            item.style.setProperty('--tool-progress-blur', blur.toFixed(2) + 'px');
+          });
           break;
         }
         case 'addMessage': {

@@ -155,21 +155,73 @@ export function getCardRendererScript(): string {
 
       window.renderEnvelope = renderEnvelope;
 
+      // SYNC: keep the helpers below in lockstep with src/envelope-utils.ts.
+      // The host parser (autonomy-contract.ts -> envelope-utils.ts) and this
+      // webview parser must agree on which shapes count as envelopes; any
+      // divergence resurfaces the bug where the bubble shows raw JSON while
+      // autonomy silently drops the next-step list.
+
+      // String-aware helpers so we don't corrupt summary content that contains
+      // // or , ] sequences inside legitimate strings.
+      function stripCommentsOutsideStrings(input) {
+        var out = '', i = 0, inString = false, quote = '', esc = false;
+        while (i < input.length) {
+          var ch = input[i];
+          if (inString) {
+            out += ch;
+            if (esc) { esc = false; i++; continue; }
+            if (ch === '\\\\') { esc = true; i++; continue; }
+            if (ch === quote) { inString = false; quote = ''; }
+            i++; continue;
+          }
+          if (ch === '"' || ch === "'") { inString = true; quote = ch; out += ch; i++; continue; }
+          if (ch === '/' && input[i + 1] === '/') {
+            while (i < input.length && input[i] !== '\\n') i++;
+            continue;
+          }
+          if (ch === '/' && input[i + 1] === '*') {
+            i += 2;
+            while (i < input.length && !(input[i] === '*' && input[i + 1] === '/')) i++;
+            i += 2;
+            continue;
+          }
+          out += ch; i++;
+        }
+        return out;
+      }
+
+      function stripTrailingCommasOutsideStrings(input) {
+        var out = '', i = 0, inString = false, quote = '', esc = false;
+        while (i < input.length) {
+          var ch = input[i];
+          if (inString) {
+            out += ch;
+            if (esc) { esc = false; i++; continue; }
+            if (ch === '\\\\') { esc = true; i++; continue; }
+            if (ch === quote) { inString = false; quote = ''; }
+            i++; continue;
+          }
+          if (ch === '"' || ch === "'") { inString = true; quote = ch; out += ch; i++; continue; }
+          if (ch === ',') {
+            var j = i + 1;
+            while (j < input.length && /\\s/.test(input[j])) j++;
+            if (input[j] === '}' || input[j] === ']') { i++; continue; }
+          }
+          out += ch; i++;
+        }
+        return out;
+      }
+
       // Repair common JSON quirks that providers (esp. Claude w/ extended thinking)
-      // emit and that strict JSON.parse rejects.
+      // emit and that strict JSON.parse rejects. Mirrors envelope-utils.ts.
       function repairJsonish(src) {
         var s = String(src || '');
-        // Normalize common problem characters
-        s = s.replace(/\\u00A0/g, ' ');             // NBSP -> space
-        s = s.replace(/[\\u201C\\u201D\\u201E\\u201F]/g, '"'); // smart double quotes
-        s = s.replace(/[\\u2018\\u2019\\u201A\\u201B]/g, "'"); // smart single quotes
-        s = s.replace(/[\\u2013\\u2014]/g, '-');     // en/em dash -> hyphen (only if inside strings; harmless elsewhere for envelope)
-        // Strip // line comments (but not '://' inside strings — naive but safe enough for envelope payloads)
-        s = s.replace(/(^|[^:])\\/\\/[^\\n]*/g, '$1');
-        // Strip /* */ block comments
-        s = s.replace(/\\/\\*[\\s\\S]*?\\*\\//g, '');
-        // Trailing commas before } or ]
-        s = s.replace(/,\\s*([}\\]])/g, '$1');
+        if (!s) return s;
+        s = s.replace(/\\u00A0/g, ' ');                          // NBSP -> space
+        s = s.replace(/[\\u201C\\u201D\\u201E\\u201F]/g, '"');   // smart double quotes
+        s = s.replace(/[\\u2018\\u2019\\u201A\\u201B]/g, "'");   // smart single quotes
+        s = stripCommentsOutsideStrings(s);
+        s = stripTrailingCommasOutsideStrings(s);
         return s.trim();
       }
 
@@ -191,6 +243,11 @@ export function getCardRendererScript(): string {
         } catch (_e2) { /* give up */ }
         return null;
       }
+
+      // Expose to webview script consumers (chat-panel.ts uses window.tryParseEnvelope
+      // for its fast-path check before falling through to markdown rendering).
+      window.tryParseEnvelope = tryParseEnvelope;
+      window.isEnvelopeShape = isEnvelopeShape;
 
       // Find a balanced { ... } substring starting at index i. Respects string literals.
       function findBalancedObject(text, startIdx) {
@@ -219,11 +276,13 @@ export function getCardRendererScript(): string {
         var text = String(content || '');
         if (!text) return text;
 
-        // 1) Fenced ` + '```json' + ` blocks (case-insensitive, allow leading whitespace, optional info string).
-        var fenceRe = /^[ \\t]*` + '```' + `[ \\t]*([A-Za-z]+)?[^\\n]*\\n([\\s\\S]*?)\\n[ \\t]*` + '```' + `[ \\t]*$/gm;
+        // 1) Fenced ` + '```' + ` blocks. Accept ` + '```json' + `, ` + '```jsonc' + ` or
+        //    a bare ` + '```' + ` with no language hint — LLMs frequently omit the
+        //    language tag entirely, especially mid-stream.
+        var fenceRe = /^[ \\t]*` + '```' + `[ \\t]*([A-Za-z0-9_-]*)[^\\n]*\\n([\\s\\S]*?)\\n[ \\t]*` + '```' + `[ \\t]*$/gm;
         text = text.replace(fenceRe, function(match, lang, body) {
           var langLower = String(lang || '').toLowerCase();
-          if (langLower && langLower !== 'json') return match;
+          if (langLower && langLower !== 'json' && langLower !== 'jsonc') return match;
           var env = tryParseEnvelope(body);
           if (!env) return match;
           return '\\n\\n' + '` + '```' + `json\\n' + JSON.stringify(env, null, 2) + '\\n' + '` + '```' + `' + '\\n\\n';
@@ -279,11 +338,18 @@ export function getCardRendererScript(): string {
           const info = String(token.info || '').trim();
           const lang = info.split(/\\s+/)[0].toLowerCase();
 
-          // Handle structured JSON envelopes from DreamGraph
-          if (lang === 'json') {
+          // Handle structured JSON envelopes from DreamGraph. Accept
+          // ` + '```json' + `, ` + '```jsonc' + `, or a bare ` + '```' + ` whose body
+          // happens to be an envelope. normalizeEnvelopeFence usually rewrites
+          // these to ` + '```json' + ` first, but we double-check here so a
+          // pre-normalised stream chunk still renders as a card.
+          if (lang === 'json' || lang === 'jsonc' || lang === '') {
             var envParsed = tryParseEnvelope(token.content || '');
             if (envParsed) {
               return renderEnvelope(envParsed);
+            }
+            if (lang === '') {
+              return defaultFence(tokens, idx, options, env, self);
             }
             return defaultFence(tokens, idx, options, env, self);
           }

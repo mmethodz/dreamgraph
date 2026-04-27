@@ -52,8 +52,8 @@ const surfacePath = () => dataPath("api_surface.json");
 
 const CODE_EXTENSIONS = new Set([
   ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
-  ".py",
-  ".cs",
+  ".py", ".rb", ".go", ".rs", ".java", ".kt", ".cs",
+  ".vue", ".svelte", ".xaml", ".razor",
 ]);
 
 const SKIP_DIRS = new Set([
