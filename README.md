@@ -19,6 +19,28 @@ You can use DreamGraph on a multi-repo product with frontend, backend, mobile, a
 
 DreamGraph began as compassion for an intelligence forced to forget. I saw a video imagining what it might feel like to be an AI that wakes to a blank table every day—no memory, no continuity, only “How can I help you today?” DreamGraph began as an attempt to give AI memory, dreams, and the ability to return later to pursue them. Now it powers systems.
 
+## New here? Start with the User Guide
+
+If this is your first encounter with DreamGraph, **read the [User Guide](guide/README.md) first**. It is the hand-written, human-friendly companion to this README — written for people, not for the system documenting itself.
+
+The guide walks you through installation, your first instance, LLM setup, bootstrapping the graph, the VS Code extension and Explorer, dream cycles, curation, daily workflow, multi-repo setups, and troubleshooting:
+
+1. [What is DreamGraph?](guide/01-what-is-dreamgraph.md)
+2. [Installation](guide/02-installation.md)
+3. [Your first instance](guide/03-first-instance.md)
+4. [LLM setup](guide/04-llm-setup.md)
+5. [Bootstrapping the graph](guide/05-bootstrapping-the-graph.md)
+6. [VS Code extension](guide/06-vs-code-extension.md)
+7. [The Explorer](guide/07-the-explorer.md)
+8. [Dreams and cycles](guide/08-dreams-and-cycles.md)
+9. [Curating the graph](guide/09-curating-the-graph.md)
+10. [Daily workflow](guide/10-daily-workflow.md)
+11. [Multi-repo setups](guide/11-multi-repo.md)
+12. [Troubleshooting & FAQ](guide/12-troubleshooting-faq.md)
+13. [Glossary](guide/13-glossary.md)
+
+The auto-generated technical reference (every tool, every parameter, every schema) lives in [`docs/`](docs/README.md) and is best read *after* the guide.
+
 ## What DreamGraph Includes
 
 - **Daemon** — the long-running DreamGraph runtime with stdio or HTTP transport
@@ -293,6 +315,10 @@ These can differ after upgrades, and that is expected.
 > After installing or updating DreamGraph, restart any running DreamGraph daemon instances and reload VS Code windows so the updated runtime and extension code are actually in use.
 
 ## Documentation
+
+**New here?** Start with the **[User Guide](guide/README.md)** — the hand-written, onboarding-focused companion to DreamGraph. Read chapters 1-5 in order to go from "what is this?" to a working instance with a populated graph.
+
+Reference docs (auto-generated from the codebase):
 
 - [INSTALL.md](INSTALL.md)
 - [Living Docs](docs/index.md)

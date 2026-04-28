@@ -109,6 +109,7 @@ export interface CandidateRow {
 export interface CandidatesResult {
   total: number;
   pending: number;
+  orphaned?: number;
   last_normalization: string | null;
   candidates: CandidateRow[];
 }

@@ -225,10 +225,20 @@ async function handleCandidates(res: ServerResponse): Promise<void> {
   const dreamGraph = await engine.loadDreamGraph();
   const dreamNodes = new Map(dreamGraph.nodes.map((n) => [n.id, n]));
   const dreamEdges = new Map(dreamGraph.edges.map((e) => [e.id, e]));
-  const latent = file.results.filter((r) => r.status === "latent");
+  // Orphaned candidates (their underlying dream node/edge has been pruned
+  // from dream_graph.json) cannot be acted on meaningfully — promote/reject
+  // would either fail or operate on missing data, and the row would render
+  // as "? → ?". Surface them in a separate count so the operator knows the
+  // pool isn't lying, but exclude them from the actionable list.
+  const allLatent = file.results.filter((r) => r.status === "latent");
+  const latent = allLatent.filter((r) =>
+    r.dream_type === "edge" ? dreamEdges.has(r.dream_id) : dreamNodes.has(r.dream_id),
+  );
+  const orphaned = allLatent.length - latent.length;
   json(res, 200, {
     total: file.results.length,
     pending: latent.length,
+    orphaned,
     last_normalization: file.metadata.last_normalization,
     candidates: latent.map((r) => {
       const base = {

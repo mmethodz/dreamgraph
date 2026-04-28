@@ -21,6 +21,7 @@ interface Props {
  */
 export function CandidatesPanel({ instanceUuid, etag, onConflict, onApplied, onInspect }: Props) {
   const [rows, setRows] = useState<CandidateRow[] | null>(null);
+  const [orphaned, setOrphaned] = useState<number>(0);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [openKind, setOpenKind] = useState<"promote" | "reject" | null>(null);
@@ -30,7 +31,10 @@ export function CandidatesPanel({ instanceUuid, etag, onConflict, onApplied, onI
     setError(null);
     fetchCandidates()
       .then((r) => {
-        if (!cancelled) setRows(r.candidates);
+        if (!cancelled) {
+          setRows(r.candidates);
+          setOrphaned(r.orphaned ?? 0);
+        }
       })
       .catch((e: Error) => {
         if (!cancelled) setError(e.message);
@@ -43,10 +47,22 @@ export function CandidatesPanel({ instanceUuid, etag, onConflict, onApplied, onI
   if (error) return <div className="panel-error">{error}</div>;
   if (!rows) return <div className="panel-empty">Loading candidates…</div>;
   if (rows.length === 0)
-    return <div className="panel-empty">No candidate edges awaiting decision.</div>;
+    return (
+      <div className="panel-empty">
+        No candidate edges awaiting decision.
+        {orphaned > 0 ? (
+          <div className="panel-empty-note">{orphaned} stale candidate(s) hidden — their dream entity was pruned.</div>
+        ) : null}
+      </div>
+    );
 
   return (
     <div className="muts-list">
+      {orphaned > 0 ? (
+        <div className="muts-stale-banner">
+          {orphaned} stale candidate(s) hidden — their underlying dream node/edge was pruned and they cannot be acted on.
+        </div>
+      ) : null}
       {rows.map((c) => (
         <CandidateRowView
           key={c.dream_id}
@@ -140,10 +156,10 @@ function CandidateRowView(props: {
             <span className="muts-row-subtitle-rel">{subtitle}</span>
             <span className="muts-row-subtitle-id">{row.dream_id}</span>
           </div>
+          <div className="muts-row-stats">
+            conf {row.confidence.toFixed(2)} · ev ×{row.evidence_count}
+          </div>
         </div>
-        <span className="muts-row-meta">
-          conf {row.confidence.toFixed(2)} · ev ×{row.evidence_count}
-        </span>
         <div className="muts-row-actions">
           {primaryInspectId ? (
             <button
