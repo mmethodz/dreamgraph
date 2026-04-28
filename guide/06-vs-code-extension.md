@@ -12,7 +12,7 @@ The extension is the easiest way to live with DreamGraph. This page is a guided 
 2. Open the workspace folder for a repo you've attached to a DreamGraph instance.
 3. Click the **DreamGraph** icon in the left activity bar.
 
-The extension auto-discovers a running daemon on the standard ports and connects. If multiple instances are running, you can switch via the command palette.
+The extension auto-discovers the correct daemon by matching your **workspace folder path against the project paths registered in each instance**. If the workspace path equals an instance's project path, the extension reads that instance's `instance.json` to get the host and port, then connects automatically — no manual port picking required. If multiple instances match, you can switch via the command palette.
 
 ---
 
@@ -38,14 +38,20 @@ Useful behavior:
 
 ### 2. Dashboard
 
-A read-only summary of the current instance:
+A live control panel for the current instance. It shows:
 
 - Cognitive state (AWAKE/REM/etc.)
 - Counts: nodes, edges, tensions, ADRs, dream cycles run
 - Recent events (cycles, normalizations, tension creations)
 - Connection state (which instance, which port, which version)
 
-Use the dashboard as your at-a-glance health check. If you only look at one panel, look here.
+It is **not** read-only. From the dashboard you can also:
+
+- **Manage schedules** — add, remove, run-now, and pause/resume scheduled dream cycles, scans, and other recurring jobs
+- **Edit instance configuration** — LLM config, database config, policy settings, and narrative settings
+- **Browse living docs** — the auto-generated, graph-derived documentation for the current instance
+
+Use the dashboard as your at-a-glance health check *and* as the primary place to tune how the instance behaves. If you only look at one panel, look here.
 
 ### 3. DreamGraph Explorer
 
@@ -72,7 +78,9 @@ You can also use:
 
 ## Connecting to a daemon
 
-If the extension can't find a daemon, you'll see a "Disconnected" badge. Reconnect via:
+In most cases you don't connect manually — the extension matches your workspace folder against the project paths in each instance and uses the host/port from that instance's `instance.json`. Open a workspace whose path matches an instance and the extension just connects.
+
+If no instance matches the workspace, or the matching instance isn't running, you'll see a "Disconnected" badge. Reconnect via:
 
 > `Ctrl+Shift+P` → **DreamGraph: Connect to Daemon**
 

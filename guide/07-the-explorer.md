@@ -85,6 +85,8 @@ For each one you can:
 - **Resolve** — mark as `confirmed_fixed`, `false_positive`, or `wont_fix` with a reason
 - **Defer** — leave it open
 
+The Explorer will use LLM (when configured) to generate a default reason. It can be overridden.
+
 Resolving a tension is one of the most valuable curation actions you can take. See [9. Curating the graph](09-curating-the-graph.md).
 
 ---
@@ -104,11 +106,11 @@ For each candidate you'll see:
 
 ### Promoting a candidate
 
-Click **Promote**, write a one-line reason (this is required), submit. The candidate becomes a validated edge in `validated_edges.json`. The graph updates immediately.
+Click **Promote**, write a one-line reason (this is required, DreamGraph uses LLM (when configured) to generate a default reason that can be overridden), submit. The candidate becomes a validated edge in `validated_edges.json`. The graph updates immediately.
 
 ### Rejecting a candidate
 
-Click **Reject**, write a reason, submit. The candidate is removed. If it was wrong-but-confident, the engine learns to weigh it differently in future cycles.
+Click **Reject**, write a reason (also auto-generated when LLM is configured), submit. The candidate is removed. If it was wrong-but-confident, the engine learns to weigh it differently in future cycles.
 
 ### Why is reason required?
 
