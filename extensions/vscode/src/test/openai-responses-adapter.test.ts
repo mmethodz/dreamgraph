@@ -123,6 +123,49 @@ test('extracts text while safely ignoring unknown Responses output items', () =>
   assert.equal(text, 'Known text. Fallback text.');
 });
 
+test('inserts a paragraph break between adjacent verbose-mode message items lacking surrounding whitespace', () => {
+  // Reproduces the GPT-5.5 verbose-mode bug where consecutive top-level
+  // messages were concatenated tightly, producing
+  // "...stale references.Autonomy counters: steps=54..." in the chat.
+  const text = extractOpenAIResponsesText({
+    output: [
+      {
+        type: 'message',
+        content: [
+          { type: 'output_text', text: 'Resuming by patching final stale version references.' },
+        ],
+      },
+      {
+        type: 'message',
+        content: [
+          { type: 'output_text', text: 'Autonomy counters: steps=54, writes=19, stalls=1.' },
+        ],
+      },
+    ],
+  });
+
+  assert.equal(
+    text,
+    'Resuming by patching final stale version references.\n\nAutonomy counters: steps=54, writes=19, stalls=1.',
+  );
+});
+
+test('keeps streamed sub-blocks within a single message tightly joined', () => {
+  const text = extractOpenAIResponsesText({
+    output: [
+      {
+        type: 'message',
+        content: [
+          { type: 'output_text', text: 'Step 1: ' },
+          { type: 'output_text', text: 'reading file.' },
+        ],
+      },
+    ],
+  });
+
+  assert.equal(text, 'Step 1: reading file.');
+});
+
 test('extracts function calls and hardens malformed or unknown items', () => {
   const calls = extractOpenAIResponsesToolCalls({
     output: [

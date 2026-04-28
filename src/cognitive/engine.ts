@@ -32,6 +32,7 @@ import { loadJsonArray, invalidateCache } from "../utils/cache.js";
 import { getActiveCognitiveTuning } from "../instance/index.js";
 import { atomicWriteFile } from "../utils/atomic-write.js";
 import { withFileLock } from "../utils/mutex.js";
+import { graphEventBus } from "../graph/events.js";
 import type {
   CognitiveStateName,
   CognitiveState,
@@ -705,6 +706,19 @@ class CognitiveEngine {
     candidates.metadata.last_normalization = new Date().toISOString();
     candidates.metadata.total_cycles = this.totalNormalizationCycles;
     await this.saveCandidateEdges(candidates);
+    // Phase 3 / Slice 2: emit one event per latent candidate so the
+    // Explorer can pulse the affected dream edge.
+    const latent = results.filter((r) => r.status === "latent");
+    for (const r of latent) {
+      graphEventBus.emit("candidate.added", {
+        affected_ids: [r.dream_id],
+        payload: {
+          dream_id: r.dream_id,
+          dream_type: r.dream_type,
+          confidence: r.confidence,
+        },
+      });
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -758,6 +772,17 @@ class CognitiveEngine {
     validated.metadata.total_validated = validated.edges.length;
     await this.saveValidatedEdges(validated);
     logger.info(`Promoted ${edges.length} dream edges to validated status`);
+    // Phase 3 / Slice 2: pulse both endpoints of each promoted edge.
+    for (const e of edges) {
+      graphEventBus.emit("candidate.promoted", {
+        affected_ids: [e.from, e.to].filter(Boolean) as string[],
+        payload: {
+          from: e.from,
+          to: e.to,
+          confidence: e.confidence,
+        },
+      });
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -1039,6 +1064,18 @@ class CognitiveEngine {
 
     tensions.signals.push(newSignal);
     await this.saveTensions(tensions);
+    // Phase 3 / Slice 2: notify Explorer that a brand-new tension exists.
+    // Merge-into-existing and capped paths above intentionally don't emit —
+    // there's no new graph topology in those cases.
+    graphEventBus.emit("tension.created", {
+      affected_ids: [newSignal.id, ...newSignal.entities],
+      payload: {
+        tension_id: newSignal.id,
+        type: newSignal.type,
+        domain: newSignal.domain,
+        urgency: newSignal.urgency,
+      },
+    });
     return newSignal;
   }
 
@@ -1090,6 +1127,15 @@ class CognitiveEngine {
       `Tension resolved: "${tensionId}" by ${resolvedBy} as ${resolutionType}` +
       (evidence ? ` (evidence: ${evidence})` : "")
     );
+    // Phase 3 / Slice 2: notify Explorer that the tension is gone.
+    graphEventBus.emit("tension.resolved", {
+      affected_ids: [tensionId, ...(resolved.original.entities ?? [])],
+      payload: {
+        tension_id: tensionId,
+        resolved_by: resolvedBy,
+        resolution_type: resolutionType,
+      },
+    });
     return resolved;
   }
 
@@ -1342,6 +1388,16 @@ class CognitiveEngine {
       await atomicWriteFile(historyPath(), JSON.stringify(history, null, 2));
     });
     logger.debug(`Dream history entry recorded: session ${entry.session_id}`);
+    // Phase 3 / Slice 2: appendHistoryEntry is the canonical "a cycle just
+    // finished" signal — every dream/normalization/nightmare path funnels
+    // through here at the end. Cheaper than instrumenting each strategy.
+    graphEventBus.emit("dream.cycle.completed", {
+      affected_ids: [],
+      payload: {
+        session_id: entry.session_id,
+        strategy: (entry as { strategy?: string }).strategy ?? null,
+      },
+    });
   }
 
   private emptyHistoryFile(): DreamHistoryFile {
@@ -1521,6 +1577,153 @@ class CognitiveEngine {
         }
       })(),
     };
+  }
+
+  // -------------------------------------------------------------------------
+  // Curated user mutations (Explorer Phase 4 / Slice 2)
+  //
+  // These three methods bypass the normal `assertState("normalizing")` gate
+  // because they're driven by a human reviewer through the Explorer, not by
+  // the autonomous dream loop. They are the *only* engine entry points the
+  // mutation service is allowed to call. Each one:
+  //   - leaves the state machine untouched
+  //   - persists with the same locks the autonomous paths use
+  //   - emits the same graph events (so existing consumers keep working)
+  //   - returns enough data for the audit row (`affected_ids`)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Resolve a tension on behalf of a human operator. Wraps the existing
+   * `resolveTension` (which already has no state precondition) so the
+   * Explorer can call it from AWAKE.
+   */
+  async userResolveTension(
+    tensionId: string,
+    opts: {
+      resolution_type?: TensionResolutionType;
+      evidence?: string;
+    } = {},
+  ): Promise<{ resolved: ResolvedTension | null; affected_ids: string[] }> {
+    const resolved = await this.resolveTension(
+      tensionId,
+      "human",
+      opts.resolution_type ?? "confirmed_fixed",
+      opts.evidence,
+    );
+    if (!resolved) return { resolved: null, affected_ids: [tensionId] };
+    return {
+      resolved,
+      affected_ids: [tensionId, ...(resolved.original.entities ?? [])],
+    };
+  }
+
+  /**
+   * Promote a candidate (latent dream edge) into the validated edge store.
+   * Locates the originating `DreamEdge` by `dream_id`, builds the
+   * `ValidatedEdge`, removes the candidate's `ValidationResult`, persists
+   * both files, and emits `candidate.promoted`.
+   */
+  async userPromoteCandidate(
+    dreamId: string,
+  ): Promise<{
+    edge: ValidatedEdge | null;
+    affected_ids: string[];
+    candidate?: ValidationResult;
+  }> {
+    const candidates = await this.loadCandidateEdges();
+    const idx = candidates.results.findIndex((r) => r.dream_id === dreamId);
+    if (idx === -1) return { edge: null, affected_ids: [dreamId] };
+    const candidate = candidates.results[idx];
+
+    const dreamGraph = await this.loadDreamGraph();
+    const dreamEdge = dreamGraph.edges.find((e) => e.id === dreamId);
+    if (!dreamEdge) {
+      logger.warn(
+        `userPromoteCandidate: dream edge ${dreamId} missing from dream_graph.json — cannot promote`,
+      );
+      return { edge: null, affected_ids: [dreamId], candidate };
+    }
+
+    // Build a ValidatedEdge from the dream edge + the candidate's score.
+    const promotedAt = new Date().toISOString();
+    const validatedType: ValidatedEdge["type"] =
+      dreamEdge.type === "feature" || dreamEdge.type === "workflow" || dreamEdge.type === "data_model"
+        ? dreamEdge.type
+        : "feature";
+    const validatedEdge: ValidatedEdge = {
+      id: `validated_${dreamEdge.id}`,
+      from: dreamEdge.from,
+      to: dreamEdge.to,
+      type: validatedType,
+      relation: dreamEdge.relation,
+      description: dreamEdge.reason,
+      confidence: candidate.confidence,
+      plausibility: candidate.plausibility,
+      evidence_score: candidate.evidence_score,
+      origin: "rem",
+      status: "validated",
+      evidence_summary: candidate.reason,
+      evidence_count: candidate.evidence_count,
+      reinforcement_count: dreamEdge.reinforcement_count,
+      dream_cycle: dreamEdge.dream_cycle,
+      normalization_cycle: candidate.normalization_cycle,
+      validated_at: promotedAt,
+    };
+
+    const validated = await this.loadValidatedEdges();
+    validated.edges.push(validatedEdge);
+    validated.metadata.last_validation = promotedAt;
+    validated.metadata.total_validated = validated.edges.length;
+    await this.saveValidatedEdges(validated);
+
+    candidates.results.splice(idx, 1);
+    candidates.metadata.last_normalization = promotedAt;
+    await this.saveCandidateEdges(candidates);
+
+    logger.info(`User-promoted candidate ${dreamId} → validated edge`);
+    graphEventBus.emit("candidate.promoted", {
+      affected_ids: [validatedEdge.from, validatedEdge.to].filter(Boolean) as string[],
+      payload: {
+        from: validatedEdge.from,
+        to: validatedEdge.to,
+        confidence: validatedEdge.confidence,
+        actor: "user",
+      },
+    });
+
+    return {
+      edge: validatedEdge,
+      affected_ids: [dreamId, validatedEdge.from, validatedEdge.to].filter(Boolean) as string[],
+      candidate,
+    };
+  }
+
+  /**
+   * Reject a candidate (flip its `ValidationResult.status` to "rejected"
+   * and persist). Does not delete — provenance is preserved. Emits
+   * `candidate.rejected`.
+   */
+  async userRejectCandidate(
+    dreamId: string,
+  ): Promise<{ candidate: ValidationResult | null; affected_ids: string[] }> {
+    const candidates = await this.loadCandidateEdges();
+    const candidate = candidates.results.find((r) => r.dream_id === dreamId);
+    if (!candidate) return { candidate: null, affected_ids: [dreamId] };
+
+    candidate.status = "rejected";
+    candidates.metadata.last_normalization = new Date().toISOString();
+    await this.saveCandidateEdges(candidates);
+
+    logger.info(`User-rejected candidate ${dreamId}`);
+    graphEventBus.emit("candidate.rejected", {
+      affected_ids: [dreamId],
+      payload: {
+        dream_id: dreamId,
+        dream_type: candidate.dream_type,
+      },
+    });
+
+    return { candidate, affected_ids: [dreamId] };
   }
 }
 

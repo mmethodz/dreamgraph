@@ -46,7 +46,7 @@ The `dg` CLI is responsible for:
 - user-facing control flow for local installations
 
 ### VS Code Extension
-The extension integrates DreamGraph into the editor and currently lives under `extensions/vscode/src/`.
+The extension integrates DreamGraph into the editor and currently lives under `extensions/vscode/src/`. It surfaces the chat panel, dashboard, the Explorer (interactive Sigma.js graph with curated tension/candidate mutations), and changed-files view. The Explorer SPA itself lives under `explorer/src/` and is bundled to `dist/explorer-spa/`, served by the daemon at `/explorer/`.
 
 ## Source Layout
 
@@ -199,6 +199,21 @@ extensions/vscode/src/
   extensions/vscode/src/webview/protocol.ts
   extensions/vscode/src/webview/render-markdown.ts
   extensions/vscode/src/webview/styles.ts
+explorer/src/
+  explorer/src/App.tsx
+  explorer/src/CandidatesPanel.tsx
+  explorer/src/EventDock.tsx
+  explorer/src/FiltersPanel.tsx
+  explorer/src/GraphCanvas.tsx
+  explorer/src/Inspector.tsx
+  explorer/src/PulseOverlay.tsx
+  explorer/src/ReasonField.tsx
+  explorer/src/SearchBar.tsx
+  explorer/src/TensionsPanel.tsx
+  explorer/src/api.ts
+  explorer/src/main.tsx
+  explorer/src/sse.ts
+  explorer/src/styles.css
 scripts/
   scripts/_codeql_scan.cjs
   scripts/_codeql_scan.js

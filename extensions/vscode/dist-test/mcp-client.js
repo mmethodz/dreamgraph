@@ -34,7 +34,7 @@ class McpClient {
     async connect() {
         await this.disconnect();
         this._transport = new streamableHttp_js_1.StreamableHTTPClientTransport(new URL(`${this._baseUrl}/mcp`));
-        this._client = new index_js_1.Client({ name: "dreamgraph-vscode", version: "0.1.0" }, { capabilities: {} });
+        this._client = new index_js_1.Client({ name: "dreamgraph-vscode", version: "8.1.0" }, { capabilities: {} });
         await this._client.connect(this._transport);
         // Subscribe to server log notifications and forward to the external listener
         this._client.setNotificationHandler(types_js_1.LoggingMessageNotificationSchema, (notification) => {

@@ -1,6 +1,6 @@
-# Installing DreamGraph v8.0.0 "Vishnu"
+# Installing DreamGraph v8.1.0 "Atlas"
 
-One-command install from source. Builds the MCP server, deploys the `dg` CLI globally, and installs the VS Code extension.
+One-command install from source. Builds the MCP server, deploys the `dg` CLI globally, and installs the VS Code extension with DreamGraph Explorer.
 
 ---
 
@@ -36,7 +36,7 @@ bash scripts/install.sh
 That's it. After install, open a **new terminal** and run:
 
 ```bash
-dg --version          # DreamGraph CLI v8.0.0 (Vishnu)
+dg --version          # DreamGraph CLI v8.1.0 (Atlas)
 dg --help             # Show all commands
 ```
 
@@ -164,7 +164,7 @@ export PATH="$HOME/.local/bin:$PATH"
 
 1. Check the extension is installed: Extensions sidebar > search "DreamGraph"
 2. If missing, the installer may have skipped it (VS Code `code` CLI not in PATH)
-3. Manual install: `code --install-extension extensions/vscode/dreamgraph-vscode-0.1.0.vsix`
+3. Manual install: `code --install-extension extensions/vscode/dreamgraph-vscode-8.1.0.vsix`
 4. Reload VS Code: `Ctrl+Shift+P` > "Reload Window"
 
 ### Extension activation error (missing modules)
@@ -173,11 +173,11 @@ If the extension fails with "Cannot find module '@modelcontextprotocol/sdk'":
 
 ```powershell
 # Windows
-cd "$env:USERPROFILE\.vscode\extensions\siteledger.dreamgraph-vscode-0.1.0"
+cd "$env:USERPROFILE\.vscode\extensions\siteledger.dreamgraph-vscode-8.1.0"
 npm install --omit=dev
 
 # Linux / macOS
-cd ~/.vscode/extensions/siteledger.dreamgraph-vscode-0.1.0
+cd ~/.vscode/extensions/siteledger.dreamgraph-vscode-8.1.0
 npm install --omit=dev
 ```
 

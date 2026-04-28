@@ -257,6 +257,50 @@ export async function openDashboardCommand(
   await svc.dashboardView.open();
 }
 
+/* ------------------------------------------------------------------ */
+/*  Command: Open Explorer                                            */
+/* ------------------------------------------------------------------ */
+
+let explorerPanel: vscode.WebviewPanel | undefined;
+
+export async function openExplorerCommand(
+  svc: CommandServices,
+): Promise<void> {
+  const config = vscode.workspace.getConfiguration("dreamgraph");
+  const host = config.get<string>("daemonHost") ?? "127.0.0.1";
+  const port = config.get<number>("daemonPort") ?? 8100;
+  const url = `http://${host}:${port}/explorer/`;
+
+  if (explorerPanel) {
+    explorerPanel.reveal(vscode.ViewColumn.Active);
+    return;
+  }
+  explorerPanel = vscode.window.createWebviewPanel(
+    "dreamgraph.explorer",
+    "DreamGraph Explorer",
+    vscode.ViewColumn.Active,
+    { enableScripts: true, retainContextWhenHidden: true },
+  );
+  explorerPanel.onDidDispose(() => {
+    explorerPanel = undefined;
+  });
+  explorerPanel.webview.html = `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>DreamGraph Explorer</title>
+    <style>
+      html, body { height: 100%; margin: 0; padding: 0; background: #0b0d10; color: #d8dde3; font-family: -apple-system, "Segoe UI", sans-serif; }
+      iframe { width: 100%; height: 100%; border: 0; display: block; }
+    </style>
+  </head>
+  <body>
+    <iframe src="${url}" title="DreamGraph Explorer"></iframe>
+  </body>
+</html>`;
+}
+
+
 export async function restoreSidebarCommand(
   svc: CommandServices,
 ): Promise<void> {
@@ -459,6 +503,10 @@ export async function statusQuickPickCommand(
       description: "Open web dashboard",
     },
     {
+      label: "$(graph) Open Explorer",
+      description: "Open graph explorer (curated mutations)",
+    },
+    {
       label: "$(eye) Inspect Context",
       description: "Show context envelope",
     },
@@ -483,6 +531,8 @@ export async function statusQuickPickCommand(
       return restoreSidebarCommand(svc);
     case "$(globe) Open Dashboard":
       return openDashboardCommand(svc);
+    case "$(graph) Open Explorer":
+      return openExplorerCommand(svc);
     case "$(eye) Inspect Context":
       return inspectContextCommand(svc), undefined;
   }

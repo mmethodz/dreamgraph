@@ -6,7 +6,7 @@
 
 ## What is DreamGraph?
 
-DreamGraph is a model-agnostic, graph-grounded development agent. It builds a validated knowledge graph from code, workflows, schemas, and runtime signals, then continuously explores, verifies, and refines relationships through speculative reasoning. It ships with a **CLI** (`dg`), an **MCP daemon**, a **VS Code extension**, and a **web dashboard**.
+DreamGraph is a model-agnostic, graph-grounded development agent. It builds a validated knowledge graph from code, workflows, schemas, and runtime signals, then continuously explores, verifies, and refines relationships through speculative reasoning. It ships with a **CLI** (`dg`), an **MCP daemon**, a **VS Code extension** (chat, dashboard, Explorer), and a **web dashboard**.
 
 It thinks in cycles: **dream → validate → learn → repeat** — and schedules its own cognitive work autonomously.
 
@@ -22,9 +22,9 @@ It thinks in cycles: **dream → validate → learn → repeat** — and schedul
 | [LLM Setup](setup-llm.md) | Configure providers, API keys, and engine settings for DreamGraph instances |
 | [Tools Reference](tools-reference.md) | Complete 69-tool catalog with parameter tables and 26 resource URIs |
 | [Data Model](data-model.md) | All 21 data store schemas and relationship map |
-| [Workflows](workflows.md) | 15 step-by-step operational process flows |
+| [Workflows](workflows.md) | 16 step-by-step operational process flows |
 | [The Chronicle](narrative.md) | Auto-generated system autobiography — written by DreamGraph about itself |
-| [VS Code Extension](../extensions/vscode/) | Chat, Dashboard, Files Changed panels — installed automatically by the global install script |
+| [VS Code Extension](../extensions/vscode/) | Chat, Dashboard, Explorer (graph + curated mutations), Files Changed panels — installed automatically by the global install script |
 
 ---
 
@@ -60,7 +60,7 @@ After starting the daemon, configure your LLM (dashboard or `engine.env`), then 
 | CLI commands | 16 |
 | Cognitive states | 5 |
 | Data stores | 20 |
-| Workflows | 15 |
+| Workflows | 16 |
 | Promotion threshold | ≥ 0.62 combined confidence |
 
 ---

@@ -696,7 +696,7 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
     await this.postMessage({ type: 'stream-start' });
 
     let fullContent = '';
-    const mcpTools = this.mcpClient ? await this.mcpClient.listTools() : [];
+    const mcpTools = await this._listMcpToolsLazy();
     const allTools: ToolDefinition[] = [
       ...mcpTools.map((tool) => ({
         name: tool.name,
@@ -1922,7 +1922,7 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
         try {
           const result = isLocalTool(toolCall.name)
             ? await executeLocalTool(toolCall.name, toolCall.input ?? {})
-            : await this.mcpClient?.callTool(toolCall.name, toolCall.input ?? {});
+            : await this._callMcpToolWithLazyConnect(toolCall.name, toolCall.input ?? {});
           const normalized = this._truncateToolResult(toolCall.name, this._stringifyToolResult(result));
           toolResultBlocks.push({
             type: 'tool_result',
@@ -2113,6 +2113,55 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
     return helpers.redactSecrets(content);
   }
 
+  /**
+   * Best-effort `listTools()` that lazy-connects the MCP client.
+   *
+   * If the client exists but `connect()` has not run (auto-connect lost
+   * the race, or the instance was bound after activation), we try to
+   * bring it up here so the architect can use MCP tools without the
+   * user having to manually invoke `DreamGraph: Connect`. Failure is
+   * non-fatal — we degrade to "no MCP tools" so the architect can still
+   * answer using local tools + LLM-only knowledge.
+   */
+  private async _listMcpToolsLazy(): Promise<Array<{ name: string; description?: string; inputSchema: unknown }>> {
+    if (!this.mcpClient) return [];
+    if (!this.mcpClient.isConnected) {
+      try {
+        await this.mcpClient.connect();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.contextInspector?.appendContextLine(
+          `MCP lazy-connect failed: ${msg} — proceeding without DreamGraph tools.`,
+        );
+        return [];
+      }
+    }
+    try {
+      return await this.mcpClient.listTools();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.contextInspector?.appendContextLine(
+        `MCP listTools failed: ${msg} — proceeding without DreamGraph tools.`,
+      );
+      return [];
+    }
+  }
+
+  /**
+   * Best-effort `callTool` that lazy-connects the MCP client. Used by
+   * the agentic loop so a stale/never-connected client is repaired
+   * inline rather than crashing the whole turn.
+   */
+  private async _callMcpToolWithLazyConnect(name: string, args: Record<string, unknown>): Promise<unknown> {
+    if (!this.mcpClient) {
+      throw new Error(`Tool "${name}" is not available — MCP client is not configured.`);
+    }
+    if (!this.mcpClient.isConnected) {
+      await this.mcpClient.connect();
+    }
+    return this.mcpClient.callTool(name, args);
+  }
+
   private async _executeMessageActionTool(toolName: string, input: Record<string, unknown>): Promise<unknown> {
     const startedAt = Date.now();
     let status: 'completed' | 'failed' = 'completed';
@@ -2121,7 +2170,17 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
         return await executeLocalTool(toolName, input);
       }
       if (!this.mcpClient?.isConnected) {
-        throw new Error(`Tool "${toolName}" is not available — MCP client is not connected.`);
+        // Lazy-connect attempt — same rationale as `_listMcpToolsLazy`.
+        if (this.mcpClient) {
+          try {
+            await this.mcpClient.connect();
+          } catch {
+            // fall through to the explicit "not connected" error below
+          }
+        }
+        if (!this.mcpClient?.isConnected) {
+          throw new Error(`Tool "${toolName}" is not available — MCP client is not connected.`);
+        }
       }
       return await this.mcpClient.callTool(toolName, input, ChatPanel._toolTimeoutMs(toolName));
     } catch (error) {

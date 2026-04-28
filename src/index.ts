@@ -19,6 +19,8 @@
 import { createServer } from "./server/server.js";
 import { handleDashboardRoute, setDashboardContext } from "./server/dashboard.js";
 import { handleApiRoute } from "./api/routes.js";
+import { handleExplorerRoute } from "./explorer/routes.js";
+import { startDataDirWatcher } from "./graph/watcher.js";
 import { resolveInstanceAtStartup, updateInstanceCounters } from "./instance/index.js";
 import { engine } from "./cognitive/engine.js";
 import { initLlmProvider } from "./cognitive/llm.js";
@@ -136,9 +138,9 @@ async function startHTTP(port: number): Promise<void> {
     );
     res.setHeader(
       "Access-Control-Allow-Headers",
-      "Content-Type, mcp-session-id",
+      "Content-Type, mcp-session-id, X-DreamGraph-Instance, X-DreamGraph-Dry-Run, If-Match, If-None-Match, Last-Event-ID",
     );
-    res.setHeader("Access-Control-Expose-Headers", "mcp-session-id");
+    res.setHeader("Access-Control-Expose-Headers", "mcp-session-id, ETag");
 
     if (req.method === "OPTIONS") {
       res.writeHead(204);
@@ -222,6 +224,12 @@ async function startHTTP(port: number): Promise<void> {
       if (handled) return;
     }
 
+    // ---- /explorer/* — DreamGraph Explorer (Phase 0: read-only API) ----
+    if (url.pathname.startsWith("/explorer/")) {
+      const handled = await handleExplorerRoute(req, res, url.pathname);
+      if (handled) return;
+    }
+
     // ---- Dashboard pages: /, /status, /schedules, /config, /docs, /health --
     if (req.method === "GET" || (req.method === "POST" && (url.pathname === "/config" || url.pathname === "/config/test-db" || url.pathname === "/schedules" || url.pathname === "/restart"))) {
       const handled = await handleDashboardRoute(req, res, url.pathname);
@@ -236,6 +244,10 @@ async function startHTTP(port: number): Promise<void> {
     logger.info(
       `DreamGraph MCP Server running on Streamable HTTP — http://localhost:${port}/mcp`,
     );
+    // Start the data dir watcher so /explorer/events emits cache.invalidated
+    // when files mutate (Phase 3 / Slice 1). HTTP mode only — stdio doesn't
+    // expose the SSE endpoint.
+    startDataDirWatcher();
   });
 }
 

@@ -2,7 +2,7 @@
   "name": "dreamgraph-vscode",
   "displayName": "DreamGraph",
   "description": "DreamGraph-native development agent — intentional context, architectural discipline, knowledge-grounded AI.",
-  "version": "8.0.0",
+  "version": "8.1.0",
   "icon": "media/dreamgraph-icon.png",
   "publisher": "siteledger-solutions",
   "license": "DreamGraph License v1.0",
@@ -94,6 +94,10 @@
       {
         "command": "dreamgraph.openDashboard",
         "title": "DreamGraph: Open Dashboard"
+      },
+      {
+        "command": "dreamgraph.openExplorer",
+        "title": "DreamGraph: Open Explorer"
       },
       {
         "command": "dreamgraph.restoreSidebar",

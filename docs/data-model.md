@@ -137,6 +137,41 @@ All tensions: unresolved questions, inconsistencies, discovered gaps. Active cap
 
 ---
 
+### Explorer Audit Log (`explorer_audit.jsonl`)
+
+JSONL append-only ledger of every curated mutation issued through the Explorer
+SPA's `POST /explorer/mutations/{intent}` funnel. Slice 2 covers
+`tension.resolve`, `candidate.promote`, and `candidate.reject`. **Every
+mutation — successful, failed, or dry-run — produces exactly one row.** The
+daemon emits an `audit.appended` event on the in-process bus immediately after
+each append, which the EventDock surfaces in real time.
+
+One row per line, JSON object:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `mutation_id` | string | UUIDv4 generated server-side; returned to the caller |
+| `timestamp` | string | ISO-8601 timestamp at append time |
+| `actor` | string | Instance UUID of the caller (from `X-DreamGraph-Instance`) |
+| `intent` | string | Wire name of the mutation (e.g. `tension.resolve`) |
+| `affected_ids` | string[] | Entity / edge / tension ids the mutation touched |
+| `reason` | string | Required non-empty justification supplied by the caller |
+| `before_hash` | string \| null | sha-256 hex of the subject before the handler ran |
+| `after_hash` | string \| null | sha-256 hex of the subject after; equals `before_hash` for dry-run |
+| `etag` | string \| null | Snapshot etag observed *after* the mutation (for replay/audit) |
+| `dry_run` | boolean | `true` when rehearsed via `X-DreamGraph-Dry-Run: 1` or `body.dry_run: true` |
+| `ok` | boolean | Whether the mutation succeeded |
+| `error` | string? | Short error code on failure (`etag_mismatch`, `not_found`, …) |
+| `message` | string? | Human-readable error message on failure |
+
+Preconditions enforced before any row is written:
+
+- `If-Match` header is **mandatory** for the three real intents. Missing → 400 `missing_if_match`. Stale → 412 `etag_mismatch` (and a failure row is recorded).
+- `body.reason` is **mandatory** and must be a non-empty string. Missing → 400 `missing_reason`.
+- Auth must succeed (`X-DreamGraph-Instance` matches the active scope). 401/403 responses do **not** produce audit rows.
+
+---
+
 ### Dream History (`dream_history.json`)
 
 Append-only audit trail of every cycle. Never modified, only appended.

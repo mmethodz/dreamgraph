@@ -1,7 +1,7 @@
 {
   "name": "dreamgraph",
-  "version": "8.0.0",
-  "description": "Graph-first cognitive daemon with MCP tools, CLI, dashboard, and VS Code integration",
+  "version": "8.1.0",
+  "description": "Graph-first cognitive daemon with MCP tools, CLI, dashboard, Explorer, and VS Code integration",
   "license": "SEE LICENSE IN LICENSE",
   "type": "module",
   "main": "dist/index.js",
@@ -9,7 +9,9 @@
     "dg": "dist/cli/dg.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && npm run build:explorer",
+    "build:server": "tsc",
+    "build:explorer": "npm --prefix explorer install --no-audit --no-fund && npm --prefix explorer run build",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "cli": "node dist/cli/dg.js",

@@ -24,8 +24,12 @@ DreamGraph began as compassion for an intelligence forced to forget. I saw a vid
 - **Daemon** — the long-running DreamGraph runtime with stdio or HTTP transport
 - **MCP tool surface** — tools for graph queries, enrichment, source inspection, cognition, ADRs, workflows, and remediation
 - **CLI (`dg`)** — instance creation, attach/detach, start/stop, status, scan, enrich, schedule, export, fork, and migration
-- **VS Code extension** — chat, dashboard, changed-files view, daemon connection, and local support tools
+- **VS Code extension** — chat, dashboard, Explorer (interactive graph + curated mutations), changed-files view, daemon connection, and local support tools
 - **Knowledge graph + cognitive engine** — features, workflows, data model, tensions, validated relationships, and dream-cycle reasoning
+
+![DreamGraph Architect with the DreamGraph Explorer in VS Code](assets/dreamgraph-v8-explorer-in-architect-2.png)
+
+*DreamGraph Architect with the DreamGraph Explorer in VS Code*
 
 ## GPT-5.5 and OpenAI Responses API
 
@@ -224,7 +228,7 @@ DreamGraph has five major surfaces:
 - **Cognitive engine** — dream cycles, normalization, promotion, temporal/causal analysis, remediation planning
 - **Daemon runtime** — the MCP-capable service layer exposed through stdio or HTTP
 - **CLI** — operational control over instances and daemon lifecycle
-- **VS Code extension** — the primary interactive user experience for chat, dashboarding, and local-tool execution
+- **VS Code extension** — the primary interactive user experience for chat, dashboard, Explorer (graph + curated mutations), and local-tool execution
 
 For deeper architectural detail, see:
 - [docs/architecture.md](docs/architecture.md)
@@ -259,6 +263,21 @@ extensions/
       mcp-client.ts
       local-tools.ts
       tool-groups.ts
+
+explorer/
+  src/
+    App.tsx
+    GraphCanvas.tsx
+    Inspector.tsx
+    TensionsPanel.tsx
+    CandidatesPanel.tsx
+    ReasonField.tsx
+    EventDock.tsx
+    PulseOverlay.tsx
+    FiltersPanel.tsx
+    SearchBar.tsx
+    api.ts
+    sse.ts
 ```
 
 ## Version Semantics

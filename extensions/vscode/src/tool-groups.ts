@@ -175,6 +175,9 @@ const GRAPH_WRITE_KEYWORDS = [
   'update dreamgraph', 'enrich', 'register entity', 'add entity',
   'seed data', 'capture decision', 'record adr', 'document decision',
   'add adr', 'graph node', 'register ui', 'scan ui', 'ui element',
+  'graph update', 'graph mutation', 'update the graph', 'sync the graph',
+  'feature status', 'workflow status', 'transitional status', 'in-progress',
+  'in progress', 'under construction', 'completion status', '4/6',
 ];
 
 const COGNITIVE_RUN_KEYWORDS = [

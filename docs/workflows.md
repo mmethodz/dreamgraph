@@ -304,3 +304,26 @@ candidate â†’ [normalization] â†’ validated (promoted)
 **Important:** The daemon does NOT auto-scan on startup. The user must configure LLM settings first (via dashboard at `/config` or by editing `engine.env`), then run `dg scan <instance>`.
 
 **Output:** Log messages and CLI output indicating each phase's completion. The instance is ready for interactive use after the scan completes.
+
+---
+
+## 16. Explorer Curated Mutation (`explorer_mutation_flow`)
+
+**Purpose**: Operator-driven promotion, rejection, or tension resolution applied through the Explorer SPA with optimistic concurrency, mandatory rationale, and a permanent audit trail.
+
+**Steps**:
+1. Operator opens the Explorer (`/explorer/`) via the VS Code statusbar quick-pick or directly in the browser.
+2. SPA fetches `GET /explorer/api/snapshot` ? receives `{ instance_uuid, etag, ... }`.
+3. Operator selects the Tensions or Candidates tab in the right rail. Each row is enriched (endpoints, names, descriptions) and exposes Inspect chips that jump to the Inspector tab.
+4. Operator chooses an action — Resolve / Promote / Reject — and a form opens with a `reason` textarea.
+5. (Optional) Operator clicks **Suggest** ? SPA `POST /explorer/api/reason-suggest` with `{ intent, subject }`. The Dreamer LLM (`gpt-5.4-nano`) drafts a reason; operator edits as needed.
+6. Operator submits the form. SPA `POST /explorer/mutations/<intent>` with headers `X-DreamGraph-Instance: <uuid>` + `If-Match: <etag>` and body `{ <id>, reason }`.
+7. Daemon validates the etag. On mismatch ? **HTTP 412**; SPA refetches the snapshot, surfaces a conflict banner, and the operator can retry against the fresh state.
+8. On success the daemon applies the mutation (resolve tension / promote candidate / reject candidate), appends a row to `explorer_audit_log.jsonl` with `{ ts, intent, subject, reason, actor, etag_before, etag_after }`, and emits `cache.invalidated` + `snapshot.changed` over `/explorer/events`.
+9. SPA receives the SSE, refetches the snapshot, and the affected row disappears from the pending pool. Inspector reflects the new graph state.
+10. Subsequent dream cycles see the new validated/resolved state and reason about the graph going forward.
+
+**Concurrency contract**:
+- The etag is a content hash of the snapshot. Any concurrent dream cycle, mutation, or schedule that modifies the graph rotates the etag.
+- Stale etag ? 412; never silent overwrite.
+- Mutations are serialized through the data-file mutex.

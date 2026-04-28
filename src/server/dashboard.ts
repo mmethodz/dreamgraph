@@ -1,5 +1,5 @@
 /**
- * DreamGraph v7.0 — Web Dashboard.
+ * DreamGraph v8.1.0 — Atlas Web Dashboard.
  *
  * Self-contained HTTP route handlers that render status, config,
  * and live documentation pages as HTML.  Zero external dependencies —
@@ -161,7 +161,7 @@ async function shell(title: string, body: string, activeTab: string): Promise<st
   </nav>
   <main>${body}</main>
   <footer>
-    <span>${BRAND} v${VERSION} "Vishnu"</span>
+    <span>${BRAND} v${VERSION} "Atlas"</span>
     <span>Instance: ${instanceId}</span>
     <span>Generated: ${new Date().toISOString()}</span>
   </footer>
