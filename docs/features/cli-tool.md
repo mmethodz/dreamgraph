@@ -1,6 +1,6 @@
 # Command Line Interface Tool
 
-> Provides a command line interface for interacting with DreamGraph. Users can start the server, specify transport modes, and manage instances through command line arguments.
+> Provides a command line interface for interacting with the DreamGraph application. Users can execute various commands to manage instances, run scripts, and access functionalities directly from the terminal.
 
 **Repository:** dreamgraph  
 **Domain:** cli  

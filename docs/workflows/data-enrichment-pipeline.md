@@ -1,6 +1,6 @@
 # Data Enrichment Pipeline
 
-> A structured workflow for enriching data across different sources and types in the system.. Intent: To streamline the process of enriching existing data models with new inputs and cross-links for improved insights.
+> A workflow pipeline designed to enrich data through various processing stages before its utilization.. Intent: This workflow should exist to ensure that data is effectively processed and enhanced prior to its use in cognitive tasks or graphical representations.
 
 **Trigger:** unknown  
 

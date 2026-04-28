@@ -1,11 +1,11 @@
-# Cognitive Scheduler Module
+# Scheduler Cognitive Module
 
-> Manages scheduling and timing aspects of cognitive tasks within the engine, ensuring that operations are performed in a timely and organized manner.
+> Manages scheduling tasks within the cognitive engine, ensuring timely execution of cognitive processes and interventions. This module enhances the efficiency of the overall system.
 
 **Repository:** dreamgraph  
-**Domain:** data-processing  
+**Domain:** cognitive  
 **Status:** active  
 **Source files:** src/cognitive/scheduler.ts  
 
-**Tags:** cognitive, scheduler, timing
+**Tags:** cognitive, scheduler, task-management
 

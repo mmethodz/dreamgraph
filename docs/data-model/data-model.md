@@ -1,6 +1,6 @@
 # Data Model
 
-> Defines the structure of data entities within the DreamGraph system, including fields and relationships. Data models are crucial for data validation and integrity.
+> Describes the structure and relationships of data entities within the DreamGraph system. Data models are used to validate and organize data flows.
 
 **Table:** `data_model`  
 **Storage:** json  
@@ -10,5 +10,5 @@
 | Field | Type | Description |
 |-------|------|-------------|
 | id | string | Unique identifier for the data model. |
-| fields | array | List of fields defined in the data model. |
+| name | string | Human-readable name of the data model. |
 

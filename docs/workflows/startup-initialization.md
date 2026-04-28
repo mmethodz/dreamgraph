@@ -1,8 +1,8 @@
 # Startup Initialization Process
 
-> This process initializes the DreamGraph MCP Server, setting up the necessary configurations and starting the server. It handles command-line arguments to determine the transport mode and port settings.
+> This process initializes the DreamGraph server, setting up necessary configurations and starting the server in the specified transport mode. It handles command-line arguments to configure the server's transport and port settings.
 
-**Trigger:** Server start command  
+**Trigger:** Server launch  
 **Source files:** src/index.ts  
 
 ## Flowchart
@@ -20,7 +20,7 @@ flowchart TD
 
 ### 1. Parse Command-Line Arguments
 
-Extract transport mode and port from command-line arguments.
+Extract transport mode and port from the command-line arguments.
 
 ### 2. Initialize Server
 
@@ -28,5 +28,5 @@ Create and configure the server based on the parsed arguments.
 
 ### 3. Start Server
 
-Begin listening for incoming requests on the specified transport.
+Launch the server in the specified transport mode.
 

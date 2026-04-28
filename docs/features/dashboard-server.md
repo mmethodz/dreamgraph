@@ -1,16 +1,11 @@
 # Dashboard Server
 
-> Legacy alias for canonical feature_dashboard_server retained for historical graph continuity. Superseded for authoritative ownership by ADR-010; do not use this ID for new UI used_by mappings.
+> Handles the dashboard functionalities of the DreamGraph application, providing a user interface for monitoring and managing instances. It integrates with the main server to deliver real-time updates.
 
-**Repository:**   
-**Domain:** core  
+**Repository:** dreamgraph  
+**Domain:** ui  
 **Status:** active  
+**Source files:** src/server/dashboard.ts  
 
-## Relationships
-
-| Target | Type | Relationship | Strength | Description |
-|--------|------|--------------|----------|-------------|
-| feature_dashboard_server | feature | related_to | moderate |  |
-
-**Tags:** dashboard, server, ui, legacy-alias
+**Tags:** dashboard, ui, monitoring
 

@@ -1,11 +1,11 @@
-# Cognitive Adversarial Module
+# Adversarial Cognitive Module
 
-> A module that implements adversarial reasoning capabilities within the cognitive engine. It allows the system to explore alternative scenarios and challenge existing assumptions.
+> A module within the cognitive engine that focuses on adversarial reasoning and analysis. It helps in identifying potential weaknesses and vulnerabilities in the system's cognitive processes.
 
 **Repository:** dreamgraph  
-**Domain:** data-processing  
+**Domain:** cognitive  
 **Status:** active  
 **Source files:** src/cognitive/adversarial.ts  
 
-**Tags:** cognitive, adversarial, reasoning
+**Tags:** cognitive, adversarial, analysis
 

@@ -1,18 +1,11 @@
 # Cli
 
-> Cli — 1 source file(s): src/cli/dg.ts
+> Cli — 18 source file(s) in src/cli/
 
 **Repository:** dreamgraph  
 **Domain:** cli  
 **Status:** active  
-**Source files:** src/cli/dg.ts  
+**Source files:** src/cli/commands/attach.ts, src/cli/commands/curate.ts, src/cli/commands/enrich.ts, src/cli/commands/export.ts, src/cli/commands/fork.ts, src/cli/commands/init.ts, src/cli/commands/instances.ts, src/cli/commands/lifecycle-ops.ts, src/cli/commands/migrate.ts, src/cli/commands/restart.ts  
 
-## Relationships
-
-| Target | Type | Relationship | Strength | Description |
-|--------|------|--------------|----------|-------------|
-| dreamgraph_src_cli_commands | workflow | related_to | moderate | Shared domain 'cli' with 2 keyword overlap(s) |
-| dreamgraph_src_cli_utils | data_model | related_to | moderate | Shared domain 'cli' with 2 keyword overlap(s) |
-
-**Tags:** cli, ts
+**Tags:** typescript
 

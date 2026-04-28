@@ -1,11 +1,11 @@
-# Cognitive Narrator Module
+# Narrator Cognitive Module
 
-> Provides narrative capabilities to the cognitive engine, enabling it to generate coherent stories or explanations based on the reasoning process and data available.
+> This module provides narrative capabilities within the cognitive engine, allowing for the generation of coherent and contextually relevant narratives based on the data processed by the system.
 
 **Repository:** dreamgraph  
-**Domain:** data-processing  
+**Domain:** cognitive  
 **Status:** active  
 **Source files:** src/cognitive/narrator.ts  
 
-**Tags:** cognitive, narrative, reasoning
+**Tags:** cognitive, narrator, narrative
 

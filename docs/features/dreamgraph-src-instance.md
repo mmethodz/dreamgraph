@@ -1,11 +1,11 @@
 # Instance
 
-> Instance — 5 source file(s): src/instance/index.ts, src/instance/lifecycle.ts, src/instance/policies.ts, src/instance/registry.ts, src/instance/scope.ts
+> Instance — 7 source file(s) in src/instance/
 
 **Repository:** dreamgraph  
 **Domain:** core  
 **Status:** active  
-**Source files:** src/instance/index.ts, src/instance/lifecycle.ts, src/instance/policies.ts, src/instance/registry.ts, src/instance/scope.ts  
+**Source files:** src/instance/bootstrap.ts, src/instance/index.ts, src/instance/lifecycle.ts, src/instance/policies.ts, src/instance/registry.ts, src/instance/scope.ts, src/instance/types.ts  
 
-**Tags:** core, ts
+**Tags:** typescript
 

@@ -1,6 +1,6 @@
 # Workflow
 
-> Defines a sequence of steps that can be triggered in the DreamGraph application. Workflows are used to automate processes and manage task execution.
+> Defines a sequence of operations or tasks within the DreamGraph system. Workflows can be triggered based on specific events or conditions.
 
 **Table:** `workflow`  
 **Storage:** json  
@@ -9,6 +9,6 @@
 
 | Field | Type | Description |
 |-------|------|-------------|
-| trigger | string | The event that triggers the workflow. |
-| steps | array | The steps involved in the workflow. |
+| id | string | Unique identifier for the workflow. |
+| name | string | Human-readable name of the workflow. |
 

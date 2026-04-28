@@ -1,32 +1,38 @@
 # User Interaction Process
 
-> This process manages interactions with users through the command line or HTTP API. It handles requests and responses, ensuring that user inputs are processed correctly.
+> This process manages user interactions through the CLI and HTTP API, allowing users to send requests and receive responses. It includes validation of input data and error handling.
 
-**Trigger:** User input via CLI or API  
+**Trigger:** User input  
 **Source files:** src/api/routes.ts, src/cli/dg.ts  
 
 ## Flowchart
 
 ```mermaid
 flowchart TD
-    S1["Receive User Input"]
-    S2["Process Input"]
+    S1["Receive User Request"]
+    S2["Validate Input"]
     S1 --> S2
-    S3["Send Response"]
+    S3["Process Request"]
     S2 --> S3
+    S4["Send Response"]
+    S3 --> S4
 ```
 
 ## Steps
 
-### 1. Receive User Input
+### 1. Receive User Request
 
-Capture input from the user through the command line or HTTP request.
+Capture user input from CLI or HTTP requests.
 
-### 2. Process Input
+### 2. Validate Input
 
-Validate and process the input to determine the appropriate action.
+Check the structure and content of the input data for correctness.
 
-### 3. Send Response
+### 3. Process Request
 
-Return the result of the processed input back to the user.
+Execute the appropriate action based on the user request.
+
+### 4. Send Response
+
+Return the result of the processed request back to the user.
 

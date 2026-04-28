@@ -1,32 +1,32 @@
 # Settings Persistence Process
 
-> This process manages the saving and loading of user settings and configurations. It ensures that user preferences are stored and can be retrieved across sessions.
+> This process saves user settings and configurations to a persistent storage, ensuring that preferences are retained across sessions. It handles reading and writing of configuration files.
 
 **Trigger:** User updates settings  
-**Source files:** src/utils/cache.ts  
+**Source files:** src/config/config.ts  
 
 ## Flowchart
 
 ```mermaid
 flowchart TD
-    S1["Save Settings"]
-    S2["Load Settings"]
+    S1["Read Current Settings"]
+    S2["Update Settings"]
     S1 --> S2
-    S3["Update Settings"]
+    S3["Save Settings"]
     S2 --> S3
 ```
 
 ## Steps
 
-### 1. Save Settings
+### 1. Read Current Settings
 
-Persist user settings to a configuration file.
+Load existing settings from the configuration file.
 
-### 2. Load Settings
+### 2. Update Settings
 
-Retrieve user settings from the configuration file at startup.
+Modify settings based on user input.
 
-### 3. Update Settings
+### 3. Save Settings
 
-Allow users to modify and update their settings dynamically.
+Write the updated settings back to the configuration file.
 

@@ -1,6 +1,6 @@
 # Data Management Pipeline
 
-> A pipeline that integrates data processing, protection, and auditing functionalities.. Intent: To unify the processes of data handling, ensuring alignment with compliance and auditing standards.
+> A structured approach for managing data flow across different processes.. Intent: To enable better governance of data handling and flow across workflows.
 
 **Trigger:** unknown  
 

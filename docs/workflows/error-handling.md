@@ -1,6 +1,6 @@
 # Error Handling Flow
 
-> This process captures and manages errors that occur during the operation of the application. It ensures that users receive meaningful feedback and that the system can recover gracefully.
+> This process manages errors that occur during the execution of the application, providing feedback to users and logging errors for further analysis. It ensures that the application remains stable and user-friendly.
 
 **Trigger:** Error occurrence  
 **Source files:** src/utils/errors.ts  
@@ -10,9 +10,9 @@
 ```mermaid
 flowchart TD
     S1["Capture Error"]
-    S2["Notify User"]
+    S2["Log Error"]
     S1 --> S2
-    S3["Attempt Recovery"]
+    S3["Notify User"]
     S2 --> S3
 ```
 
@@ -20,13 +20,13 @@ flowchart TD
 
 ### 1. Capture Error
 
-Detect and log the error that has occurred.
+Detect and capture the error that has occurred.
 
-### 2. Notify User
+### 2. Log Error
 
-Provide feedback to the user regarding the error.
+Record the error details in the application logs for analysis.
 
-### 3. Attempt Recovery
+### 3. Notify User
 
-Try to recover from the error or revert to a safe state.
+Provide feedback to the user about the error and possible next steps.
 

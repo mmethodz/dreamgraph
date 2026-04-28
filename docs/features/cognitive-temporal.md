@@ -1,9 +1,9 @@
-# Cognitive Temporal Module
+# Temporal Cognitive Module
 
-> Handles temporal reasoning within the cognitive engine, enabling it to understand and manipulate time-related concepts and relationships.
+> Focuses on temporal reasoning within the cognitive engine, analyzing time-based relationships and events to derive insights and predictions about future occurrences.
 
 **Repository:** dreamgraph  
-**Domain:** data-processing  
+**Domain:** cognitive  
 **Status:** active  
 **Source files:** src/cognitive/temporal.ts  
 

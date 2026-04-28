@@ -1,11 +1,11 @@
 # Policy Management
 
-> Manages the policies that govern instance behavior and cognitive tuning. It allows for loading, validating, and switching between different policy profiles to adapt the instance's cognitive capabilities.
+> Handles the definition, validation, and application of policies within the DreamGraph instances. This feature ensures that the correct policies are applied to maintain the integrity and security of the instances.
 
 **Repository:** dreamgraph  
-**Domain:** infrastructure  
+**Domain:** instance  
 **Status:** active  
 **Source files:** src/instance/policies.ts  
 
-**Tags:** policy, management, cognitive
+**Tags:** policy, management, validation
 

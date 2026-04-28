@@ -1,9 +1,9 @@
-# Cognitive Federation Module
+# Federation Cognitive Module
 
-> Enables the cognitive engine to operate in a federated manner, allowing multiple instances or components to collaborate and share knowledge effectively.
+> Handles federated learning and reasoning across multiple instances within the DreamGraph system. This module allows for collaborative cognitive processes and shared insights.
 
 **Repository:** dreamgraph  
-**Domain:** data-processing  
+**Domain:** cognitive  
 **Status:** active  
 **Source files:** src/cognitive/federation.ts  
 

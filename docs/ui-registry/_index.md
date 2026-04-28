@@ -10,11 +10,13 @@
 | [remediation_plan_viewer](remediation-plan-viewer.md) | Remediation Plan Viewer | active | Render generated remediation plans with ordered steps, risk … | react |
 | [vscode_chat_panel](vscode-chat-panel.md) | VS Code Chat Panel | active | Provides the primary Architect interaction surface in the VS… | vscode |
 | [ui_dashboard_view](ui-dashboard-view.md) | Dashboard View | active | Present DreamGraph system status, knowledge graph counts, an… | react, react |
-| [ui_chat_panel](ui-chat-panel.md) | Architect Chat Panel | active | Host the DreamGraph architect conversation, render structure… | react |
+| [ui_chat_panel](ui-chat-panel.md) | Architect Chat Panel | active | Host the DreamGraph architect conversation, render structure… | react, vscode |
 | [ui_schedule_management_table](ui-schedule-management-table.md) | Schedule Management Table | active | Display configured cognitive schedules and let operators ins… | html |
 | [ui_docs_viewer](ui-docs-viewer.md) | Docs Viewer | active | Browse DreamGraph documentation and render individual markdo… | html |
 | [ui-dashboard-view](ui-dashboard-view.md) | UI Dashboard View | active | Legacy parallel dashboard embedding entry retained only for … | - |
 | [ui-chat-panel](ui-chat-panel.md) | UI Chat Panel | active | Legacy parallel chat surface entry retained only for histori… | - |
+| [explorer-inspector](explorer-inspector.md) | Explorer Inspector | active | Context panel for viewing structured details, relationships,… | react |
+| [explorer-shell](explorer-shell.md) | Explorer Shell | active | Host the DreamGraph Explorer experience inside the Architect… | html |
 
 ## data_display
 
@@ -25,6 +27,10 @@
 | [tension_list](tension-list.md) | Tension List | active | Display unresolved tensions with urgency and evidence summar… | react |
 | [ui_metrics_card_grid](ui-metrics-card-grid.md) | Metrics Card Grid | active | Summarize canonical DreamGraph operational and cognitive hea… | html |
 | [ui_changed_files_view](ui-changed-files-view.md) | Changed Files View | active | Provide a session-scoped tree view of files created, edited,… | vscode |
+| [dreamgraph_dashboard_view](dreamgraph-dashboard-view.md) | DreamGraph Dashboard View | active | Embeds the daemon status dashboard in a dockable sidebar web… | html |
+| [changed_files_view](changed-files-view.md) | Changed Files View | active | Show a session-scoped list of files changed during the curre… | vscode |
+| [context_inspector_output](context-inspector-output.md) | Context Inspector Output | active | Expose the constructed DreamGraph context envelope, reasonin… | vscode |
+| [explorer-graph-canvas](explorer-graph-canvas.md) | Explorer Graph Canvas | active | Primary interactive visualization surface for exploring Drea… | react |
 
 ## feedback
 
@@ -41,6 +47,10 @@
 | [tension-list](tension-list.md) | Tension List | active | Legacy parallel graph-signal feedback entry retained only fo… | - |
 | [remediation-plan-viewer](remediation-plan-viewer.md) | Remediation Plan Viewer | active | Legacy parallel remediation/task summary entry retained only… | - |
 | [anchor_state_badge](anchor-state-badge.md) | Anchor State Badge | active | Communicates the lifecycle migration state of a semantic anc… | react |
+| [graph_signal_indicator](graph-signal-indicator.md) | Graph Signal Indicator | active | Surface immediate graph awareness for the currently active f… | vscode |
+| [ui_tool_progress_view](ui-tool-progress-view.md) | Tool Progress View | active | Expose live and historical tool execution progress inside th… | vscode |
+| [ui_status_bar_indicator](ui-status-bar-indicator.md) | DreamGraph Status Bar Indicator | active | Provide always-visible DreamGraph connection and cognitive-s… | vscode |
+| [explorer-event-dock](explorer-event-dock.md) | Explorer Event Dock | active | Live event surface showing recent graph, cognitive, and expl… | react |
 
 ## layout
 
@@ -54,4 +64,23 @@
 | ID | Name | Status | Purpose | Platforms |
 |----|------|--------|---------|-----------|
 | [ui_command_action_picker](ui-command-action-picker.md) | Command Action Picker | active | Offer a quick-pick action surface for common DreamGraph exte… | vscode |
+| [ui_recommended_actions_bar](ui-recommended-actions-bar.md) | Recommended Actions Bar | active | Present structured suggested actions for a rendered DreamGra… | vscode |
+
+## data_input
+
+| ID | Name | Status | Purpose | Platforms |
+|----|------|--------|---------|-----------|
+| [explorer-search-bar](explorer-search-bar.md) | Explorer Search Bar | active | Global Explorer query input for locating entities, narrowing… | react |
+| [explorer-filters-panel](explorer-filters-panel.md) | Explorer Filters Panel | active | Controls the visible Explorer subgraph by applying semantic … | react |
+
+## Deprecated / Transitional Legacy Entries
+
+> ⚠️ Deprecated UI entries are excluded from the main catalog but retained for backward compatibility and historical traceability. Prefer canonical `ui_*` entries and any declared `superseded_by` targets.
+
+| ID | Name | Status | Superseded By | Reason |
+|----|------|--------|---------------|--------|
+| [dreamgraph_chat_panel](dreamgraph-chat-panel.md) | DreamGraph Chat Panel | deprecated | ui_chat_panel | Canonicalized under ADR-083/ADR-084 to the generic semantic id ui_chat_panel. |
+| [dreamgraph_tool_progress_view](dreamgraph-tool-progress-view.md) | DreamGraph Tool Progress View | deprecated | ui_tool_progress_view | Canonicalized under ADR-083/ADR-084 to the generic semantic id ui_tool_progress_view. |
+| [dreamgraph_recommended_actions_bar](dreamgraph-recommended-actions-bar.md) | DreamGraph Recommended Actions Bar | deprecated | ui_recommended_actions_bar | Canonicalized under ADR-083/ADR-084 to the generic semantic id ui_recommended_actions_bar. |
+| [dreamgraph_status_bar_indicator](dreamgraph-status-bar-indicator.md) | DreamGraph Status Bar Indicator (Legacy Alias) | deprecated | ui_status_bar_indicator | Canonicalized under ADR-083/ADR-084 to the generic semantic id ui_status_bar_indicator. |
 

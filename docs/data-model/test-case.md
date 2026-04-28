@@ -1,14 +1,14 @@
 # Test Case
 
-> Defines a test case for the DreamGraph application, including the conditions and expected outcomes. Test cases are essential for ensuring the reliability and correctness of the application.
+> Defines a test case for validating the functionality of the DreamGraph system. Test cases ensure that the system behaves as expected under various conditions.
 
 **Table:** `test_case`  
-**Storage:** memory  
+**Storage:** json  
 
 ## Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
-| id | string | Unique identifier for the test case. |
-| description | string | Description of the test case. |
+| test_id | string | Unique identifier for the test case. |
+| description | string | Description of the test case and its purpose. |
 

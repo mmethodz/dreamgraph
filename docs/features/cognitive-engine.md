@@ -1,11 +1,11 @@
 # Cognitive Engine
 
-> The core component of DreamGraph that drives cognitive reasoning and decision-making processes. It orchestrates various cognitive tasks and manages the flow of information through the system, enabling advanced functionalities such as speculative reasoning and knowledge graph manipulation.
+> The core component responsible for processing cognitive tasks and managing the interactions between various cognitive modules. It orchestrates the flow of data and decisions within the DreamGraph system.
 
 **Repository:** dreamgraph  
-**Domain:** data-processing  
+**Domain:** cognitive  
 **Status:** active  
 **Source files:** src/cognitive/engine.ts  
 
-**Tags:** cognitive, engine, reasoning
+**Tags:** cognitive, engine, processing
 

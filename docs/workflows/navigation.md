@@ -1,8 +1,8 @@
 # Navigation Process
 
-> This process handles the navigation within the DreamGraph application, allowing users to move between different views and functionalities seamlessly.
+> This process handles navigation within the application, allowing users to move between different views or sections. It manages the state of the current view and updates the UI accordingly.
 
-**Trigger:** User interaction with navigation elements  
+**Trigger:** User navigates  
 **Source files:** src/server/dashboard.ts  
 
 ## Flowchart
@@ -10,9 +10,9 @@
 ```mermaid
 flowchart TD
     S1["Capture Navigation Event"]
-    S2["Determine Target View"]
+    S2["Update Current View"]
     S1 --> S2
-    S3["Render Target View"]
+    S3["Render New View"]
     S2 --> S3
 ```
 
@@ -20,13 +20,13 @@ flowchart TD
 
 ### 1. Capture Navigation Event
 
-Detect when a user interacts with navigation elements.
+Detect when a user attempts to navigate to a different view.
 
-### 2. Determine Target View
+### 2. Update Current View
 
-Identify the target view or functionality based on the user's action.
+Change the current view state to reflect the user's choice.
 
-### 3. Render Target View
+### 3. Render New View
 
-Display the selected view to the user.
+Display the new view to the user.
 

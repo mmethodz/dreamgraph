@@ -1,6 +1,6 @@
 # Plugin Discovery Process
 
-> This process identifies and registers available plugins for the DreamGraph system. It scans the extensions directory and loads any compatible plugins.
+> This process identifies and loads available plugins/extensions for the DreamGraph application, enhancing its functionality. It checks for compatibility and registers the plugins.
 
 **Trigger:** Server startup  
 **Source files:** src/instance/registry.ts  
@@ -9,24 +9,24 @@
 
 ```mermaid
 flowchart TD
-    S1["Scan Extensions Directory"]
-    S2["Load Plugins"]
+    S1["Scan for Plugins"]
+    S2["Validate Plugins"]
     S1 --> S2
-    S3["Validate Plugins"]
+    S3["Register Plugins"]
     S2 --> S3
 ```
 
 ## Steps
 
-### 1. Scan Extensions Directory
+### 1. Scan for Plugins
 
-Look for plugin files in the extensions directory.
+Search the extensions directory for available plugins.
 
-### 2. Load Plugins
+### 2. Validate Plugins
 
-Load and register each discovered plugin into the system.
+Check each plugin for compatibility with the current version.
 
-### 3. Validate Plugins
+### 3. Register Plugins
 
-Check that each loaded plugin meets the necessary criteria for operation.
+Add valid plugins to the application registry for use.
 

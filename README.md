@@ -222,13 +222,14 @@ dg scan my-project
 
 ## Architecture at a Glance
 
-DreamGraph has five major surfaces:
+DreamGraph has six major surfaces:
 
 - **Knowledge graph** — features, workflows, data model, ADRs, UI registry, tensions, and validated edges
 - **Cognitive engine** — dream cycles, normalization, promotion, temporal/causal analysis, remediation planning
 - **Daemon runtime** — the MCP-capable service layer exposed through stdio or HTTP
 - **CLI** — operational control over instances and daemon lifecycle
-- **VS Code extension** — the primary interactive user experience for chat, dashboard, Explorer (graph + curated mutations), and local-tool execution
+- **VS Code extension** — the primary interactive editor experience for chat, dashboard, changed-files context, daemon connection, and local-tool execution
+- **DreamGraph Explorer** — the interactive graph surface for browsing entities, tensions, candidates, and curated graph mutations, available in a web browser or through the VS Code extension
 
 For deeper architectural detail, see:
 - [docs/architecture.md](docs/architecture.md)
@@ -294,7 +295,7 @@ These can differ after upgrades, and that is expected.
 ## Documentation
 
 - [INSTALL.md](INSTALL.md)
-- [docs/README.md](docs/README.md)
+- [Living Docs](docs/index.md)
 - [docs/architecture.md](docs/architecture.md)
 - [docs/setup-llm.md](docs/setup-llm.md)
 - [docs/tools-reference.md](docs/tools-reference.md)

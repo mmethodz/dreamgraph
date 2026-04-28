@@ -1,6 +1,6 @@
 # Adversarial Model
 
-> Represents the adversarial cognitive model used to challenge and refine the outputs of the DreamGraph system. This model plays a critical role in ensuring the robustness of the cognitive processes.
+> A model that simulates adversarial scenarios to test the robustness of the DreamGraph system. It helps identify weaknesses and improve system resilience.
 
 **Table:** `adversarial_model`  
 **Storage:** json  
@@ -10,5 +10,5 @@
 | Field | Type | Description |
 |-------|------|-------------|
 | id | string | Unique identifier for the adversarial model. |
-| status | string | Current operational status of the adversarial model. |
+| scenario | string | Description of the adversarial scenario being tested. |
 

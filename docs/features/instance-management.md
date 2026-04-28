@@ -1,11 +1,11 @@
 # Instance Management
 
-> Handles the lifecycle and management of instances within DreamGraph. This includes creating, loading, and managing instance states, as well as ensuring isolation between instances to prevent cross-contamination.
+> Manages the lifecycle and state of instances within the DreamGraph application. It includes functionalities for creating, loading, and updating instances, as well as handling policies and scopes.
 
 **Repository:** dreamgraph  
-**Domain:** infrastructure  
+**Domain:** instance  
 **Status:** active  
-**Source files:** src/instance/index.ts, src/instance/lifecycle.ts, src/instance/registry.ts  
+**Source files:** src/instance/index.ts  
 
 **Tags:** instance, management, lifecycle
 

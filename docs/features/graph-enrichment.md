@@ -1,11 +1,11 @@
 # Graph Enrichment
 
-> A script that enhances the knowledge graph by adding domain labels, keywords, and cross-links to various data files. It enables the cognitive engine to build a more comprehensive FactSnapshot and facilitates speculative reasoning.
+> Enriches the knowledge graph data by adding domain labels, keywords, and cross-links to enhance the cognitive engine's capabilities. This feature allows for better contextual understanding and relationship mapping.
 
 **Repository:** dreamgraph  
 **Domain:** data-processing  
 **Status:** active  
 **Source files:** scripts/enrich-graph.mjs  
 
-**Tags:** graph, enrichment, script
+**Tags:** graph, enrichment, cognitive
 

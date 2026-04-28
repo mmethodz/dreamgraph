@@ -1,11 +1,11 @@
 # Cognitive
 
-> Cognitive — 16 source file(s): src/cognitive/adversarial.ts, src/cognitive/causal.ts, src/cognitive/dreamer.ts, src/cognitive/engine.ts, src/cognitive/event-router.ts, src/cognitive/federation.ts, src/cognitive/graph-rag.ts, src/cognitive/intervention.ts, src/cognitive/lucid.ts, src/cognitive/metacognition.ts, src/cognitive/narrator.ts, src/cognitive/normalizer.ts, src/cognitive/register.ts, src/cognitive/scheduler.ts, src/cognitive/temporal.ts, src/cognitive/types.ts
+> Cognitive — 26 source file(s) in src/cognitive/
 
 **Repository:** dreamgraph  
-**Domain:** cognitive  
+**Domain:** core  
 **Status:** active  
-**Source files:** src/cognitive/adversarial.ts, src/cognitive/causal.ts, src/cognitive/dreamer.ts, src/cognitive/engine.ts, src/cognitive/event-router.ts, src/cognitive/federation.ts, src/cognitive/graph-rag.ts, src/cognitive/intervention.ts, src/cognitive/lucid.ts, src/cognitive/metacognition.ts, src/cognitive/narrator.ts, src/cognitive/normalizer.ts, src/cognitive/register.ts, src/cognitive/scheduler.ts, src/cognitive/temporal.ts, src/cognitive/types.ts  
+**Source files:** src/cognitive/adversarial.ts, src/cognitive/causal.ts, src/cognitive/dreamer.ts, src/cognitive/engine.ts, src/cognitive/event-router.ts, src/cognitive/federation.ts, src/cognitive/graph-rag.ts, src/cognitive/intervention.ts, src/cognitive/llm.ts, src/cognitive/lucid.ts  
 
-**Tags:** cognitive, ts
+**Tags:** typescript
 

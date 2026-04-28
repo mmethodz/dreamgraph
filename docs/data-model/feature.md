@@ -1,6 +1,6 @@
 # Feature
 
-> Represents a distinct capability or functionality within the DreamGraph application. Features are linked to workflows and other entities to enhance the application's capabilities.
+> Represents a specific feature within the DreamGraph system. Features are defined with metadata and can be linked to other entities in the graph.
 
 **Table:** `feature`  
 **Storage:** json  
@@ -9,6 +9,6 @@
 
 | Field | Type | Description |
 |-------|------|-------------|
-| name | string | The name of the feature. |
-| description | string | A brief description of what the feature does. |
+| id | string | Unique identifier for the feature. |
+| name | string | Human-readable name of the feature. |
 

@@ -1,11 +1,11 @@
-# Cognitive Intervention
+# Intervention Cognitive Module
 
-> Facilitates interventions in the cognitive processes of DreamGraph. This feature allows for dynamic adjustments to cognitive tasks based on real-time data and feedback.
+> Handles interventions within the cognitive engine, allowing for adjustments and modifications based on the analysis of cognitive processes. This module enhances the adaptability of the system.
 
 **Repository:** dreamgraph  
-**Domain:** data-processing  
+**Domain:** cognitive  
 **Status:** active  
 **Source files:** src/cognitive/intervention.ts  
 
-**Tags:** cognitive, intervention
+**Tags:** cognitive, intervention, adaptability
 

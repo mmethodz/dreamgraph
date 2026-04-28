@@ -1,9 +1,9 @@
-# Cognitive Causal Module
+# Causal Cognitive Module
 
-> This module provides causal reasoning capabilities to the cognitive engine, enabling it to understand and infer relationships between different entities and events.
+> This module is responsible for causal reasoning within the cognitive engine. It analyzes relationships and dependencies between entities to derive insights and predictions based on historical data.
 
 **Repository:** dreamgraph  
-**Domain:** data-processing  
+**Domain:** cognitive  
 **Status:** active  
 **Source files:** src/cognitive/causal.ts  
 

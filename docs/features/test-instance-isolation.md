@@ -1,11 +1,11 @@
 # Instance Isolation Tests
 
-> Integration tests that ensure the isolation and integrity of instances within the DreamGraph application. It covers various scenarios including boundary checks and policy validation.
+> Integration tests that ensure the integrity and isolation of instances within the DreamGraph application. These tests cover various scenarios to prevent cross-instance contamination and validate policies.
 
 **Repository:** dreamgraph  
 **Domain:** testing  
 **Status:** active  
 **Source files:** tests/instance-isolation.test.ts  
 
-**Tags:** tests, integration, instance
+**Tags:** testing, integration, isolation
 
