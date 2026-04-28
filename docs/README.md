@@ -1,6 +1,6 @@
 # DreamGraph Documentation
 
-> **v8.0.0 "Vishnu"** — Documentation generated from DreamGraph's own knowledge graph.
+> **v8.1.0 "Atlas"** — Documentation generated from DreamGraph's own knowledge graph.
 
 ---
 
