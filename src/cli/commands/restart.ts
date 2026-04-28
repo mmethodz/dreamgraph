@@ -7,6 +7,11 @@
  *   dg restart <query> [--http] [--port <n>] [--json]
  */
 
+import { resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import type { DreamGraphInstance } from "../../instance/index.js";
+import { resolveInstanceForCommand } from "../utils/daemon.js";
 import type { ParsedArgs } from "../dg.js";
 import { cmdStop } from "./stop.js";
 import { cmdStart } from "./start.js";
@@ -17,6 +22,7 @@ export async function cmdRestart(
 ): Promise<void> {
   if (flags.help) {
     console.log(`
+
 dg restart — Restart a DreamGraph server process
 
 Usage:
@@ -33,6 +39,22 @@ Options:
 
   const jsonOutput = flags.json === true;
   const log = jsonOutput ? () => {} : console.log;
+
+  const query = positional[0];
+  const { instanceRoot } = await resolveInstanceForCommand(query, flags);
+  const instanceConfig = await readInstanceConfig(instanceRoot);
+
+  const restartFlags: ParsedArgs["flags"] = { ...flags };
+  if (restartFlags.http !== true && instanceConfig?.transport?.type === "http") {
+    restartFlags.http = true;
+  }
+  if (
+    typeof restartFlags.port !== "string" &&
+    instanceConfig?.transport?.type === "http" &&
+    typeof instanceConfig.transport.port === "number"
+  ) {
+    restartFlags.port = String(instanceConfig.transport.port);
+  }
 
   // 1. Stop (graceful, 5s timeout)
   //    Silently pass --timeout 5000; don't pass --force (graceful stop)
@@ -51,6 +73,20 @@ Options:
   log("Restarting...");
   await new Promise((r) => setTimeout(r, 500));
 
-  // 3. Start with original flags
-  await cmdStart(positional, flags);
+  // 3. Start with original flags, merged with persisted transport defaults
+  await cmdStart(positional, restartFlags);
+}
+
+async function readInstanceConfig(
+  instanceRoot: string,
+): Promise<DreamGraphInstance | null> {
+  const instanceJsonPath = resolve(instanceRoot, "instance.json");
+  if (!existsSync(instanceJsonPath)) return null;
+  try {
+    const raw = await readFile(instanceJsonPath, "utf-8");
+    const stripped = raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw;
+    return JSON.parse(stripped) as DreamGraphInstance;
+  } catch {
+    return null;
+  }
 }

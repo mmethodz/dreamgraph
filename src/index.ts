@@ -126,6 +126,11 @@ async function startHTTP(port: number): Promise<void> {
     }
   >();
 
+  // Start the data dir watcher before accepting requests so explorer,
+  // dashboard, and SSE surfaces all bind to the active instance-scoped
+  // data directory resolved during startup.
+  startDataDirWatcher();
+
   // Provide runtime context to dashboard (session count, port)
   setDashboardContext({ getSessionCount: () => sessions.size, port });
 
@@ -244,10 +249,6 @@ async function startHTTP(port: number): Promise<void> {
     logger.info(
       `DreamGraph MCP Server running on Streamable HTTP — http://localhost:${port}/mcp`,
     );
-    // Start the data dir watcher so /explorer/events emits cache.invalidated
-    // when files mutate (Phase 3 / Slice 1). HTTP mode only — stdio doesn't
-    // expose the SSE endpoint.
-    startDataDirWatcher();
   });
 }
 

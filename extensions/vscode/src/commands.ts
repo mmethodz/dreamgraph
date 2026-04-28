@@ -262,16 +262,33 @@ export async function openDashboardCommand(
 /* ------------------------------------------------------------------ */
 
 let explorerPanel: vscode.WebviewPanel | undefined;
+let explorerPanelUrl: string | undefined;
 
 export async function openExplorerCommand(
   svc: CommandServices,
 ): Promise<void> {
+  // Resolve the daemon URL the same way the dashboard does: prefer the
+  // currently connected instance's daemon port (which the daemon-client is
+  // already pointed at), and only fall back to the static configuration
+  // when no instance is connected. Reading `dreamgraph.daemonPort` directly
+  // would give the default 8100 even when the actual daemon is on a
+  // different port (auto-selected when 8100 is busy), which renders the
+  // Explorer iframe as an empty black panel.
   const config = vscode.workspace.getConfiguration("dreamgraph");
   const host = config.get<string>("daemonHost") ?? "127.0.0.1";
-  const port = config.get<number>("daemonPort") ?? 8100;
+  const instance = svc.getInstance();
+  const port =
+    instance?.daemon.port ??
+    svc.daemonClient.port ??
+    config.get<number>("daemonPort") ??
+    8100;
   const url = `http://${host}:${port}/explorer/`;
 
   if (explorerPanel) {
+    if (explorerPanelUrl !== url) {
+      explorerPanel.webview.html = renderExplorerHtml(url);
+      explorerPanelUrl = url;
+    }
     explorerPanel.reveal(vscode.ViewColumn.Active);
     return;
   }
@@ -283,8 +300,14 @@ export async function openExplorerCommand(
   );
   explorerPanel.onDidDispose(() => {
     explorerPanel = undefined;
+    explorerPanelUrl = undefined;
   });
-  explorerPanel.webview.html = `<!doctype html>
+  explorerPanel.webview.html = renderExplorerHtml(url);
+  explorerPanelUrl = url;
+}
+
+function renderExplorerHtml(url: string): string {
+  return `<!doctype html>
 <html>
   <head>
     <meta charset="utf-8" />

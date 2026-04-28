@@ -78,7 +78,8 @@ Options:
 
   // Update instance.json
   const raw = await readFile(instanceJsonPath, "utf-8");
-  const instance = JSON.parse(raw) as DreamGraphInstance;
+  const stripped = raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw;
+  const instance = JSON.parse(stripped) as DreamGraphInstance;
   instance.project_root = projectRoot;
   await writeFile(instanceJsonPath, JSON.stringify(instance, null, 2), "utf-8");
 
@@ -86,7 +87,8 @@ Options:
   if (typeof flags.repo === "string") {
     try {
       const mcpRaw = await readFile(mcpJsonPath, "utf-8");
-      const mcpConfig = JSON.parse(mcpRaw) as InstanceMcpConfig;
+      const mcpStripped = mcpRaw.charCodeAt(0) === 0xfeff ? mcpRaw.slice(1) : mcpRaw;
+      const mcpConfig = JSON.parse(mcpStripped) as InstanceMcpConfig;
       const [name, path] = flags.repo.split("=");
       if (name && path) {
         mcpConfig.repos[name] = resolve(path);
@@ -146,7 +148,8 @@ Options:
 
   // Update instance.json
   const raw = await readFile(instanceJsonPath, "utf-8");
-  const instance = JSON.parse(raw) as DreamGraphInstance;
+  const stripped = raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw;
+  const instance = JSON.parse(stripped) as DreamGraphInstance;
   const oldProject = instance.project_root;
   instance.project_root = null;
   await writeFile(instanceJsonPath, JSON.stringify(instance, null, 2), "utf-8");

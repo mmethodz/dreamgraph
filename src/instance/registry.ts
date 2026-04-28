@@ -16,6 +16,7 @@
 
 import { readFile, mkdir } from "node:fs/promises";
 import { atomicWriteFile } from "../utils/atomic-write.js";
+import { stripBom } from "../utils/read-json.js";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import type {
@@ -83,7 +84,8 @@ export async function loadRegistry(
 
   // Read or create
   try {
-    const raw = await readFile(filePath, "utf-8");
+    const rawWithBom = await readFile(filePath, "utf-8");
+    const raw = stripBom(rawWithBom);
     const parsed = JSON.parse(raw);
 
     // Defensive: ensure structure
@@ -93,6 +95,15 @@ export async function loadRegistry(
       parsed.schema_version === INSTANCE_SCHEMA_VERSION &&
       Array.isArray(parsed.instances)
     ) {
+      // Self-heal: drop a BOM if one had crept in.
+      if (rawWithBom.length !== raw.length) {
+        try {
+          await atomicWriteFile(filePath, raw);
+          logger.warn(`Stripped UTF-8 BOM from ${filePath}`);
+        } catch {
+          /* best-effort */
+        }
+      }
       return { registry: parsed as MasterRegistry, masterDir: dir };
     }
 

@@ -294,7 +294,8 @@ async function readInstanceConfig(
   if (!existsSync(instanceJsonPath)) return null;
   try {
     const raw = await readFile(instanceJsonPath, "utf-8");
-    return JSON.parse(raw) as DreamGraphInstance;
+    const stripped = raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw;
+    return JSON.parse(stripped) as DreamGraphInstance;
   } catch {
     return null;
   }

@@ -81,9 +81,11 @@ Options:
   let instance: DreamGraphInstance;
   try {
     const raw = await readFile(instanceJsonPath, "utf-8");
-    instance = JSON.parse(raw) as DreamGraphInstance;
-  } catch {
-    console.error(`Failed to read instance.json for ${entry.uuid}`);
+    instance = JSON.parse(raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw) as DreamGraphInstance;
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    console.error(`Failed to read instance.json for ${entry.uuid}: ${detail}`);
+    console.error(`  Path: ${instanceJsonPath}`);
     process.exit(1);
   }
 

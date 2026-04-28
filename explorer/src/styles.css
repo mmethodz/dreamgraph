@@ -413,7 +413,7 @@ html, body, #root {
 .right-tabs {
   display: flex;
   gap: 2px;
-  padding: 8px 8px 0 8px;
+  padding: 8px 8px 0 36px;
   background: var(--bg-elev);
   border-bottom: 1px solid var(--grid-line);
   position: sticky;
@@ -529,10 +529,6 @@ html, body, #root {
   flex-wrap: wrap;
   gap: 6px;
   padding: 0 0 8px 0;
-}
-.muts-row-head-static .muts-row-actions {
-  grid-column: auto;
-  padding: 0;
 }
 
 .muts-badge {
@@ -780,3 +776,134 @@ html, body, #root {
   color: var(--fg-dim);
   opacity: 0.8;
 }
+
+/* ------------------------------------------------------------------ */
+/*  Candidate card layout (replaces cramped 3-col head row)           */
+/* ------------------------------------------------------------------ */
+.muts-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+}
+.muts-card-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+.muts-card-title {
+  flex: 1;
+  min-width: 0;
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.3;
+  word-break: break-word;
+}
+.muts-card-subtitle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--fg-dim);
+  min-width: 0;
+}
+.muts-card-id {
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+  opacity: 0.75;
+  word-break: break-all;
+}
+.muts-card-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 11px;
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+}
+.muts-card-stats strong { color: var(--fg); font-weight: 600; }
+.muts-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Resizable + collapsible sidebars                                  */
+/* ------------------------------------------------------------------ */
+.left, .right { position: relative; }
+
+.resizer {
+  background: transparent;
+  cursor: col-resize;
+  user-select: none;
+  position: relative;
+  z-index: 3;
+  transition: background 120ms ease;
+}
+.resizer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: var(--grid-line);
+  transform: translateX(-50%);
+}
+.resizer:hover,
+.resizer.dragging {
+  background: rgba(122, 162, 255, 0.18);
+}
+
+.sidebar-collapse {
+  position: absolute;
+  top: 8px;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  color: var(--fg-dim);
+  border: 1px solid var(--grid-line);
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+  z-index: 4;
+}
+.sidebar-collapse:hover { color: var(--accent); border-color: var(--accent); }
+.sidebar-collapse.left { right: 8px; }
+.sidebar-collapse.right { left: 8px; }
+
+.sidebar-reopen {
+  background: var(--bg-elev);
+  border: none;
+  border-right: 1px solid var(--grid-line);
+  color: var(--fg-dim);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-size: 10px;
+  overflow: hidden;
+}
+.sidebar-reopen.right { border-right: none; border-left: 1px solid var(--grid-line); }
+.sidebar-reopen:hover { color: var(--accent); background: rgba(122, 162, 255, 0.06); }
+
+/* When a side rail is collapsed, the right rail's sticky tabs and inner
+   padding would still try to render; hide them. */
+.right.collapsed > *,
+.left.collapsed > * { display: none; }

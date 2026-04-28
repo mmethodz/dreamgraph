@@ -23,7 +23,7 @@ import { readFile, readdir } from "node:fs/promises";
 import { resolve, basename, extname } from "node:path";
 import { config, updateDatabaseConnectionString } from "../config/config.js";
 import { engine } from "../cognitive/engine.js";
-import { getActiveScope, isInstanceMode, getToolCallCount } from "../instance/lifecycle.js";
+import { getActiveScope, isInstanceMode, getToolCallCount, getEffectiveDataDir } from "../instance/lifecycle.js";
 import { getActiveProfileName, switchProfile } from "../instance/policies.js";
 import {
   getSchedules, getScheduleHistory, getSchedulerConfig, updateSchedulerConfig,

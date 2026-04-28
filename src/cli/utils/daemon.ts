@@ -68,7 +68,8 @@ export async function readServerMeta(
   const p = serverMetaPath(instanceRoot);
   try {
     const raw = await readFile(p, "utf-8");
-    const parsed = JSON.parse(raw);
+    const stripped = raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw;
+    const parsed = JSON.parse(stripped);
     if (
       parsed &&
       typeof parsed === "object" &&

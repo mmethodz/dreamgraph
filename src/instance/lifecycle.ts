@@ -18,6 +18,7 @@
 
 import { mkdir, readFile, copyFile, readdir } from "node:fs/promises";
 import { atomicWriteFile } from "../utils/atomic-write.js";
+import { stripBom } from "../utils/read-json.js";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -401,7 +402,7 @@ export async function updateInstanceCounters(
   const instancePath = resolve(dir, scope.uuid, "instance.json");
 
   try {
-    const raw = await readFile(instancePath, "utf-8");
+    const raw = stripBom(await readFile(instancePath, "utf-8"));
     // Guard against empty / truncated reads (race with concurrent writes)
     const trimmed = raw.trim();
     if (!trimmed || !trimmed.startsWith("{")) {
@@ -440,14 +441,26 @@ export async function loadInstance(
   const dir = masterDir ?? resolveMasterDir();
   const instancePath = resolve(dir, uuid, "instance.json");
 
-  const raw = await readFile(instancePath, "utf-8");
+  const rawWithBom = await readFile(instancePath, "utf-8");
+  const raw = stripBom(rawWithBom);
   const instance = JSON.parse(raw) as DreamGraphInstance;
+
+  // Self-heal: if the file had a UTF-8 BOM, rewrite it without one so
+  // future readers (and external tools) don't trip over it.
+  if (rawWithBom.length !== raw.length) {
+    try {
+      await atomicWriteFile(instancePath, raw);
+      logger.warn(`Stripped UTF-8 BOM from ${instancePath}`);
+    } catch (err) {
+      logger.warn(`Failed to self-heal BOM in ${instancePath}: ${err instanceof Error ? err.message : err}`);
+    }
+  }
 
   // Read repos from mcp.json if available
   let repos: Record<string, string> = {};
   const mcpPath = resolve(dir, uuid, "config", "mcp.json");
   try {
-    const mcpRaw = await readFile(mcpPath, "utf-8");
+    const mcpRaw = stripBom(await readFile(mcpPath, "utf-8"));
     const mcpConfig = JSON.parse(mcpRaw) as InstanceMcpConfig;
     repos = mcpConfig.repos ?? {};
   } catch {

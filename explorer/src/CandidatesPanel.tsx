@@ -148,26 +148,29 @@ function CandidateRowView(props: {
 
   return (
     <div className={`muts-row${openKind ? " open" : ""}`}>
-      <div className="muts-row-head muts-row-head-static">
-        <span className="muts-badge muts-badge-candidate">{isEdge ? "edge" : "node"}</span>
-        <div className="muts-row-titleblock">
-          <div className="muts-row-title" title={title}>{title}</div>
-          <div className="muts-row-subtitle" title={row.dream_id}>
-            <span className="muts-row-subtitle-rel">{subtitle}</span>
-            <span className="muts-row-subtitle-id">{row.dream_id}</span>
-          </div>
-          <div className="muts-row-stats">
-            conf {row.confidence.toFixed(2)} · ev ×{row.evidence_count}
-          </div>
+      <div className="muts-card">
+        <div className="muts-card-header">
+          <span className="muts-badge muts-badge-candidate">{isEdge ? "edge" : "node"}</span>
+          <div className="muts-card-title" title={title}>{title}</div>
         </div>
-        <div className="muts-row-actions">
+        <div className="muts-card-subtitle">
+          <span className="muts-row-subtitle-rel" title={subtitle}>{subtitle}</span>
+          <span className="muts-card-id" title={row.dream_id}>{row.dream_id}</span>
+        </div>
+        <div className="muts-card-stats">
+          <span>conf <strong>{row.confidence.toFixed(2)}</strong></span>
+          <span>ev ×{row.evidence_count}</span>
+          {row.dream_type ? <span>{row.dream_type}</span> : null}
+          {row.strategy ? <span>{row.strategy}</span> : null}
+        </div>
+        <div className="muts-card-actions">
           {primaryInspectId ? (
             <button
               className="btn-mini"
               onClick={() => onInspect(primaryInspectId)}
               title={`Inspect ${primaryInspectId}`}
             >
-              Inspect
+              {isEdge ? "Inspect from" : "Inspect"}
             </button>
           ) : null}
           {isEdge && row.to ? (
@@ -176,7 +179,7 @@ function CandidateRowView(props: {
               onClick={() => onInspect(row.to as string)}
               title={`Inspect ${row.to}`}
             >
-              Inspect →
+              Inspect to →
             </button>
           ) : null}
           <button
