@@ -181,30 +181,60 @@ export function extractOpenAIResponsesText(data: OpenAIResponsesData): string {
     return data.output_text;
   }
 
-  const parts: string[] = [];
+  // Collect text in two granularities:
+  //   - within a single message item, sub-blocks are streamed chunks of the
+  //     same paragraph and are concatenated tightly (no separator).
+  //   - between top-level items (message / text), insert a paragraph break
+  //     when neither boundary already provides whitespace, so verbose-mode
+  //     responses don't run sentences together
+  //     ("...stale references.Autonomy counters: steps=54...").
+  const groups: string[] = [];
   for (const item of data.output ?? []) {
     if (!isRecord(item)) {
       continue;
     }
 
     if (item.type === "message" && Array.isArray(item.content)) {
+      const blocks: string[] = [];
       for (const block of item.content) {
         if (!isRecord(block)) {
           continue;
         }
         if ((block.type === "output_text" || block.type === "text") && typeof block.text === "string") {
-          parts.push(block.text);
+          blocks.push(block.text);
         }
+      }
+      if (blocks.length > 0) {
+        groups.push(blocks.join(""));
       }
       continue;
     }
 
     if ((item.type === "output_text" || item.type === "text") && typeof item.text === "string") {
-      parts.push(item.text);
+      groups.push(item.text);
     }
   }
 
-  return parts.join("");
+  let out = "";
+  for (const group of groups) {
+    if (out.length === 0) {
+      out = group;
+      continue;
+    }
+
+    const prevEndsWS = /\s$/.test(out);
+    const nextStartsWS = /^\s/.test(group);
+    const prevEndsInline = /[,:;([{\-–—]$/.test(out);
+    const nextStartsInline = /^[)\]}.!?,:;\-–—]/.test(group);
+    const nextLooksLikeCounter = /^(Autonomy counters:|steps=\d+\b|writes=\d+\b|stalls=\d+\b)/.test(group);
+    const prevEndsSentence = /[.!?]["')\]]?$/.test(out);
+    const shouldParagraphBreak = !(prevEndsWS || nextStartsWS || prevEndsInline || nextStartsInline)
+      && (prevEndsSentence || nextLooksLikeCounter);
+
+    out += shouldParagraphBreak ? `\n\n${group}` : group;
+  }
+
+  return out;
 }
 
 export function extractOpenAIResponsesToolCalls(data: OpenAIResponsesData): ToolUseRequest[] {
