@@ -184,15 +184,29 @@ function CandidateRowView(props: {
           ) : null}
           <button
             className={`btn-mini${openKind === "promote" ? " active" : ""}`}
-            onClick={() => onToggle("promote")}
+            onClick={() => {
+              if (openKind === "promote" && !submitting && reason.trim().length > 0) {
+                void submit();
+              } else {
+                onToggle("promote");
+              }
+            }}
             disabled={submitting}
+            title={openKind === "promote" && reason.trim().length > 0 ? "Click again to submit" : "Promote this candidate"}
           >
             Promote
           </button>
           <button
             className={`btn-mini btn-warn${openKind === "reject" ? " active" : ""}`}
-            onClick={() => onToggle("reject")}
+            onClick={() => {
+              if (openKind === "reject" && !submitting && reason.trim().length > 0) {
+                void submit();
+              } else {
+                onToggle("reject");
+              }
+            }}
             disabled={submitting}
+            title={openKind === "reject" && reason.trim().length > 0 ? "Click again to submit" : "Reject this candidate"}
           >
             Reject
           </button>
