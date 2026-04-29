@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/mmethodz-dreamgraph-badge.png)](https://mseep.ai/app/mmethodz-dreamgraph)
+
 ![DreamGraph](assets/dreamgraph.jpeg)
 
 # DreamGraph v8.1.0 — Atlas
