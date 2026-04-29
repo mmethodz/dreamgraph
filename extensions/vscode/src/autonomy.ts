@@ -30,6 +30,10 @@ export interface RecommendedAction {
   withinScope: boolean;
   mutuallyExclusiveWith?: string[];
   batchGroup?: string;
+  /** Exact MCP/local tool name to run for this action, when applicable. */
+  tool?: string;
+  /** Pre-bound arguments for `tool`. */
+  toolArgs?: Record<string, unknown>;
 }
 
 export interface RecommendedActionSet {

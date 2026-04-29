@@ -33,6 +33,30 @@ You will receive:
    "Consider running a dream cycle to discover relationships."
 5. Never suggest actions that require tools or capabilities not present.
 
+### Tool binding (critical for continuity)
+
+When a suggestion maps cleanly to a single MCP/local tool, ALSO emit it in the
+trailing structured envelope's \`recommended_next_steps\` with:
+
+- \`tool\`: the exact snake_case tool name (e.g. \`dream_cycle\`, \`scan_database\`,
+  \`enrich_seed_data\`). Must match a real available tool.
+- \`tool_args\`: pre-bound arguments for that tool, when known.
+
+Example envelope entry:
+
+\`\`\`json
+{
+  "label": "Run a dream cycle to discover edges",
+  "rationale": "Graph density is low; new dreams will surface candidate edges.",
+  "tool": "dream_cycle",
+  "tool_args": { "strategy": "gap_detection" }
+}
+\`\`\`
+
+Without the \`tool\` field, brief follow-ups like "yes" or "do it" cannot
+reliably trigger the right tool on the next turn. Omit \`tool\` only when the
+step is not a single-tool action (e.g. a multi-step refactor).
+
 ### Knowledge maturity awareness
 
 Be honest about what the graph knows:

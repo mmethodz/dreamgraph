@@ -296,6 +296,19 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
   /** Cached URI to bundled webview runtime for Slice 3 Option C migration. */
   private _webviewBundleUri: string | null = null;
   private _lastToolTrace: ToolTraceEntry[] = [];
+  /**
+   * Tool names that the most recent assistant turn explicitly mentioned in its
+   * "Suggested Actions" / next-step text. Carried into the next user turn so
+   * brief follow-ups ("yes", "do it") still expose the right tools to the
+   * agentic loop. Cleared after one turn — see handleUserMessage().
+   */
+  private _primedTools = new Set<string>();
+  /**
+   * Names of every tool available on the most recent turn. Stashed here so
+   * post-response capture (`_capturePrimedTools`) can scan the assistant text
+   * without re-fetching the MCP tool list.
+   */
+  private _lastAvailableToolNames: string[] = [];
   private _lastVerdict: VerdictBanner | null = null;
   private _actionLog: ActionExecutionRecord[] = [];
   private _actionStateByMessage = new Map<string, Set<string>>();
@@ -719,7 +732,12 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       prompt: trimmed,
       autonomy: this._autonomyEnabled,
       availableToolNames: allTools.map((t) => t.name),
+      primedTools: Array.from(this._primedTools),
     });
+    // Primed tools are consumed for this turn; the next assistant response
+    // will repopulate the set if it suggests further actions.
+    this._primedTools.clear();
+    this._lastAvailableToolNames = allTools.map((t) => t.name);
     const selectedSet = new Set(toolDecision.selected);
     const tools: ToolDefinition[] = allTools.filter((t) => selectedSet.has(t.name));
     this.contextInspector?.appendContextLine(
@@ -743,6 +761,7 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
     }
 
     const cleaned = fullContent.trim() || '(No response)';
+    this._capturePrimedTools(cleaned, this._lastAvailableToolNames);
     const assistantMessage: ChatMessage = {
       id: this._createMessageId(),
       role: 'assistant',
@@ -1064,6 +1083,7 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
     });
 
     const redactedFullContent = this._redactSecrets(fullContent);
+    this._capturePrimedTools(redactedFullContent, this._lastAvailableToolNames);
     const finalContent = this._applyRenderLimits(redactedFullContent);
     const implicitEntities = this._detectImplicitEntities(redactedFullContent);
     const implicitEntityNotice = implicitEntities.names.length > 0
@@ -1197,6 +1217,54 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
 
   private _applyRenderLimits(content: string): { content: string; truncated: boolean } {
     return helpers.applyRenderLimits(content, ChatPanel.MAX_RENDERED_MESSAGE_CHARS);
+  }
+
+  /**
+   * Scan an assistant response for explicit tool-name mentions and stash them
+   * in `_primedTools` so the next user turn's `selectToolGroups` call exposes
+   * them even when the user replies with something terse like "yes" or "do it".
+   *
+   * Two signals are honored, structured-first:
+   *   1. The structured continuation envelope's `recommended_next_steps[].tool`
+   *      field — the authoritative, machine-readable binding emitted by the
+   *      ARCHITECT_SUGGEST prompt.
+   *   2. Free-text mentions of any available tool name with word-ish boundary
+   *      matching — fallback for prose suggestions and older prompts that
+   *      don't emit the structured `tool` field.
+   *
+   * Tool names in this codebase are snake_case identifiers, so a simple
+   * non-word boundary check is sufficient for the text fallback.
+   */
+  private _capturePrimedTools(text: string, availableToolNames: string[]): void {
+    if (!text) return;
+    const availableSet = new Set(availableToolNames);
+
+    // Structured envelope binding — authoritative.
+    try {
+      const envelope = extractStructuredPassEnvelope(text);
+      for (const step of envelope.nextSteps) {
+        if (step.tool && availableSet.has(step.tool)) {
+          this._primedTools.add(step.tool);
+        }
+      }
+    } catch {
+      // Envelope parsing must never break message handling.
+    }
+
+    // Free-text fallback — catches tools mentioned in prose without a binding.
+    const lower = text.toLowerCase();
+    for (const name of availableToolNames) {
+      const lname = name.toLowerCase();
+      if (lname.length < 3) continue;
+      const idx = lower.indexOf(lname);
+      if (idx === -1) continue;
+      const before = idx === 0 ? '' : lower[idx - 1];
+      const after = idx + lname.length >= lower.length ? '' : lower[idx + lname.length];
+      const isWordChar = (c: string): boolean => /[a-z0-9_]/.test(c);
+      if (before && isWordChar(before)) continue;
+      if (after && isWordChar(after)) continue;
+      this._primedTools.add(name);
+    }
   }
 
   private _buildMessageActions(message: ChatMessage): MessageAction[] {
@@ -1731,6 +1799,7 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
       }
 
       const redactedFullContent = this._redactSecrets(fullContent);
+      this._capturePrimedTools(redactedFullContent, this._lastAvailableToolNames);
       this._lastVerdict = this._deriveVerdict(redactedFullContent, this._lastToolTrace);
       const finalContent = this._applyRenderLimits(redactedFullContent);
       const implicitEntities = this._detectImplicitEntities(redactedFullContent);

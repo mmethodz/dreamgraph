@@ -121,6 +121,8 @@ function toActionFromStructured(step: {
   within_scope?: boolean;
   mutually_exclusive_with?: string[];
   batch_group?: string;
+  tool?: string;
+  tool_args?: Record<string, unknown>;
 }, fallbackPriority: number): RecommendedAction {
   const normalized = toAction(step.label, step.priority ?? fallbackPriority);
   return {
@@ -132,5 +134,7 @@ function toActionFromStructured(step: {
     withinScope: step.within_scope ?? true,
     mutuallyExclusiveWith: step.mutually_exclusive_with,
     batchGroup: step.batch_group ?? normalized.batchGroup,
+    tool: typeof step.tool === 'string' && step.tool.trim() ? step.tool.trim() : undefined,
+    toolArgs: step.tool_args && typeof step.tool_args === 'object' ? step.tool_args : undefined,
   };
 }

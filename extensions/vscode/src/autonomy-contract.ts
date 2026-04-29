@@ -12,6 +12,15 @@ export interface StructuredActionEnvelope {
     within_scope?: boolean;
     mutually_exclusive_with?: string[];
     batch_group?: string;
+    /**
+     * Exact MCP/local tool name that should run this step. When present,
+     * the host primes this tool for the next turn so brief follow-ups
+     * ("yes", "do it") still expose it to the agentic loop. Omit when
+     * the step is not a single-tool action.
+     */
+    tool?: string;
+    /** Optional pre-bound arguments for `tool`. Shape is tool-specific. */
+    tool_args?: Record<string, unknown>;
   }>;
 }
 
@@ -34,7 +43,9 @@ export function getStructuredResponseContractBlock(): string {
     '      "eligible": true,',
     '      "within_scope": true,',
     '      "mutually_exclusive_with": [],',
-    '      "batch_group": "optional-group"',
+    '      "batch_group": "optional-group",',
+    '      "tool": "exact_mcp_tool_name",',
+    '      "tool_args": { "key": "value" }',
     '    }',
     '  ]',
     '}',
@@ -44,6 +55,7 @@ export function getStructuredResponseContractBlock(): string {
     '- Set goal_status to complete when the original goal has sufficiently been reached.',
     '- Set progress_status to stalled when further pursuit is not making meaningful progress.',
     '- Keep ids stable and concise when possible.',
+    '- When a step maps to a single tool call, set `tool` to the exact tool name (snake_case) and `tool_args` to its arguments. Omit both when the step is not a single-tool action.',
     '- Prefer the structured json values over prose when they differ.',
   ].join('\n');
 }

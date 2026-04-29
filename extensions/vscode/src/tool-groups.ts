@@ -261,8 +261,15 @@ export function selectToolGroups(args: {
   prompt: string;
   autonomy: boolean;
   availableToolNames: string[];
+  /**
+   * Tools the previous assistant turn explicitly suggested by name.
+   * Forced into the selection ahead of group expansion so brief follow-ups
+   * ("yes", "do it", "go ahead") can still resolve the intended tool.
+   * Caller is responsible for clearing/decaying these between turns.
+   */
+  primedTools?: string[];
 }): ToolSelectionDecision {
-  const { task, prompt, autonomy, availableToolNames } = args;
+  const { task, prompt, autonomy, availableToolNames, primedTools } = args;
   const groups: ToolGroupKey[] = [];
   let mutating = false;
   const reasons: string[] = [];
@@ -359,6 +366,32 @@ export function selectToolGroups(args: {
     if (lowerPrompt.includes(toolName.toLowerCase()) && !selected.includes(toolName)) {
       selected.unshift(toolName);
       reasons.push(`name-mention[${toolName}]`);
+    }
+  }
+
+  // Primed-tool overlay — the previous assistant turn suggested these by name
+  // (e.g. "run `scan_database`"). Force them into the selection so the next
+  // user turn doesn't have to repeat the tool name for tool exposure to work.
+  // Also expand to include sibling tools from any group the primed tool
+  // belongs to, so a follow-up like "yes do it and verify" still has
+  // related read tools available.
+  if (primedTools && primedTools.length > 0) {
+    const primedSet = new Set(primedTools);
+    const expanded = new Set<string>();
+    for (const [groupKey, list] of Object.entries(TOOL_GROUPS)) {
+      if (list.some((n) => primedSet.has(n))) {
+        for (const n of list) expanded.add(n);
+        reasons.push(`primed-group[${groupKey}]`);
+      }
+    }
+    for (const n of primedTools) expanded.add(n);
+    for (const toolName of expanded) {
+      if (availableSet.has(toolName) && !selected.includes(toolName)) {
+        selected.unshift(toolName);
+        if (primedSet.has(toolName)) {
+          reasons.push(`primed[${toolName}]`);
+        }
+      }
     }
   }
 
