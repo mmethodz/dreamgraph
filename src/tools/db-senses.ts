@@ -568,6 +568,38 @@ const FK_COUNT_SQL = `
   GROUP BY tc.table_schema, tc.table_name
 `;
 
+class PgScanner implements DatastoreScanner {
+  async scan(targetSchemas: string[], scanTimeoutMs: number): Promise<ScannerScanOutput> {
+    const dbPool = await getPool();
+
+    const queryDeadline = new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error(`scan_database timed out after ${scanTimeoutMs}ms`)),
+        scanTimeoutMs,
+      ),
+    );
+
+    const [tRes, cRes, fRes] = (await Promise.race([
+      Promise.all([
+        dbPool.query(LIST_TABLES_SQL, [targetSchemas]),
+        dbPool.query(COLUMN_COUNT_SQL, [targetSchemas]),
+        dbPool.query(FK_COUNT_SQL, [targetSchemas]),
+      ]),
+      queryDeadline,
+    ])) as [
+      { rows: ScannedTableRow[] },
+      { rows: ScannedColumnCountRow[] },
+      { rows: ScannedFkCountRow[] },
+    ];
+
+    return {
+      tables: tRes.rows,
+      colCounts: cRes.rows,
+      fkCounts: fRes.rows,
+    };
+  }
+}
+
 /** Tables/prefixes to skip — migration bookkeeping & framework noise. */
 const TABLE_DENYLIST_PREFIX = ["pg_", "knex_"];
 const TABLE_DENYLIST_EXACT = new Set([
@@ -595,6 +627,34 @@ interface ScanResult {
   /** Number of data_model entities created when create_missing=true. */
   data_models_created: number;
   last_scanned_at: string;
+}
+
+interface ScannedTableRow {
+  table_schema: string;
+  table_name: string;
+}
+
+interface ScannedColumnCountRow {
+  table_schema: string;
+  table_name: string;
+  col_count: number;
+}
+
+interface ScannedFkCountRow {
+  table_schema: string;
+  table_name: string;
+  fk_count: number;
+}
+
+interface ScannerScanOutput {
+  tables: ScannedTableRow[];
+  colCounts: ScannedColumnCountRow[];
+  fkCounts: ScannedFkCountRow[];
+}
+
+interface DatastoreScanner {
+  scan(targetSchemas: string[], scanTimeoutMs: number): Promise<ScannerScanOutput>;
+  close?(): Promise<void> | void;
 }
 
 /**
@@ -644,41 +704,30 @@ export async function runDatastoreScan(opts: {
     );
   }
 
-  let dbPool: InstanceType<typeof Pool>;
+  let scanner: DatastoreScanner;
   try {
-    dbPool = await getPool();
+    if (target.kind === "postgres") {
+      scanner = new PgScanner();
+    } else {
+      return error(
+        "SCAN_FAILED",
+        `Datastore kind "${target.kind}" is not yet supported by scan_database.`,
+      );
+    }
   } catch (err) {
     return error("NO_CONNECTION", err instanceof Error ? err.message : String(err));
   }
 
-  const queryDeadline = new Promise<never>((_, reject) =>
-    setTimeout(
-      () => reject(new Error(`scan_database timed out after ${scanTimeoutMs}ms`)),
-      scanTimeoutMs,
-    ),
-  );
-  let tables: Array<{ table_schema: string; table_name: string }>;
-  let colCounts: Array<{ table_schema: string; table_name: string; col_count: number }>;
-  let fkCounts: Array<{ table_schema: string; table_name: string; fk_count: number }>;
+  let tables: ScannedTableRow[];
+  let colCounts: ScannedColumnCountRow[];
+  let fkCounts: ScannedFkCountRow[];
   try {
-    const [tRes, cRes, fRes] = (await Promise.race([
-      Promise.all([
-        dbPool.query(LIST_TABLES_SQL, [targetSchemas]),
-        dbPool.query(COLUMN_COUNT_SQL, [targetSchemas]),
-        dbPool.query(FK_COUNT_SQL, [targetSchemas]),
-      ]),
-      queryDeadline,
-    ])) as [
-      { rows: Array<{ table_schema: string; table_name: string }> },
-      { rows: Array<{ table_schema: string; table_name: string; col_count: number }> },
-      { rows: Array<{ table_schema: string; table_name: string; fk_count: number }> },
-    ];
-    tables = tRes.rows;
-    colCounts = cRes.rows;
-    fkCounts = fRes.rows;
+    ({ tables, colCounts, fkCounts } = await scanner.scan(targetSchemas, scanTimeoutMs));
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return error("SCAN_FAILED", `Schema scan failed: ${msg}`);
+  } finally {
+    await scanner.close?.();
   }
 
   const colMap = new Map<string, number>();
@@ -812,9 +861,9 @@ export async function runDatastoreScan(opts: {
 function registerScanDatabaseTool(server: McpServer): void {
   server.tool(
     "scan_database",
-    "Scan the live PostgreSQL database for tables and populate the " +
+    "Scan the configured datastore for tables and populate the " +
       "target datastore record (datastores.json) with table metadata. " +
-      "Reuses the same connection pool as query_db_schema. Read-only.",
+      "Supports backend-specific read-only introspection.",
     {
       datastore_id: z
         .string()

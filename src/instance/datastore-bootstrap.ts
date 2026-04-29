@@ -13,6 +13,8 @@
 
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 
 import { atomicWriteFile } from "../utils/atomic-write.js";
 import { dataPath } from "../utils/paths.js";
@@ -22,6 +24,12 @@ import type { Datastore } from "../types/index.js";
 
 const FILENAME = "datastores.json";
 
+export interface ClassifiedDatastoreSource {
+  kind: Datastore["kind"];
+  urlHint: string;
+  filename?: string;
+}
+
 /**
  * Strip the password component from a connection URL for safe display.
  * Returns "" if the input is falsy.
@@ -29,6 +37,63 @@ const FILENAME = "datastores.json";
 function sanitizeConnectionString(url: string): string {
   if (!url) return "";
   return url.replace(/\/\/([^:]+):([^@]+)@/, "//$1:****@");
+}
+
+function collapseHomeDir(filePath: string): string {
+  const home = os.homedir();
+  if (!home) return filePath;
+  if (filePath === home) return "~";
+  if (filePath.startsWith(`${home}${path.sep}`)) {
+    return `~${filePath.slice(home.length)}`;
+  }
+  return filePath;
+}
+
+export function classifyDatastoreSource(rawUrl: string): ClassifiedDatastoreSource | null {
+  const value = rawUrl.trim();
+  if (!value) return null;
+
+  if (
+    value.startsWith("sqlite:") ||
+    value.startsWith("file:") ||
+    value.endsWith(".db") ||
+    value.endsWith(".sqlite") ||
+    value.endsWith(".sqlite3")
+  ) {
+    let filename = value;
+
+    if (value.startsWith("sqlite:///")) {
+      filename = value.slice("sqlite:///".length);
+      if (process.platform === "win32" && /^([A-Za-z]:)(\/|\\)/.test(filename)) {
+        filename = filename.replace(/\//g, path.sep);
+      } else if (!filename.startsWith(path.sep)) {
+        filename = `${path.sep}${filename}`;
+      }
+    } else if (value.startsWith("sqlite://")) {
+      filename = value.slice("sqlite://".length);
+    } else if (value.startsWith("sqlite:")) {
+      filename = value.slice("sqlite:".length);
+    } else if (value.startsWith("file://")) {
+      filename = new URL(value).pathname;
+      if (process.platform === "win32" && filename.startsWith("/")) {
+        filename = filename.slice(1);
+      }
+      filename = filename.replace(/\//g, path.sep);
+    }
+
+    filename = decodeURIComponent(filename);
+
+    return {
+      kind: "sqlite",
+      urlHint: collapseHomeDir(filename),
+      filename,
+    };
+  }
+
+  return {
+    kind: "postgres",
+    urlHint: sanitizeConnectionString(value),
+  };
 }
 
 /**
@@ -79,7 +144,8 @@ export async function autoSeedPrimaryDatastore(
     }
   }
 
-  if (!url || url.trim().length === 0) return;
+  const classified = classifyDatastoreSource(url ?? "");
+  if (!classified) return;
 
   if (!(await isUnconfigured())) return;
 
@@ -90,8 +156,8 @@ export async function autoSeedPrimaryDatastore(
       "Auto-seeded from DATABASE_URL. Run `scan_database` (Slice 2) to populate the table list.",
     source_repo: "",
     source_files: [],
-    kind: "postgres",
-    url_hint: sanitizeConnectionString(url),
+    kind: classified.kind,
+    url_hint: classified.urlHint,
     repos: Object.keys(repos),
     tables: [],
     tags: ["primary", "auto-seeded"],
@@ -105,7 +171,7 @@ export async function autoSeedPrimaryDatastore(
     );
     invalidateCache(FILENAME);
     logger.info(
-      `Auto-seeded datastore:primary (kind=postgres, repos=[${record.repos?.join(", ")}])`,
+      `Auto-seeded datastore:primary (kind=${record.kind}, repos=[${record.repos?.join(", ")}])`,
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
