@@ -1242,6 +1242,12 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
     // Structured envelope binding — authoritative.
     try {
       const envelope = extractStructuredPassEnvelope(text);
+      if (envelope.nextSteps.length > 0) {
+        // Persist for chip-click resolution — _executeRecommendedAction needs
+        // this to look up the tool binding for clicks outside the autonomy
+        // loop (which is the only other path that populates this list).
+        this._lastRecommendedActions = envelope.nextSteps;
+      }
       for (const step of envelope.nextSteps) {
         if (step.tool && availableSet.has(step.tool)) {
           this._primedTools.add(step.tool);
@@ -1872,18 +1878,30 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
     const action = this._lastRecommendedActions.find((a) => a.id === actionId);
     const label = action?.label || (typeof fallbackLabel === 'string' ? fallbackLabel.trim() : '');
     if (!label) return;
+    // If the action carries a structured tool binding, prime it so the
+    // follow-up turn's selectToolGroups() definitely exposes it — the chip
+    // label alone ("Run a dream cycle") often won't substring-match the
+    // exact tool name (`dream_cycle`).
+    if (action?.tool) {
+      this._primedTools.add(action.tool);
+    }
     await this.handleUserMessage(label);
   }
 
   private async _executeAllRecommendedActions(fallbackLabels?: string[]): Promise<void> {
-    const liveLabels = this._lastRecommendedActions
-      .filter((a) => a.eligible && a.withinScope)
+    const eligible = this._lastRecommendedActions.filter((a) => a.eligible && a.withinScope);
+    const liveLabels = eligible
       .map((a) => a.label)
       .filter((label) => typeof label === 'string' && label.trim().length > 0);
     const labels = liveLabels.length > 0
       ? liveLabels
       : (Array.isArray(fallbackLabels) ? fallbackLabels.map((label) => String(label || '').trim()).filter(Boolean) : []);
     if (labels.length === 0) return;
+    // Prime every tool binding in the batch so the combined follow-up turn
+    // has them all whitelisted.
+    for (const a of eligible) {
+      if (a.tool) this._primedTools.add(a.tool);
+    }
     const combined = `Execute these steps sequentially:\n${labels.map((l, i) => `${i + 1}. ${l}`).join('\n')}`;
     await this.handleUserMessage(combined);
   }
