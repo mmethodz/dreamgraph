@@ -85,6 +85,7 @@ DreamGraph supports multiple dream-generation strategies.
 | `tension_directed` | Focuses dreaming around unresolved tensions |
 | `causal_replay` | Mines historical cause → effect chains |
 | `reflective` | Agent-driven insight capture after code reading |
+| `orphan_bridging` | Attaches degree-0 fact-graph entities to nearest plausible neighbor using relaxed signals (capped per cycle by `DG_ORPHAN_BUDGET`, default 20) |
 | `all` | Runs the full strategy set |
 
 ---

@@ -563,6 +563,11 @@ export async function resolveInstanceAtStartup(): Promise<InstanceScope | null> 
       config.repos[name] = repoPath;
     }
 
+    // Keep scope.repos in sync with the merged runtime registry so
+    // consumers that read scope.repos (e.g. the dashboard) see the same
+    // view as code paths that read config.repos.
+    scope.repos = { ...mergedRepos };
+
     logger.info(`Instance mode activated: ${scope}`);
     if (Object.keys(config.repos).length > 0) {
       logger.info(`Repos available: ${Object.keys(config.repos).join(", ")}`);

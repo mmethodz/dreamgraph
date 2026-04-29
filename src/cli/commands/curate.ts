@@ -100,6 +100,12 @@ Options:
   const findings: CurationFinding[] = [];
 
   try {
+    // Helper: detect orphan (no incoming or outgoing links)
+    const isOrphan = (item: Record<string, unknown>): boolean => {
+      const links = item.links;
+      return !Array.isArray(links) || links.length === 0;
+    };
+
     // Query features for quality issues
     if (targets.includes("features")) {
       const result = await mcpCallTool(daemonPort, "query_resource", {
@@ -115,6 +121,9 @@ Options:
         const desc = str(item, "description");
         if (!desc || desc.length < 10) {
           findings.push({ type: "weak_feature", id, name, detail: "missing or minimal description" });
+        }
+        if (isOrphan(item)) {
+          findings.push({ type: "orphan_feature", id, name, detail: "no outgoing links to other entities" });
         }
       }
     }
@@ -134,6 +143,9 @@ Options:
         if (item.status === "deprecated") {
           findings.push({ type: "stale_workflow", id, name, detail: `status: ${item.status}` });
         }
+        if (isOrphan(item)) {
+          findings.push({ type: "orphan_workflow", id, name, detail: "no outgoing links to other entities" });
+        }
       }
     }
 
@@ -148,6 +160,9 @@ Options:
         const name = str(item, "name", id);
         if (!item.key_fields || (Array.isArray(item.key_fields) && item.key_fields.length === 0)) {
           findings.push({ type: "weak_entity", id, name, detail: "no key fields defined" });
+        }
+        if (isOrphan(item)) {
+          findings.push({ type: "orphan_entity", id, name, detail: "no outgoing links to other entities" });
         }
       }
     }
@@ -246,9 +261,12 @@ function formatFindingType(type: string): string {
   const labels: Record<string, string> = {
     stale_feature: "Stale features",
     weak_feature: "Weak feature descriptions",
+    orphan_feature: "Orphan features (no edges)",
     empty_workflow: "Empty workflows",
     stale_workflow: "Stale workflows",
+    orphan_workflow: "Orphan workflows (no edges)",
     weak_entity: "Weak data model entities",
+    orphan_entity: "Orphan data model entities (no edges)",
     weak_adr: "Weak ADRs",
   };
   return labels[type] ?? type;
@@ -268,6 +286,9 @@ function buildSuggestedActions(findings: CurationFinding[]): string[] {
   }
   if (types.has("weak_adr")) {
     actions.push("add context and rationale to weak ADRs");
+  }
+  if (types.has("orphan_feature") || types.has("orphan_workflow") || types.has("orphan_entity")) {
+    actions.push("run a dream cycle (dg dream) — the orphan_bridging strategy will propose neighbor edges; or enrich descriptions/keywords so structural strategies can match");
   }
   if (actions.length === 0) {
     actions.push("graph quality looks good — consider running dg enrich for coverage");

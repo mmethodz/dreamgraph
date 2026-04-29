@@ -42,6 +42,7 @@ export type DreamStrategy =
   | "causal_replay"
   | "pgo_wave"
   | "llm_dream"
+  | "orphan_bridging"
   | "all";
 
 /** Adversarial dream strategies (used in NIGHTMARE state) */

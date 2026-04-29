@@ -234,6 +234,12 @@ export function writeEngineEnv(
         section: "Adaptive Dream Strategy",
       },
       {
+        key: "DG_ORPHAN_BUDGET",
+        defaultValue: "20",
+        description: "Max edges the orphan_bridging strategy may propose per dream cycle",
+        section: "Adaptive Dream Strategy",
+      },
+      {
         key: "DG_NORMALIZER_BATCH_SIZE",
         defaultValue: "20",
         description: "Max edges per LLM semantic validation batch",

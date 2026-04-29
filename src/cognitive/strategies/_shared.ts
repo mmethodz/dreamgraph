@@ -58,6 +58,8 @@ export interface FactSnapshot {
   domains: Set<string>;
   /** Shared source files → entity IDs that reference them */
   sourceFileIndex: Map<string, string[]>;
+  /** Per-entity degree (outgoing + incoming links across the fact graph) */
+  degree: Map<string, number>;
 }
 
 // ---------------------------------------------------------------------------
@@ -261,5 +263,14 @@ export async function buildFactSnapshot(): Promise<FactSnapshot> {
     }
   }
 
-  return { entities, edgeSet, domains, sourceFileIndex };
+  // Compute per-entity degree (outgoing + incoming) from the assembled edge set.
+  const degree = new Map<string, number>();
+  for (const id of entities.keys()) degree.set(id, 0);
+  for (const key of edgeSet) {
+    const [from, to] = key.split("|");
+    if (entities.has(from)) degree.set(from, (degree.get(from) ?? 0) + 1);
+    if (entities.has(to) && to !== from) degree.set(to, (degree.get(to) ?? 0) + 1);
+  }
+
+  return { entities, edgeSet, domains, sourceFileIndex, degree };
 }

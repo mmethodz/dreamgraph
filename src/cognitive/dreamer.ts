@@ -40,6 +40,7 @@ import { symmetryCompletion } from "./strategies/symmetry-completion.js";
 import { tensionDirected } from "./strategies/tension-directed.js";
 import { pgoWaveDream } from "./strategies/pgo-wave.js";
 import { llmDream } from "./strategies/llm-dream.js";
+import { orphanBridging } from "./strategies/orphan-bridging.js";
 
 // ---------------------------------------------------------------------------
 // Public API — Dream Cycle
@@ -143,6 +144,7 @@ export async function dream(
     "symmetry_completion",
     "tension_directed",
     "causal_replay",
+    "orphan_bridging",
   ];
 
   const strategiesToRun: DreamStrategy[] =
@@ -261,6 +263,16 @@ export async function dream(
     const pgoEdges = pgoWaveDream(snapshot, cycle, pgoBudget || perStrategy);
     allEdges.push(...pgoEdges);
     strategyYields["pgo_wave"] = pgoEdges.length;
+  }
+
+  // Orphan bridging — attach degree-0 fact-graph entities to nearest neighbor
+  if (strategiesToRun.includes("orphan_bridging")) {
+    const orphanCap = Number(process.env.DG_ORPHAN_BUDGET) || 20;
+    const orphanBudget = Math.min(perStrategy, orphanCap);
+    const orphanEdges = orphanBridging(snapshot, cycle, orphanBudget);
+    allEdges.push(...orphanEdges);
+    strategyYields["orphan_bridging"] = orphanEdges.length;
+    logger.debug(`Orphan bridging: ${orphanEdges.length} dream edges (budget ${orphanBudget})`);
   }
 
   // Record yields for adaptive selection (only when running "all")

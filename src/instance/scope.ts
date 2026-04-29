@@ -62,8 +62,16 @@ export class InstanceScope {
   /** Attached project root (null if unbound). */
   readonly projectRoot: string | null;
 
-  /** Additional repository paths this instance may read. */
-  readonly repos: Record<string, string>;
+  /**
+   * Additional repository paths this instance may read.
+   *
+   * Initially populated from `config/mcp.json` at scope construction time,
+   * then overwritten in {@link resolveInstanceAtStartup} with the merged
+   * runtime registry (mcp.json ∪ engine.env DREAMGRAPH_REPOS ∪ auto-registered
+   * project_root). Kept in sync with `config.repos` so consumers (dashboard,
+   * source tools, etc.) see the same view regardless of which they read.
+   */
+  repos: Record<string, string>;
 
   /** Human-readable name (mutable in the registry; cached here for display). */
   readonly name?: string;
