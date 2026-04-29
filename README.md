@@ -42,6 +42,18 @@ The guide walks you through installation, your first instance, LLM setup, bootst
 
 The auto-generated technical reference (every tool, every parameter, every schema) lives in [`docs/`](docs/README.md) and is best read *after* the guide.
 
+## Sponsor DreamGraph
+
+DreamGraph is built and maintained by a solo developer on aging hardware. If this tool saves your architecture team time — debugging a multi-repo system, onboarding a new engineer, or just keeping a SaaS backend's data model honest — please consider sponsoring.
+
+Sponsorship directly funds:
+
+- **CI infrastructure** for the multi-engine datastore tests (Postgres, MySQL, MSSQL, Mongo, Redis containers)
+- **A dev machine that doesn't catch fire** when running 20 DreamGraph instances next to a Postgres container and a WSL kernel
+- **More frequent releases** — fewer hours spent on contract work means more hours on the daemon
+
+[**:sparkling_heart: Sponsor on GitHub**](https://github.com/sponsors/mmethodz)
+
 ## What DreamGraph Includes
 
 - **Daemon** — the long-running DreamGraph runtime with stdio or HTTP transport
