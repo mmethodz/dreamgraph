@@ -43,6 +43,7 @@ export type DreamStrategy =
   | "pgo_wave"
   | "llm_dream"
   | "orphan_bridging"
+  | "schema_grounding"
   | "all";
 
 /** Adversarial dream strategies (used in NIGHTMARE state) */
@@ -96,6 +97,7 @@ export type DreamEdgeType =
   | "feature"
   | "workflow"
   | "data_model"
+  | "datastore"
   | "hypothetical";
 
 // ---------------------------------------------------------------------------

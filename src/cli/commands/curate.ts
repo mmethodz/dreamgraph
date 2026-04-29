@@ -95,7 +95,7 @@ Options:
 
   const targets = typeof flags.targets === "string"
     ? flags.targets.split(",").map((t) => t.trim())
-    : ["features", "workflows", "data_model", "adrs"];
+    : ["features", "workflows", "data_model", "datastores", "adrs"];
 
   const findings: CurationFinding[] = [];
 
@@ -163,6 +163,68 @@ Options:
         }
         if (isOrphan(item)) {
           findings.push({ type: "orphan_entity", id, name, detail: "no outgoing links to other entities" });
+        }
+      }
+    }
+
+    // Query datastores for hub/grounding issues (DATASTORE_AS_HUB Slice 3).
+    if (targets.includes("datastores")) {
+      const dsResult = await mcpCallTool(daemonPort, "query_resource", {
+        uri: "system://datastores",
+      }, 30_000).catch(() => null);
+      const dmResult = await mcpCallTool(daemonPort, "query_resource", {
+        uri: "system://data-model",
+      }, 30_000).catch(() => null);
+      const datastores = dsResult ? parseResourceResult(dsResult.content?.[0]?.text) : [];
+      const dataModels = dmResult ? parseResourceResult(dmResult.content?.[0]?.text) : [];
+
+      // phantom_data_model: data_model with no `stored_in` link to any datastore.
+      const datastoreIds = new Set(datastores.map((d) => str(d, "id")).filter(Boolean));
+      if (datastoreIds.size > 0) {
+        for (const dm of dataModels) {
+          const links = Array.isArray(dm.links) ? dm.links : [];
+          const linksToStore = links.some((l) => {
+            if (!l || typeof l !== "object") return false;
+            const target = (l as Record<string, unknown>).target;
+            return typeof target === "string" && datastoreIds.has(target);
+          });
+          if (!linksToStore) {
+            findings.push({
+              type: "phantom_data_model",
+              id: str(dm, "id", "unknown"),
+              name: str(dm, "name", str(dm, "id", "unknown")),
+              detail: "no stored_in edge to any datastore",
+            });
+          }
+        }
+
+        // shadow_table: a table in datastores.json `tables[]` that no data_model
+        // appears to claim (lenient name match against id leaf or name).
+        const claimedNames = new Set<string>();
+        const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+        for (const dm of dataModels) {
+          const id = str(dm, "id");
+          const name = str(dm, "name");
+          const leaf = norm((id.split(/[:.]/).pop() ?? id) || "");
+          if (leaf) claimedNames.add(leaf);
+          if (name) claimedNames.add(norm(name));
+        }
+        for (const ds of datastores) {
+          const dsId = str(ds, "id", "unknown");
+          const dsName = str(ds, "name", dsId);
+          const tables = Array.isArray(ds.tables) ? ds.tables : [];
+          for (const t of tables) {
+            if (!t || typeof t !== "object") continue;
+            const tName = str(t as Record<string, unknown>, "name");
+            if (!tName) continue;
+            if (claimedNames.has(norm(tName))) continue;
+            findings.push({
+              type: "shadow_table",
+              id: `${dsId}:${tName}`,
+              name: `${dsName} / ${tName}`,
+              detail: "table in datastore has no matching data_model entity",
+            });
+          }
         }
       }
     }
@@ -268,6 +330,8 @@ function formatFindingType(type: string): string {
     weak_entity: "Weak data model entities",
     orphan_entity: "Orphan data model entities (no edges)",
     weak_adr: "Weak ADRs",
+    phantom_data_model: "Phantom data_model entities (no datastore link)",
+    shadow_table: "Shadow tables (datastore tables with no data_model)",
   };
   return labels[type] ?? type;
 }
@@ -289,6 +353,12 @@ function buildSuggestedActions(findings: CurationFinding[]): string[] {
   }
   if (types.has("orphan_feature") || types.has("orphan_workflow") || types.has("orphan_entity")) {
     actions.push("run a dream cycle (dg dream) — the orphan_bridging strategy will propose neighbor edges; or enrich descriptions/keywords so structural strategies can match");
+  }
+  if (types.has("phantom_data_model")) {
+    actions.push("run a dream cycle with strategy=schema_grounding, or run scan_database to refresh datastore tables; correct the data_model `storage` field if the table name differs");
+  }
+  if (types.has("shadow_table")) {
+    actions.push("run scan_database({ create_missing: true }) to auto-create stub data_model entries for orphan tables, or add them via enrich_seed_data");
   }
   if (actions.length === 0) {
     actions.push("graph quality looks good — consider running dg enrich for coverage");

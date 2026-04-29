@@ -41,6 +41,7 @@ import { tensionDirected } from "./strategies/tension-directed.js";
 import { pgoWaveDream } from "./strategies/pgo-wave.js";
 import { llmDream } from "./strategies/llm-dream.js";
 import { orphanBridging } from "./strategies/orphan-bridging.js";
+import { schemaGrounding } from "./strategies/schema-grounding.js";
 
 // ---------------------------------------------------------------------------
 // Public API — Dream Cycle
@@ -145,6 +146,7 @@ export async function dream(
     "tension_directed",
     "causal_replay",
     "orphan_bridging",
+    "schema_grounding",
   ];
 
   const strategiesToRun: DreamStrategy[] =
@@ -273,6 +275,17 @@ export async function dream(
     allEdges.push(...orphanEdges);
     strategyYields["orphan_bridging"] = orphanEdges.length;
     logger.debug(`Orphan bridging: ${orphanEdges.length} dream edges (budget ${orphanBudget})`);
+  }
+
+  // Schema grounding — anchor data_models to scanned datastore tables and
+  // surface cross-repo state sharing through the shared hub.
+  if (strategiesToRun.includes("schema_grounding")) {
+    const sg = await schemaGrounding(snapshot, cycle, perStrategy);
+    allEdges.push(...sg.edges);
+    strategyYields["schema_grounding"] = sg.edges.length;
+    logger.debug(
+      `Schema grounding: ${sg.edges.length} dream edges, ${sg.tensions_raised} tensions raised`,
+    );
   }
 
   // Record yields for adaptive selection (only when running "all")

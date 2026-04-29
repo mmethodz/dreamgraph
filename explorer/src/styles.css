@@ -222,6 +222,7 @@ html, body, #root {
 .searchbar-type.t-workflow { color: #5dd2c4; }
 .searchbar-type.t-data_model { color: #f6c177; }
 .searchbar-type.t-capability { color: #ff8fd6; }
+.searchbar-type.t-datastore { color: #22d3ee; }
 .searchbar-type.t-dream_node { color: #b07bff; }
 .searchbar-type.t-tension { color: #ff6b6b; }
 .searchbar-label { color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

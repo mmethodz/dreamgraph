@@ -10,6 +10,7 @@ export type ExplorerNodeType =
   | "workflow"
   | "data_model"
   | "capability"
+  | "datastore"
   | "dream_node"
   | "tension";
 

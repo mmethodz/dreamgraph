@@ -417,14 +417,15 @@ describe("Instance constants", () => {
     expect(INSTANCE_DIRS).toContain("exports");
   });
 
-  it("DATA_STUBS has all 19 data files", () => {
+  it("DATA_STUBS has all 20 data files", () => {
     const keys = Object.keys(DATA_STUBS);
-    expect(keys.length).toBe(19);
+    expect(keys.length).toBe(20);
     expect(keys).toContain("dream_graph.json");
     expect(keys).toContain("schedules.json");
     expect(keys).toContain("adr_log.json");
     expect(keys).toContain("ui_registry.json");
     expect(keys).toContain("tension_log.json");
+    expect(keys).toContain("datastores.json");
   });
 
   it("DATA_STUBS values are valid JSON objects", () => {

@@ -1,0 +1,20 @@
+[
+  {
+    "_schema": "Datastore — a shared backend store (database, blob, event bus) that anchors data_model entities",
+    "_fields": {
+      "id": "Unique datastore ID (e.g. 'datastore:primary')",
+      "name": "Human-readable name (e.g. 'Primary Postgres')",
+      "kind": "Backend kind: postgres | mysql | sqlite | mongo | redis | blob_storage | event_bus | other",
+      "url_hint": "Sanitized connection-string preview, no password (e.g. 'postgres://user@host/db')",
+      "repos": ["Repo names that share this datastore"],
+      "tables": ["Populated by scan_database (Slice 2). Each: {schema, name, columns, fk_count, rows_estimate}"],
+      "last_scanned_at": "ISO timestamp of last successful schema scan",
+      "tags": ["Optional tags (e.g. 'shared', 'saas', 'primary')"],
+      "status": "active | planned | deprecated",
+      "description": "What this datastore stores",
+      "source_repo": "Repository name this record was authored from",
+      "source_files": ["Relevant source files (e.g. schema.sql, prisma/schema.prisma)"]
+    },
+    "_note": "Auto-seeded as 'datastore:primary' when DATABASE_URL is set in engine.env. DELETE this schema entry once a real datastore exists. See plans/DATASTORE_AS_HUB.md."
+  }
+]

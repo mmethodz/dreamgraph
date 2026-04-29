@@ -38,12 +38,13 @@ import {
 } from "./types.js";
 import { InstanceScope } from "./scope.js";
 import { resolveMasterDir, registerInstance, loadRegistry } from "./registry.js";
-import { config } from "../config/config.js";
+import { config, updateDatabaseConnectionString } from "../config/config.js";
 import { logger } from "../utils/logger.js";
 import { setDataDirResolver } from "../utils/cache.js";
 import { setDataDirOverride } from "../utils/paths.js";
 import { setMutexKeyResolver } from "../utils/mutex.js";
 import { loadEngineEnv } from "../utils/engine-env.js";
+import { autoSeedPrimaryDatastore } from "./datastore-bootstrap.js";
 
 /** Project root — three levels up from dist/instance/lifecycle.js */
 const PROJECT_ROOT = resolve(fileURLToPath(import.meta.url), "..", "..", "..");
@@ -519,6 +520,15 @@ export async function resolveInstanceAtStartup(): Promise<InstanceScope | null> 
       logger.info(`Loaded ${envVars} env vars from ${scope.engineEnvPath}`);
     }
 
+    // engine.env is loaded after config.ts captured process.env.DATABASE_URL
+    // at module-init time, so refresh the cached connection string now that
+    // the per-instance env has been merged in. Without this, db-senses and
+    // server.ts see the stale empty value and the dashboard's "Sync schema"
+    // button reports DATABASE_URL is not set even though engine.env defines it.
+    if (process.env.DATABASE_URL && process.env.DATABASE_URL !== config.database.connectionString) {
+      updateDatabaseConnectionString(process.env.DATABASE_URL);
+    }
+
     const instanceRepos = scope.repos;
     const envReposRaw = process.env.DREAMGRAPH_REPOS ?? "{}";
     let envRepos: Record<string, string> = {};
@@ -567,6 +577,11 @@ export async function resolveInstanceAtStartup(): Promise<InstanceScope | null> 
     // consumers that read scope.repos (e.g. the dashboard) see the same
     // view as code paths that read config.repos.
     scope.repos = { ...mergedRepos };
+
+    // Auto-seed datastore:primary if DATABASE_URL is set and no real
+    // datastore record exists yet (per plans/DATASTORE_AS_HUB.md Slice 1).
+    // Inert when DATABASE_URL is unset — see Decision #7.
+    await autoSeedPrimaryDatastore(config.repos);
 
     logger.info(`Instance mode activated: ${scope}`);
     if (Object.keys(config.repos).length > 0) {

@@ -243,6 +243,7 @@ export const DATA_STUBS: Record<string, unknown> = {
   "threat_log.json":        [],
   "dream_archetypes.json":  [],
   "capabilities.json":      [],
+  "datastores.json":        [],
   "system_overview.json":   { id: "system_overview", name: "", description: "", source_repo: "", source_files: [], repositories: [] },
   "features.json":          [],
   "workflows.json":         [],

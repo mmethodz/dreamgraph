@@ -13,6 +13,7 @@ export const NODE_COLORS: Record<ExplorerNodeType, string> = {
   workflow: "#5dd2c4",     // teal
   data_model: "#f6c177",   // amber
   capability: "#ff8fd6",   // hot pink — distinct from dream
+  datastore: "#22d3ee",    // cyan — infrastructure hub (per plans/DATASTORE_AS_HUB.md)
   dream_node: "#b07bff",   // lavender
   tension: "#ff6b6b",      // red
 };

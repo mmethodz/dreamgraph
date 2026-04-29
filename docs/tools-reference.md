@@ -18,7 +18,7 @@ Trigger a full AWAKE → REM → NORMALIZING → AWAKE cycle. Generates speculat
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `strategy` | enum | `"all"` | `llm_dream`, `pgo_wave`, `gap_detection`, `weak_reinforcement`, `cross_domain`, `missing_abstraction`, `symmetry_completion`, `tension_directed`, `causal_replay`, `reflective`, `orphan_bridging`, `all` |
+| `strategy` | enum | `"all"` | `llm_dream`, `pgo_wave`, `gap_detection`, `weak_reinforcement`, `cross_domain`, `missing_abstraction`, `symmetry_completion`, `tension_directed`, `causal_replay`, `reflective`, `orphan_bridging`, `schema_grounding`, `all` |
 | `max_dreams` | number (1–500) | 100 | Maximum dream items to generate |
 | `auto_normalize` | boolean | true | Run normalization after dreaming |
 
@@ -866,6 +866,7 @@ System resources (registered in [src/resources/register.ts](../src/resources/reg
 | `system://features` | All features from fact graph |
 | `system://workflows` | All operational workflows |
 | `system://data-model` | Entity definitions and relationships |
+| `system://datastores` | Shared infrastructure (databases) referenced by data_model. Includes scanned table metadata. Empty when no datastore is configured. |
 | `system://capabilities` | Server capabilities, strategies & available tools |
 | `system://index` | Central entity index for fast lookup and cross-resource linking |
 

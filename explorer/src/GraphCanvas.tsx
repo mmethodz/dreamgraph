@@ -544,6 +544,7 @@ function ringColorFor(type: string, health: number): string {
   if (type === "workflow") return "#9be8de";
   if (type === "data_model") return "#ffd9a3";
   if (type === "capability") return "#ffc2e6";
+  if (type === "datastore") return "#7feaf5";
   return "#d8dde3";
 }
 

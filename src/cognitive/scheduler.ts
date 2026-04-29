@@ -68,6 +68,8 @@ const DREAM_STRATEGIES = [
   "causal_replay",
   "pgo_wave",
   "llm_dream",
+  "orphan_bridging",
+  "schema_grounding",
   "all",
 ] as const satisfies readonly DreamStrategy[];
 

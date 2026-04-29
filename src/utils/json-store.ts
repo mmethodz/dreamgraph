@@ -73,6 +73,7 @@ export const STORE_TRUST_TIERS: Record<string, TrustTier> = {
   "workflows.json": "external",
   "data_model.json": "external",
   "capabilities.json": "external",
+  "datastores.json": "external",
   "schedules.json": "external",
   "dream_archetypes.json": "external",
   "system_overview.json": "external",

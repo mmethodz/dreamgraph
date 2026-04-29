@@ -236,7 +236,7 @@ async function startHTTP(port: number): Promise<void> {
     }
 
     // ---- Dashboard pages: /, /status, /schedules, /config, /docs, /health --
-    if (req.method === "GET" || (req.method === "POST" && (url.pathname === "/config" || url.pathname === "/config/test-db" || url.pathname === "/schedules" || url.pathname === "/restart"))) {
+    if (req.method === "GET" || (req.method === "POST" && (url.pathname === "/config" || url.pathname === "/config/test-db" || url.pathname === "/config/clear-db" || url.pathname === "/datastores/scan" || url.pathname === "/schedules" || url.pathname === "/restart"))) {
       const handled = await handleDashboardRoute(req, res, url.pathname);
       if (handled) return;
     }

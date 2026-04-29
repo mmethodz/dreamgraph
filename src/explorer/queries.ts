@@ -31,6 +31,7 @@ import { loadGraphRaw, type GraphRawSnapshot } from "../graph/store.js";
 import type {
   CapabilityEntity,
   DataModelEntity,
+  Datastore,
   Feature,
   Workflow,
 } from "../types/index.js";
@@ -165,6 +166,8 @@ function findEntity(raw: GraphRawSnapshot, id: string, type: ExplorerNodeType): 
       return (raw.dataModel as DataModelEntity[]).find((d) => d.id === id) ?? null;
     case "capability":
       return (raw.capabilities as CapabilityEntity[]).find((c) => c.id === id) ?? null;
+    case "datastore":
+      return (raw.datastores as Datastore[]).find((d) => d.id === id) ?? null;
     case "dream_node":
       return (raw.dreamGraph.nodes ?? []).find((n: DreamNode) => n.id === id) ?? null;
     case "tension":
@@ -369,7 +372,7 @@ export interface StatsResult {
 }
 
 const NODE_TYPES: ExplorerNodeType[] = [
-  "feature", "workflow", "data_model", "capability", "dream_node", "tension",
+  "feature", "workflow", "data_model", "capability", "datastore", "dream_node", "tension",
 ];
 const EDGE_KINDS: ExplorerEdgeKind[] = [
   "fact", "validated", "candidate", "dream", "tension",

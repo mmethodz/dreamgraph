@@ -576,11 +576,14 @@ export function registerCognitiveTools(server: McpServer): void {
           "tension_directed",
           "causal_replay",
           "reflective",
+          "pgo_wave",
+          "orphan_bridging",
+          "schema_grounding",
           "all",
         ])
         .optional()
         .describe(
-          'Dream strategy. "llm_dream": LLM-powered creative dreaming (THE primary strategy). "gap_detection": find unconnected related entities. "weak_reinforcement": strengthen weak edges. "cross_domain": bridge different domains. "missing_abstraction": propose unifying features. "symmetry_completion": add reverse edges. "tension_directed": focus on unresolved tensions. "causal_replay": mine history for cause→effect chains. "reflective": agent-directed insights from code reading. "all": run all strategies (LLM first, then structural). Default: "all".'
+          'Dream strategy. "llm_dream": LLM-powered creative dreaming (THE primary strategy). "gap_detection": find unconnected related entities. "weak_reinforcement": strengthen weak edges. "cross_domain": bridge different domains. "missing_abstraction": propose unifying features. "symmetry_completion": add reverse edges. "tension_directed": focus on unresolved tensions. "causal_replay": mine history for cause→effect chains. "reflective": agent-directed insights from code reading. "pgo_wave": stochastic Lévy-flight divergence. "orphan_bridging": attach degree-0 entities to nearest plausible neighbor. "schema_grounding": anchor data_models to scanned datastore tables and surface cross-repo state sharing. "all": run all strategies (LLM first, then structural). Default: "all".'
         ),
       max_dreams: z
         .number()

@@ -85,7 +85,9 @@ DreamGraph supports multiple dream-generation strategies.
 | `tension_directed` | Focuses dreaming around unresolved tensions |
 | `causal_replay` | Mines historical cause → effect chains |
 | `reflective` | Agent-driven insight capture after code reading |
-| `orphan_bridging` | Attaches degree-0 fact-graph entities to nearest plausible neighbor using relaxed signals (capped per cycle by `DG_ORPHAN_BUDGET`, default 20) |
+| `orphan_bridging` | Attaches degree-0 fact-graph entities to nearest plausible neighbor using relaxed signals (capped per cycle by `DG_ORPHAN_BUDGET`, default 20). Adds a +0.15 score bonus when both endpoints transitively touch the same datastore. |
+| `pgo_wave` | Stochastic Lévy-flight divergence — long-range reseeding of the dream search distribution |
+| `schema_grounding` | Uses scanned datastore tables (`scan_database`) to (1) propose `stored_in` edges from `data_model` entities to their datastore (exact match conf 0.85, fuzzy 0.55), (2) propose `shares_state_with` edges between top-level entities in different repos that resolve to the same datastore, and (3) raise `phantom_entity` / `shadow_table` tensions. Inert when no datastores are configured or no scan has run. |
 | `all` | Runs the full strategy set |
 
 ---

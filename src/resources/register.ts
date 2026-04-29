@@ -18,6 +18,7 @@ import type {
   DataModelEntity,
   Capabilities,
   ResourceIndex,
+  Datastore,
 } from "../types/index.js";
 import { getMetricsSnapshot } from "../utils/metrics.js";
 
@@ -127,6 +128,32 @@ export function registerResources(server: McpServer): void {
   );
 
   // -----------------------------------------------------------------------
+  // system://datastores — Shared infrastructure (databases) referenced by data_model
+  // -----------------------------------------------------------------------
+  server.resource(
+    "system-datastores",
+    "system://datastores",
+    {
+      description:
+        "Shared datastores (e.g. Postgres) that data_model entities live in. Includes scanned table metadata and the repos that share each datastore. Empty when no datastore is configured.",
+      mimeType: "application/json",
+    },
+    async (uri) => {
+      logger.debug(`Resource requested: ${uri.href}`);
+      const data = await loadJsonArray<Datastore>("datastores.json");
+      return {
+        contents: [
+          {
+            uri: uri.href,
+            mimeType: "application/json",
+            text: JSON.stringify(data, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  // -----------------------------------------------------------------------
   // system://capabilities — Dynamic meta-resource: runtime server state
   // -----------------------------------------------------------------------
   server.resource(
@@ -198,7 +225,8 @@ export function registerResources(server: McpServer): void {
         },
         resources: [
           "system://overview", "system://features", "system://workflows",
-          "system://data-model", "system://capabilities", "system://index",
+          "system://data-model", "system://datastores",
+          "system://capabilities", "system://index",
           "dream://graph", "dream://candidates", "dream://validated",
           "dream://status", "dream://tensions", "dream://history",
           "dream://adrs", "dream://ui-registry", "dream://threats",
@@ -213,7 +241,8 @@ export function registerResources(server: McpServer): void {
           dream_strategies: [
             "gap_detection", "weak_reinforcement", "cross_domain",
             "missing_abstraction", "symmetry_completion", "tension_directed",
-            "causal_replay",
+            "causal_replay", "reflective", "pgo_wave", "llm_dream",
+            "orphan_bridging", "schema_grounding",
           ],
           nightmare_strategies: [
             "privilege_escalation", "data_leak_path", "injection_surface",

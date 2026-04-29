@@ -1,5 +1,5 @@
 /**
- * DreamGraph v8.1.0 — Atlas Web Dashboard.
+ * DreamGraph v8.2.0 — Bedrock Web Dashboard.
  *
  * Self-contained HTTP route handlers that render status, config,
  * and live documentation pages as HTML.  Zero external dependencies —
@@ -35,10 +35,10 @@ import {
   updateDreamerLlmConfig, updateNormalizerLlmConfig,
 } from "../cognitive/llm.js";
 import type { LlmConfig } from "../cognitive/llm.js";
-import type { DreamSchedule, ScheduleExecution, ScheduleAction, ScheduleTriggerType } from "../types/index.js";
+import type { DreamSchedule, ScheduleExecution, ScheduleAction, ScheduleTriggerType, Datastore } from "../types/index.js";
 import { updateConfig as updateEventConfig, getConfig as getEventConfig } from "../cognitive/event-router.js";
 import { updateNarrativeConfig, getNarrativeConfig } from "../cognitive/narrator.js";
-import { testDbConnection, resetDbPool } from "../tools/db-senses.js";
+import { testDbConnection, resetDbPool, runDatastoreScan } from "../tools/db-senses.js";
 import { loadJsonData, loadJsonArray } from "../utils/cache.js";
 import { writeEngineEnv } from "../utils/engine-env.js";
 import { logger } from "../utils/logger.js";
@@ -161,7 +161,7 @@ async function shell(title: string, body: string, activeTab: string): Promise<st
   </nav>
   <main>${body}</main>
   <footer>
-    <span>${BRAND} v${VERSION} "Atlas"</span>
+    <span>${BRAND} v${VERSION} "Bedrock"</span>
     <span>Instance: ${instanceId}</span>
     <span>Generated: ${new Date().toISOString()}</span>
   </footer>
@@ -626,6 +626,7 @@ const DREAM_STRATEGIES: string[] = [
   "pgo_wave",
   "llm_dream",
   "orphan_bridging",
+  "schema_grounding",
 ];
 
 async function renderSchedules(toast?: string): Promise<string> {
@@ -1266,6 +1267,111 @@ async function renderConfig(savedSection?: string): Promise<string> {
     });
   </script>`;
 
+  // -------------------------------------------------------------------
+  // Datastores card (per plans/DATASTORE_AS_HUB.md, Slice 1).
+  // Always rendered — mirrors the Database card's NOT SET pill UX so
+  // users know the feature exists whether or not they've enabled it.
+  // Three render branches: configured+scanned / configured / not configured.
+  // -------------------------------------------------------------------
+  let datastoresRaw: unknown[] = [];
+  try {
+    datastoresRaw = await loadJsonArray<unknown>("datastores.json");
+  } catch {
+    datastoresRaw = [];
+  }
+  const datastores: Datastore[] = (datastoresRaw as Array<Record<string, unknown>>)
+    .filter((d) => d._schema === undefined && d._note === undefined)
+    .map((d) => d as unknown as Datastore);
+
+  body += `<h2>Datastores</h2>
+  <div class="card">`;
+
+  if (datastores.length === 0) {
+    body += `
+    <div class="kv" style="padding:6px 0;border-bottom:none">
+      <span class="kv-key">Status</span>
+      <span class="kv-val"><span class="badge badge-red">not configured</span></span>
+    </div>
+    <p class="hint" style="margin:8px 0 0 0;color:#888">
+      Set <code>DATABASE_URL</code> in <code>config/engine.env</code> to register a shared datastore.
+      Once configured, the next instance restart auto-seeds <code>datastore:primary</code> and
+      <code>data_model</code> entities will anchor to it as a graph hub.
+    </p>`;
+  } else {
+    body += `<table class="table">
+      <thead><tr><th>ID</th><th>Kind</th><th>Repos</th><th>Tables</th><th>Last Scanned</th><th>Actions</th></tr></thead>
+      <tbody>`;
+    for (const d of datastores) {
+      const kindBadge = `<span class="badge">${esc(d.kind ?? "other")}</span>`;
+      const reposStr = (d.repos ?? []).length > 0
+        ? esc((d.repos ?? []).join(", "))
+        : `<span class="badge badge-yellow">none</span>`;
+      const tableCount = (d.tables ?? []).length;
+      const tablesCell = tableCount > 0
+        ? `${tableCount}`
+        : `<span class="badge badge-yellow">unscanned</span>`;
+      const lastScanned = d.last_scanned_at
+        ? esc(d.last_scanned_at)
+        : `<span class="badge badge-yellow">never</span>`;
+      const escId = esc(d.id);
+      body += `<tr>
+        <td><code>${escId}</code></td>
+        <td>${kindBadge}</td>
+        <td>${reposStr}</td>
+        <td>${tablesCell}</td>
+        <td>${lastScanned}</td>
+        <td><button class="btn btn-small" data-scan-id="${escId}">Sync schema</button></td>
+      </tr>`;
+    }
+    body += `</tbody></table>
+    <p class="hint" id="datastore-scan-result" style="margin:8px 0 0 0;color:#888">
+      Click <strong>Sync schema</strong> to introspect tables via <code>scan_database</code>.
+      Datastore records anchor <code>data_model</code> entities via implicit
+      <code>stored_in</code> edges.
+    </p>
+    <script>
+      (function () {
+        const out = document.getElementById('datastore-scan-result');
+        document.querySelectorAll('button[data-scan-id]').forEach((btn) => {
+          btn.addEventListener('click', async () => {
+            const id = btn.getAttribute('data-scan-id');
+            const original = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = 'Scanning\u2026';
+            if (out) out.textContent = 'Scanning ' + id + '\u2026';
+            try {
+              const r = await fetch('/datastores/scan', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ datastore_id: id }),
+              });
+              const j = await r.json();
+              if (j && j.success && j.data) {
+                if (out) {
+                  out.textContent =
+                    'Scanned ' + j.data.datastore_id + ': ' +
+                    j.data.tables_kept + ' kept, ' +
+                    j.data.tables_skipped + ' skipped (of ' +
+                    j.data.tables_found + ' total). Reload to see updated counts.';
+                }
+              } else {
+                const msg = (j && j.error && (j.error.message || j.error.code)) || 'Scan failed.';
+                if (out) out.textContent = 'Error: ' + msg;
+              }
+            } catch (e) {
+              if (out) out.textContent = 'Network error: ' + (e && e.message ? e.message : String(e));
+            } finally {
+              btn.disabled = false;
+              btn.textContent = original || 'Sync schema';
+            }
+          });
+        });
+      })();
+    </script>`;
+  }
+
+  body += `</div>`;
+
   const activePolicyProfile = await getActiveProfileName();
   body += `<h2>Policy</h2>
   <div class="card">
@@ -1618,6 +1724,47 @@ async function handleClearDbPost(
 
   await resetDbPool();
   json(res, 200, { ok: true });
+}
+
+/* ------------------------------------------------------------------ */
+/*  Route: POST /datastores/scan                                      */
+/* ------------------------------------------------------------------ */
+
+async function handleDatastoreScanPost(
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  let datastoreId: string | undefined;
+  let schemas: string[] | undefined;
+  let createMissing: boolean | undefined;
+  try {
+    const raw = await new Promise<string>((resolve, reject) => {
+      let data = "";
+      req.on("data", (chunk: Buffer) => { data += chunk.toString(); });
+      req.on("end", () => resolve(data));
+      req.on("error", reject);
+    });
+    if (raw.trim().length > 0) {
+      const parsed = JSON.parse(raw);
+      if (typeof parsed.datastore_id === "string") datastoreId = parsed.datastore_id;
+      if (Array.isArray(parsed.schemas)) {
+        schemas = parsed.schemas.filter((s: unknown) => typeof s === "string");
+      }
+      if (typeof parsed.create_missing === "boolean") createMissing = parsed.create_missing;
+    }
+  } catch {
+    json(res, 400, { success: false, error: { code: "BAD_REQUEST", message: "Invalid JSON body." } });
+    return;
+  }
+
+  try {
+    const result = await runDatastoreScan({ datastoreId, schemas, createMissing });
+    json(res, result.success ? 200 : 400, result);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error(`Dashboard: datastore scan failed: ${msg}`);
+    json(res, 500, { success: false, error: { code: "INTERNAL", message: msg } });
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -2013,6 +2160,10 @@ export async function handleDashboardRoute(
   }
   if (req.method === "POST" && pathname === "/config/clear-db") {
     await handleClearDbPost(res);
+    return true;
+  }
+  if (req.method === "POST" && pathname === "/datastores/scan") {
+    await handleDatastoreScanPost(req, res);
     return true;
   }
   if (req.method === "POST" && pathname === "/schedules") {

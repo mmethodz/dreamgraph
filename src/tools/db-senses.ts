@@ -28,7 +28,10 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { config } from "../config/config.js";
 import { success, error, safeExecute } from "../utils/errors.js";
 import { logger } from "../utils/logger.js";
-import type { ToolResponse } from "../types/index.js";
+import { atomicWriteFile } from "../utils/atomic-write.js";
+import { invalidateCache, loadJsonArray } from "../utils/cache.js";
+import { dataPath } from "../utils/paths.js";
+import type { Datastore, DatastoreTable, DataModelEntity, ToolResponse } from "../types/index.js";
 
 // Lazy-import pg so the server doesn't crash if the pg module is
 // broken or missing (it's only needed when DATABASE_URL is set).
@@ -532,5 +535,326 @@ export function registerDbSensesTools(server: McpServer): void {
     }
   );
 
-  logger.info("Registered 1 db-senses tool (query_db_schema)");
+  registerScanDatabaseTool(server);
+
+  logger.info("Registered 2 db-senses tools (query_db_schema, scan_database)");
+}
+
+// ---------------------------------------------------------------------------
+// scan_database — populate datastore.tables[] from live schema
+// (per plans/DATASTORE_AS_HUB.md, Slice 2)
+// ---------------------------------------------------------------------------
+
+const LIST_TABLES_SQL = `
+  SELECT table_schema, table_name
+  FROM information_schema.tables
+  WHERE table_schema = ANY($1::text[])
+    AND table_type = 'BASE TABLE'
+  ORDER BY table_schema, table_name
+`;
+
+const COLUMN_COUNT_SQL = `
+  SELECT table_schema, table_name, COUNT(*)::int AS col_count
+  FROM information_schema.columns
+  WHERE table_schema = ANY($1::text[])
+  GROUP BY table_schema, table_name
+`;
+
+const FK_COUNT_SQL = `
+  SELECT tc.table_schema, tc.table_name, COUNT(*)::int AS fk_count
+  FROM information_schema.table_constraints tc
+  WHERE tc.table_schema = ANY($1::text[])
+    AND tc.constraint_type = 'FOREIGN KEY'
+  GROUP BY tc.table_schema, tc.table_name
+`;
+
+/** Tables/prefixes to skip — migration bookkeeping & framework noise. */
+const TABLE_DENYLIST_PREFIX = ["pg_", "knex_"];
+const TABLE_DENYLIST_EXACT = new Set([
+  "_prisma_migrations",
+  "schema_migrations",
+  "ar_internal_metadata",
+  "spatial_ref_sys",
+]);
+
+function isDenylisted(name: string, columns: number, fks: number): boolean {
+  const lower = name.toLowerCase();
+  if (TABLE_DENYLIST_EXACT.has(lower)) return true;
+  if (TABLE_DENYLIST_PREFIX.some((p) => lower.startsWith(p))) return true;
+  // Junction table heuristic: no FKs and < 3 columns is almost always noise.
+  if (fks === 0 && columns > 0 && columns < 3) return true;
+  return false;
+}
+
+interface ScanResult {
+  datastore_id: string;
+  tables_found: number;
+  tables_kept: number;
+  tables_skipped: number;
+  skipped_reasons: Record<string, number>;
+  /** Number of data_model entities created when create_missing=true. */
+  data_models_created: number;
+  last_scanned_at: string;
+}
+
+/**
+ * Run a schema scan against the configured datastore and persist the result.
+ * Shared between the `scan_database` MCP tool and the dashboard "Sync schema"
+ * button. Returns a ToolResponse so callers can render the same error codes.
+ */
+export async function runDatastoreScan(opts: {
+  datastoreId?: string;
+  schemas?: string[];
+  createMissing?: boolean;
+}): Promise<ToolResponse<ScanResult>> {
+  const targetSchemas = opts.schemas?.length ? opts.schemas : ["public"];
+  const scanTimeoutMs = config.database.scanTimeoutMs;
+  const t0 = Date.now();
+
+  for (const s of targetSchemas) {
+    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(s)) {
+      return error("INVALID_SCHEMA", `Schema name '${s}' contains invalid characters.`);
+    }
+  }
+
+  let datastores: Datastore[];
+  try {
+    datastores = await loadJsonArray<Datastore>("datastores.json");
+  } catch {
+    datastores = [];
+  }
+  const real = datastores.filter(
+    (d) =>
+      (d as unknown as Record<string, unknown>)._schema === undefined &&
+      (d as unknown as Record<string, unknown>)._note === undefined,
+  );
+  if (real.length === 0) {
+    return error(
+      "NO_DATASTORE",
+      "datastores.json is empty. Set DATABASE_URL and restart so the instance can auto-seed datastore:primary.",
+    );
+  }
+  const target = opts.datastoreId
+    ? real.find((d) => d.id === opts.datastoreId)
+    : real[0];
+  if (!target) {
+    return error(
+      "DATASTORE_NOT_FOUND",
+      `No datastore with id='${opts.datastoreId}' in datastores.json.`,
+    );
+  }
+
+  let dbPool: InstanceType<typeof Pool>;
+  try {
+    dbPool = await getPool();
+  } catch (err) {
+    return error("NO_CONNECTION", err instanceof Error ? err.message : String(err));
+  }
+
+  const queryDeadline = new Promise<never>((_, reject) =>
+    setTimeout(
+      () => reject(new Error(`scan_database timed out after ${scanTimeoutMs}ms`)),
+      scanTimeoutMs,
+    ),
+  );
+  let tables: Array<{ table_schema: string; table_name: string }>;
+  let colCounts: Array<{ table_schema: string; table_name: string; col_count: number }>;
+  let fkCounts: Array<{ table_schema: string; table_name: string; fk_count: number }>;
+  try {
+    const [tRes, cRes, fRes] = (await Promise.race([
+      Promise.all([
+        dbPool.query(LIST_TABLES_SQL, [targetSchemas]),
+        dbPool.query(COLUMN_COUNT_SQL, [targetSchemas]),
+        dbPool.query(FK_COUNT_SQL, [targetSchemas]),
+      ]),
+      queryDeadline,
+    ])) as [
+      { rows: Array<{ table_schema: string; table_name: string }> },
+      { rows: Array<{ table_schema: string; table_name: string; col_count: number }> },
+      { rows: Array<{ table_schema: string; table_name: string; fk_count: number }> },
+    ];
+    tables = tRes.rows;
+    colCounts = cRes.rows;
+    fkCounts = fRes.rows;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return error("SCAN_FAILED", `Schema scan failed: ${msg}`);
+  }
+
+  const colMap = new Map<string, number>();
+  for (const r of colCounts) colMap.set(`${r.table_schema}.${r.table_name}`, r.col_count);
+  const fkMap = new Map<string, number>();
+  for (const r of fkCounts) fkMap.set(`${r.table_schema}.${r.table_name}`, r.fk_count);
+
+  const skipReasons: Record<string, number> = {};
+  const kept: DatastoreTable[] = [];
+  for (const t of tables) {
+    const key = `${t.table_schema}.${t.table_name}`;
+    const cols = colMap.get(key) ?? 0;
+    const fks = fkMap.get(key) ?? 0;
+    const lower = t.table_name.toLowerCase();
+    if (TABLE_DENYLIST_EXACT.has(lower)) {
+      skipReasons.exact = (skipReasons.exact ?? 0) + 1;
+      continue;
+    }
+    if (TABLE_DENYLIST_PREFIX.some((p) => lower.startsWith(p))) {
+      skipReasons.prefix = (skipReasons.prefix ?? 0) + 1;
+      continue;
+    }
+    if (isDenylisted(t.table_name, cols, fks)) {
+      skipReasons.junction = (skipReasons.junction ?? 0) + 1;
+      continue;
+    }
+    kept.push({ schema: t.table_schema, name: t.table_name, columns: cols, fk_count: fks });
+  }
+
+  const lastScannedAt = new Date().toISOString();
+  const updated: Datastore = { ...target, tables: kept, last_scanned_at: lastScannedAt };
+  const next = datastores.map((d) => (d.id === target.id ? updated : d));
+  try {
+    await atomicWriteFile(dataPath("datastores.json"), JSON.stringify(next, null, 2));
+    invalidateCache("datastores.json");
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return error("WRITE_FAILED", `Failed to write datastores.json: ${msg}`);
+  }
+
+  consecutiveFailures = 0;
+
+  // ---------------------------------------------------------------------
+  // Optional: materialize stub data_model entries for kept tables that
+  // have no representation yet. Uses lenient name matching to avoid
+  // duplicating entities the user already authored.
+  // ---------------------------------------------------------------------
+  let dataModelsCreated = 0;
+  if (opts.createMissing && kept.length > 0) {
+    try {
+      const existing = await loadJsonArray<DataModelEntity>("data_model.json");
+      const norm = (s: string) =>
+        s.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const claimed = new Set<string>();
+      for (const dm of existing) {
+        const leaf = (dm.id?.split(/[:.]/).pop() ?? dm.id ?? "");
+        if (leaf) claimed.add(norm(leaf));
+        if (dm.name) claimed.add(norm(dm.name));
+        if (dm.table_name) claimed.add(norm(dm.table_name));
+      }
+      const additions: DataModelEntity[] = [];
+      const nowIso = lastScannedAt;
+      for (const t of kept) {
+        if (claimed.has(norm(t.name))) continue;
+        const id = `data_model:db.${t.schema}.${t.name}`;
+        if (existing.some((e) => e.id === id)) continue;
+        additions.push({
+          id,
+          type: "data_model",
+          uri: `dreamgraph://resource/data_model/${id}`,
+          name: t.name,
+          description: `Auto-created from datastore introspection (${target.id}).`,
+          source_repo: target.repos?.[0] ?? "",
+          source_files: [],
+          tags: ["introspected"],
+          created_at: nowIso,
+          updated_at: nowIso,
+          table_name: t.name,
+          storage: target.kind,
+          key_fields: [],
+          relationships: [],
+          domain: t.schema,
+          keywords: [t.name, t.schema, target.kind],
+          status: "introspected",
+          links: [
+            {
+              target: target.id,
+              type: "datastore",
+              relationship: "stored_in",
+              description: `Stored in ${target.name ?? target.id}.`,
+              strength: "strong",
+            },
+          ],
+        } as DataModelEntity);
+        claimed.add(norm(t.name));
+      }
+      if (additions.length > 0) {
+        const merged = [...existing, ...additions];
+        await atomicWriteFile(
+          dataPath("data_model.json"),
+          JSON.stringify(merged, null, 2),
+        );
+        invalidateCache("data_model.json");
+        dataModelsCreated = additions.length;
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn(
+        `scan_database: create_missing failed (kept ${kept.length} tables): ${msg}`,
+      );
+    }
+  }
+
+  const totalSkipped = Object.values(skipReasons).reduce((a, b) => a + b, 0);
+  logger.info(
+    `scan_database: ${target.id} found=${tables.length} kept=${kept.length} ` +
+      `skipped=${totalSkipped} created=${dataModelsCreated} elapsed=${Date.now() - t0}ms`,
+  );
+
+  return success<ScanResult>({
+    datastore_id: target.id,
+    tables_found: tables.length,
+    tables_kept: kept.length,
+    tables_skipped: totalSkipped,
+    skipped_reasons: skipReasons,
+    data_models_created: dataModelsCreated,
+    last_scanned_at: lastScannedAt,
+  });
+}
+
+function registerScanDatabaseTool(server: McpServer): void {
+  server.tool(
+    "scan_database",
+    "Scan the live PostgreSQL database for tables and populate the " +
+      "target datastore record (datastores.json) with table metadata. " +
+      "Reuses the same connection pool as query_db_schema. Read-only.",
+    {
+      datastore_id: z
+        .string()
+        .min(1)
+        .max(128)
+        .optional()
+        .describe(
+          "Target datastore id (default: first entry in datastores.json).",
+        ),
+      schemas: z
+        .array(z.string().min(1).max(128))
+        .optional()
+        .describe("Schemas to scan (default: ['public'])."),
+      create_missing: z
+        .boolean()
+        .optional()
+        .describe(
+          "When true, auto-create stub data_model entities for kept tables that have no representation. Defaults to false to avoid junction-table noise.",
+        ),
+    },
+    async ({ datastore_id, schemas, create_missing }) => {
+      logger.info(
+        `scan_database called: datastore_id=${datastore_id ?? "<first>"}, ` +
+          `schemas=[${(schemas ?? ["public"]).join(", ")}], create_missing=${create_missing === true}`,
+      );
+      const result = await safeExecute<ScanResult>(() =>
+        runDatastoreScan({
+          datastoreId: datastore_id,
+          schemas,
+          createMissing: create_missing,
+        }),
+      );
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
 }

@@ -10,7 +10,8 @@
  */
 
 import { loadJsonArray } from "../../utils/cache.js";
-import type { Feature, Workflow, DataModelEntity } from "../../types/index.js";
+import { isMissingFileError } from "../../utils/json-store.js";
+import type { Feature, Workflow, DataModelEntity, Datastore, DatastoreTable } from "../../types/index.js";
 
 // ---------------------------------------------------------------------------
 // Fact Graph Snapshot — in-memory read-only copy for dream analysis
@@ -18,7 +19,7 @@ import type { Feature, Workflow, DataModelEntity } from "../../types/index.js";
 
 export interface FactEntity {
   id: string;
-  type: "feature" | "workflow" | "data_model";
+  type: "feature" | "workflow" | "data_model" | "datastore";
   name: string;
   description: string;
   domain: string;
@@ -48,6 +49,8 @@ export interface FactEntity {
   relationships: Array<{ type: string; target: string; via: string }>;
   /** Words extracted from description for semantic matching */
   descriptionTokens: Set<string>;
+  /** Datastore tables — only for datastore entities (per Slice 2 scan_database). */
+  tables?: DatastoreTable[];
 }
 
 export interface FactSnapshot {
@@ -139,11 +142,19 @@ export function inferReverseRelation(relation: string): string {
 // ---------------------------------------------------------------------------
 
 export async function buildFactSnapshot(): Promise<FactSnapshot> {
-  const [features, workflows, dataModel] = await Promise.all([
+  const [features, workflows, dataModel, datastoresMaybe] = await Promise.all([
     loadJsonArray<Feature>("features.json"),
     loadJsonArray<Workflow>("workflows.json"),
     loadJsonArray<DataModelEntity>("data_model.json"),
+    loadJsonArray<Datastore>("datastores.json").catch((err) =>
+      isMissingFileError(err) ? ([] as Datastore[]) : Promise.reject(err),
+    ),
   ]);
+
+  // Strip template stubs (entries with `_schema` / `_note` markers).
+  const datastores = (datastoresMaybe as unknown as Array<Record<string, unknown>>)
+    .filter((d) => d._schema === undefined && d._note === undefined)
+    .map((d) => d as unknown as Datastore);
 
   const entities = new Map<string, FactEntity>();
   const edgeSet = new Set<string>();
@@ -260,6 +271,73 @@ export async function buildFactSnapshot(): Promise<FactSnapshot> {
     indexSourceFiles(e.id, e.source_files ?? []);
     for (const link of e.links ?? []) {
       edgeSet.add(`${e.id}|${link.target}`);
+    }
+  }
+
+  // -------------------------------------------------------------------
+  // Datastores (per plans/DATASTORE_AS_HUB.md, Slice 1).
+  // Each datastore becomes a FactEntity. Every data_model entity that
+  // does not already have a `stored_in` link gets one to the resolved
+  // datastore so the hub becomes structurally visible.
+  // -------------------------------------------------------------------
+  for (const d of datastores) {
+    const desc = d.description ?? "";
+    entities.set(d.id, {
+      id: d.id,
+      type: "datastore",
+      name: d.name,
+      description: desc,
+      domain: d.kind ?? "",
+      keywords: d.tags ?? [],
+      source_repo: d.source_repo ?? "",
+      source_files: d.source_files ?? [],
+      tags: d.tags ?? [],
+      category: d.kind ?? "",
+      links: [],
+      steps: [],
+      key_fields: [],
+      relationships: [],
+      descriptionTokens: tokenize(desc),
+      tables: d.tables ?? [],
+    });
+    indexSourceFiles(d.id, d.source_files ?? []);
+  }
+
+  if (datastores.length > 0) {
+    // Resolve which datastore a data_model belongs to. Match by:
+    //   1. exact id match against `storage` field, then
+    //   2. case-insensitive name/kind substring match against `storage`,
+    //   3. fall back to the first datastore (Decision #1: single primary).
+    const datastoreById = new Map(datastores.map((d) => [d.id, d]));
+    const resolveDatastore = (storage: string): Datastore | undefined => {
+      if (!storage) return datastores[0];
+      const exact = datastoreById.get(storage);
+      if (exact) return exact;
+      const needle = storage.toLowerCase();
+      const fuzzy = datastores.find((d) => {
+        const hay = `${d.id} ${d.name} ${d.kind}`.toLowerCase();
+        return hay.includes(needle) || needle.includes(d.kind);
+      });
+      return fuzzy ?? datastores[0];
+    };
+
+    for (const e of dataModel) {
+      const ent = entities.get(e.id);
+      if (!ent) continue;
+      const alreadyLinked = (e.links ?? []).some(
+        (l) => l.relationship === "stored_in" || datastoreById.has(l.target),
+      );
+      if (alreadyLinked) continue;
+      const target = resolveDatastore(e.storage ?? "");
+      if (!target) continue;
+      ent.links.push({
+        target: target.id,
+        type: "datastore" as unknown as FactEntity["links"][number]["type"],
+        relationship: "stored_in",
+        description: "Implicit hub edge: data_model anchored to its backing datastore.",
+        strength: "medium",
+      });
+      edgeSet.add(`${e.id}|${target.id}`);
     }
   }
 

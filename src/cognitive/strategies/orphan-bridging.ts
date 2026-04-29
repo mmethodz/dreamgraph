@@ -82,6 +82,29 @@ export function orphanBridging(
     dirCache.set(e.id, dirs);
   }
 
+  // Pre-compute transitive datastore reachability (per Slice 3 hub-bias):
+  // datastoreReach[id] = direct datastore link targets ∪ datastore link
+  // targets of any 1-hop neighbor. The hub is structurally central, so
+  // two entities sharing a datastore should attract a small bonus.
+  const directDatastoreLinks = new Map<string, Set<string>>();
+  for (const e of all) {
+    const set = new Set<string>();
+    for (const link of e.links) {
+      const target = snapshot.entities.get(link.target);
+      if (target?.type === "datastore") set.add(target.id);
+    }
+    directDatastoreLinks.set(e.id, set);
+  }
+  const datastoreReach = new Map<string, Set<string>>();
+  for (const e of all) {
+    const reach = new Set<string>(directDatastoreLinks.get(e.id) ?? []);
+    for (const link of e.links) {
+      const neighbor = directDatastoreLinks.get(link.target);
+      if (neighbor) for (const id of neighbor) reach.add(id);
+    }
+    datastoreReach.set(e.id, reach);
+  }
+
   // Collect orphans (degree 0). Process lowest-id-first for determinism.
   const orphans = all
     .filter((e) => (snapshot.degree.get(e.id) ?? 0) === 0)
@@ -156,6 +179,25 @@ export function orphanBridging(
       // ---- Repo bonus (only when at least one other signal fired) ----
       if (sameRepo && signals.length > 0) {
         score += 0.05;
+      }
+
+      // ---- Hub bias: shared datastore reachability (Slice 3) ----
+      const orphanReach = datastoreReach.get(orphan.id);
+      const otherReach = datastoreReach.get(other.id);
+      if (
+        orphanReach &&
+        otherReach &&
+        orphanReach.size > 0 &&
+        otherReach.size > 0
+      ) {
+        const sharedStores: string[] = [];
+        for (const id of orphanReach) {
+          if (otherReach.has(id)) sharedStores.push(id);
+        }
+        if (sharedStores.length > 0) {
+          score += 0.15;
+          signals.push(`shared datastore ${sharedStores[0]}`);
+        }
       }
 
       // Skip if both endpoints are orphans with no real signals beyond

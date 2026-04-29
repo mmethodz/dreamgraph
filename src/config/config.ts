@@ -133,6 +133,8 @@ export const config = {
     idleTimeoutMs: Number(process.env.DG_DB_IDLE_TIMEOUT) || 30_000,
     /** Hard cap on the entire query_db_schema operation (acquire + query). */
     operationTimeoutMs: Number(process.env.DG_DB_OPERATION_TIMEOUT) || 10_000,
+    /** Hard cap on a full scan_database run (lists tables + per-table introspection). */
+    scanTimeoutMs: Number(process.env.DG_DB_SCAN_TIMEOUT_MS) || 30_000,
   },
 
   /**

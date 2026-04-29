@@ -327,3 +327,24 @@ candidate → [normalization] → validated (promoted)
 - The etag is a content hash of the snapshot. Any concurrent dream cycle, mutation, or schedule that modifies the graph rotates the etag.
 - Stale etag ? 412; never silent overwrite.
 - Mutations are serialized through the data-file mutex.
+
+---
+
+## 17. Connect a Shared Database (`shared_database_flow`)
+
+**Purpose**: Make a project's primary datastore a first-class graph hub so multi-repo features and workflows visibly orbit around the shared state they touch.
+
+**Steps**:
+
+| Step | Phase | Description |
+|------|-------|-------------|
+| 1 | Configure | Set `DATABASE_URL` in the instance's `config/engine.env` and restart the daemon. |
+| 2 | Auto-seed | On boot, `src/instance/datastore-bootstrap.ts` writes a `datastore:primary` stub into `data/datastores.json` if no real datastore is registered yet. |
+| 3 | Sync schema | Click **Sync schema** on the dashboard Datastores card (or call the `scan_database` MCP tool). The daemon introspects via `query_db_schema`, applies denylist filters (`pg_*`, `_prisma_migrations`, junction tables with no FKs and < 3 columns), and writes `tables[]` + `last_scanned_at` back to `datastores.json`. |
+| 4 | (Optional) Materialize entities | Run `scan_database({ create_missing: true })` to upsert stub `data_model` entries for any kept table that has no representation. New entries get `id: data_model:db.<schema>.<table>`, `status: introspected`, and a `stored_in` link to the datastore. |
+| 5 | Ground the graph | Run a dream cycle with `strategy: schema_grounding`. Stage 1 proposes `stored_in` edges (exact name match conf 0.85, fuzzy 0.55). Stage 2 proposes `shares_state_with` edges between top-level entities in different repos that touch the same datastore. |
+| 6 | Surface gaps | The same strategy raises `phantom_entity` tensions (data_models with no resolvable table) and `shadow_table` tensions (tables nothing claims). `dg curate --targets datastores` lists both. |
+| 7 | Curate | Address each finding: enrich the `storage` field, run `scan_database({ create_missing: true })`, or add stub entities via `enrich_seed_data`. |
+
+**Inert when unconfigured**: with no `DATABASE_URL`, the dashboard card renders a `NOT CONFIGURED` pill, no auto-seed runs, `schema_grounding` returns `[]` immediately, and the `orphan_bridging` hub-bias bonus is `0` � zero impact on non-DB instances.
+

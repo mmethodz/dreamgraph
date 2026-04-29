@@ -26,6 +26,7 @@ import type {
   Workflow,
   DataModelEntity,
   CapabilityEntity,
+  Datastore,
   GraphLink,
 } from "../types/index.js";
 
@@ -36,6 +37,7 @@ export type ExplorerNodeType =
   | "workflow"
   | "data_model"
   | "capability"
+  | "datastore"
   | "dream_node"
   | "tension";
 
@@ -153,6 +155,9 @@ function buildSnapshot(raw: GraphRawSnapshot): GraphSnapshot {
   for (const c of raw.capabilities as CapabilityEntity[]) {
     if (c?.id) pushSeedNode(nodes, c.id, "capability", c.name ?? c.id);
   }
+  for (const ds of (raw.datastores ?? []) as Datastore[]) {
+    if (ds?.id) pushSeedNode(nodes, ds.id, "datastore", ds.name ?? ds.id);
+  }
 
   // ---- Dream nodes (speculative; lower default health) ----
   for (const dn of raw.dreamGraph.nodes ?? []) {
@@ -192,6 +197,38 @@ function buildSnapshot(raw: GraphRawSnapshot): GraphSnapshot {
   for (const w of raw.workflows as Workflow[]) ingestLinks(edges, nodes, w);
   for (const d of raw.dataModel as DataModelEntity[]) ingestLinks(edges, nodes, d);
   for (const c of raw.capabilities as CapabilityEntity[]) ingestLinks(edges, nodes, c);
+
+  // ---- Implicit `stored_in` hub edges (per plans/DATASTORE_AS_HUB.md) ----
+  // Every data_model that doesn't already link to a datastore gets one
+  // synthetic edge to the resolved hub. Resolution order:
+  //   1. exact id match against `storage`,
+  //   2. case-insensitive substring match against id/name/kind,
+  //   3. fall back to the first datastore (Decision #1: single primary).
+  if ((raw.datastores ?? []).length > 0) {
+    const stores = (raw.datastores ?? []) as Datastore[];
+    const storeById = new Map(stores.map((d) => [d.id, d]));
+    const resolveStore = (storage: string): Datastore | undefined => {
+      if (!storage) return stores[0];
+      const exact = storeById.get(storage);
+      if (exact) return exact;
+      const needle = storage.toLowerCase();
+      const fuzzy = stores.find((d) => {
+        const hay = `${d.id} ${d.name} ${d.kind}`.toLowerCase();
+        return hay.includes(needle) || needle.includes(d.kind);
+      });
+      return fuzzy ?? stores[0];
+    };
+    for (const dm of raw.dataModel as DataModelEntity[]) {
+      if (!dm?.id) continue;
+      const alreadyLinked = (dm.links ?? []).some(
+        (l) => l.relationship === "stored_in" || storeById.has(l.target),
+      );
+      if (alreadyLinked) continue;
+      const target = resolveStore(dm.storage ?? "");
+      if (!target) continue;
+      pushEdge(edges, nodes, dm.id, target.id, "fact", 1);
+    }
+  }
 
   // ---- Validated edges (promoted dreams) ----
   for (const e of raw.validated.edges ?? []) {

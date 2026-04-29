@@ -172,33 +172,61 @@ const EXECUTION_KEYWORDS = [
 ];
 
 const GRAPH_WRITE_KEYWORDS = [
-  'update dreamgraph', 'enrich', 'register entity', 'add entity',
-  'seed data', 'capture decision', 'record adr', 'document decision',
-  'add adr', 'graph node', 'register ui', 'scan ui', 'ui element',
+  'update dreamgraph', 'update the dreamgraph', 'update knowledge graph',
+  'enrich', 'enrich seed', 'register entity', 'add entity', 'edit entity',
+  'modify entity', 'seed data', 'capture decision', 'record adr',
+  'document decision', 'add adr', 'log adr', 'graph node',
+  'register ui', 'scan ui', 'ui element', 'ui_registry', 'ui registry',
   'graph update', 'graph mutation', 'update the graph', 'sync the graph',
   'feature status', 'workflow status', 'transitional status', 'in-progress',
   'in progress', 'under construction', 'completion status', '4/6',
+  'modify api surface', 'modify_api_surface', 'register api', 'add api',
+  'solidify insight', 'solidify_cognitive_insight',
 ];
 
 const COGNITIVE_RUN_KEYWORDS = [
-  'dream cycle', 'normalize dreams', 'nightmare', 'lucid', 'cognitive',
-  'schedule', 'unschedule',
+  // High-level commands.
+  'dream cycle', 'dream_cycle', 'run a dream', 'run dream', 'trigger dream',
+  'start dream', 'kick off a dream', 'kick off dream', 'retry dream',
+  'normalize dreams', 'normalize_dreams', 'nightmare', 'nightmare_cycle',
+  'lucid', 'lucid_dream', 'lucid_action', 'wake_from_lucid', 'wake from lucid',
+  // Generic cognitive vocabulary.
+  'cognitive', 'cognition', 'rem ', 'rem-only', 'rem state', 'awake state',
+  'wake state', 'cognitive state', 'cognitive cycle', 'cognitive violation',
+  'state machine', 'state violation',
+  // Strategy names — every dream strategy currently in the graph.
+  'llm_dream', 'llm dream', 'gap_detection', 'gap detection',
+  'weak_reinforcement', 'weak reinforcement', 'cross_domain', 'cross domain',
+  'missing_abstraction', 'missing abstraction', 'symmetry_completion',
+  'symmetry completion', 'tension_directed', 'tension directed',
+  'causal_replay', 'causal replay', 'reflective', 'pgo_wave', 'pgo wave',
+  'orphan_bridging', 'orphan bridging', 'schema_grounding', 'schema grounding',
+  // Scheduling vocabulary.
+  'schedule', 'unschedule', 'scheduled dream', 'cron',
 ];
 
 const DOCS_KEYWORDS = [
-  'export docs', 'living doc', 'mermaid', 'diagram', 'visualize',
-  'visualise', 'visual flow', 'render diagram', 'archetype', 'autodocs',
+  'export docs', 'living doc', 'living docs', 'export_living_docs',
+  'mermaid', 'diagram', 'visualize', 'visualise', 'visual flow',
+  'generate visual', 'generate_visual_flow', 'render diagram', 'archetype',
+  'dream archetype', 'export archetype', 'export_dream_archetypes',
+  'autodocs', 'auto docs', 'ui migration', 'migration plan',
+  'generate_ui_migration_plan',
 ];
 
 const DISCIPLINE_KEYWORDS = [
-  'discipline session', 'disciplined execution', 'tdd session',
-  'plan-do-verify',
+  'discipline session', 'discipline_start_session', 'disciplined execution',
+  'tdd session', 'plan-do-verify', 'plan do verify', 'plan and verify',
+  'discipline transition', 'discipline_transition', 'submit plan',
+  'approve plan', 'discipline_check_tool', 'discipline_verify',
 ];
 
 const PROJECT_SCAN_KEYWORDS = [
-  'scan', 'rescan', 're-scan', 'init graph', 'rebuild graph',
-  'refresh graph', 'reindex', 're-index', 'bootstrap graph',
-  'extract api surface',
+  'scan', 'rescan', 're-scan', 'scan project', 'scan_project',
+  'init graph', 'init_graph', 'rebuild graph', 'refresh graph',
+  'reindex', 're-index', 'bootstrap graph', 'bootstrap the graph',
+  'extract api surface', 'extract_api_surface', 'api surface',
+  'scan datastore', 'datastore scan', 'datastores/scan',
 ];
 
 function _hasAny(prompt: string, keywords: string[]): boolean {

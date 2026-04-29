@@ -1,8 +1,8 @@
 ![DreamGraph](assets/dreamgraph.jpeg)
 
-# DreamGraph v8.1.0 — Atlas
+# DreamGraph v8.2.0 — Bedrock
 
-![Version](https://img.shields.io/badge/version-8.1.0-blue)
+![Version](https://img.shields.io/badge/version-8.2.0-blue)
 ![VS%20Code](https://img.shields.io/badge/VS%20Code-extension-0098FF?logo=visualstudiocode&logoColor=white)
 ![MCP](https://img.shields.io/badge/MCP-enabled-7C3AED)
 ![Node.js](https://img.shields.io/badge/Node.js-20%2B-339933?logo=nodedotjs&logoColor=white)
@@ -48,6 +48,7 @@ The auto-generated technical reference (every tool, every parameter, every schem
 - **CLI (`dg`)** — instance creation, attach/detach, start/stop, status, scan, enrich, schedule, export, fork, and migration
 - **VS Code extension** — chat, dashboard, Explorer (interactive graph + curated mutations), changed-files view, daemon connection, and local support tools
 - **Knowledge graph + cognitive engine** — features, workflows, data model, tensions, validated relationships, and dream-cycle reasoning
+- **Datastore-as-Hub** — first-class `datastore` entities, live schema introspection (`scan_database`), and the `schema_grounding` dream strategy for multi-repo SaaS projects sharing a backend (set `DATABASE_URL`; inert otherwise)
 
 ![DreamGraph Architect with the DreamGraph Explorer in VS Code](assets/dreamgraph-v8-explorer-in-architect-2.png)
 

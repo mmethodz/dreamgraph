@@ -40,7 +40,7 @@ export interface LinkMeta {
 /** A rich cross-link (graph edge) between any two entities */
 export interface GraphLink {
   target: string;
-  type: "feature" | "workflow" | "data_model" | "capability";
+  type: "feature" | "workflow" | "data_model" | "capability" | "datastore";
   relationship: string;
   description: string;
   strength: string;
@@ -174,11 +174,47 @@ export interface CapabilityEntity extends ResourceEntry {
 }
 
 // ---------------------------------------------------------------------------
+// Datastores (per plans/DATASTORE_AS_HUB.md, Slice 1)
+//
+// A `datastore` is a first-class entity representing a shared backend store
+// (typically the project's primary database). It anchors `data_model`
+// entities via implicit `stored_in` edges so multi-repo SaaS projects show
+// a visible hub in the graph.
+//
+// `kind` is open-ended for future backends (mysql, sqlite, mongo, redis,
+// blob_storage, event_bus, …). Slice 1 only ships the `postgres` path.
+// ---------------------------------------------------------------------------
+
+export interface DatastoreTable {
+  schema: string;
+  name: string;
+  columns?: number;
+  fk_count?: number;
+  rows_estimate?: number | null;
+}
+
+export interface Datastore extends ResourceEntry {
+  kind: "postgres" | "mysql" | "sqlite" | "mongo" | "redis" | "blob_storage" | "event_bus" | "other";
+  /** Sanitized connection-string preview (no password). */
+  url_hint?: string;
+  /** Repo names that share this datastore. */
+  repos?: string[];
+  /** Tables/collections/topics introspected from the backend (Slice 2). */
+  tables?: DatastoreTable[];
+  /** ISO timestamp of the last successful schema scan. */
+  last_scanned_at?: string;
+  /** Free-form tags (e.g. "shared", "saas", "primary"). */
+  tags?: string[];
+  /** Lifecycle status — same vocabulary as other entities. */
+  status?: string;
+}
+
+// ---------------------------------------------------------------------------
 // Resource Index
 // ---------------------------------------------------------------------------
 
 export interface IndexEntry {
-  type: "feature" | "workflow" | "data_model" | "capability";
+  type: "feature" | "workflow" | "data_model" | "capability" | "datastore";
   uri: string;
   name: string;
   source_repo: string;

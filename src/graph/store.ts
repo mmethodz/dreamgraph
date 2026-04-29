@@ -13,6 +13,7 @@ import type {
   Workflow,
   DataModelEntity,
   CapabilityEntity,
+  Datastore,
   DreamGraphFile,
   ValidatedEdgesFile,
   CandidateEdgesFile,
@@ -80,6 +81,7 @@ export interface GraphRawSnapshot {
   workflows: Workflow[];
   dataModel: DataModelEntity[];
   capabilities: CapabilityEntity[];
+  datastores: Datastore[];
   dreamGraph: DreamGraphFile;
   validated: ValidatedEdgesFile;
   candidates: CandidateEdgesFile;
@@ -96,6 +98,7 @@ export async function loadGraphRaw(): Promise<GraphRawSnapshot> {
     workflows,
     dataModel,
     capabilities,
+    datastoresRaw,
     dreamGraph,
     validated,
     candidates,
@@ -105,6 +108,7 @@ export async function loadGraphRaw(): Promise<GraphRawSnapshot> {
     safe(() => loadJsonArray<Workflow>("workflows.json"), []),
     safe(() => loadJsonArray<DataModelEntity>("data_model.json"), []),
     safe(() => loadJsonArray<CapabilityEntity>("capabilities.json"), []),
+    safe(() => loadJsonArray<unknown>("datastores.json"), []),
     safe(() => loadJsonData<DreamGraphFile>("dream_graph.json"), EMPTY_DREAM_GRAPH),
     safe(
       () => loadJsonData<ValidatedEdgesFile>("validated_edges.json"),
@@ -117,11 +121,17 @@ export async function loadGraphRaw(): Promise<GraphRawSnapshot> {
     safe(() => loadJsonData<TensionFile>("tension_log.json"), EMPTY_TENSIONS),
   ]);
 
+  // Strip template-stub entries (entries with `_schema` / `_note` markers).
+  const datastores: Datastore[] = (datastoresRaw as Array<Record<string, unknown>>)
+    .filter((d) => d._schema === undefined && d._note === undefined)
+    .map((d) => d as unknown as Datastore);
+
   return {
     features,
     workflows,
     dataModel,
     capabilities,
+    datastores,
     dreamGraph,
     validated,
     candidates,
