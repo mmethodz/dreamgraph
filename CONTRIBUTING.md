@@ -73,3 +73,10 @@ without review:
 
 Do **not** open public issues or PRs for security vulnerabilities. Follow the
 private disclosure path in [SECURITY.md](SECURITY.md).
+
+## Want to help without writing code?
+
+If you'd like to support DreamGraph but a code contribution isn't the right
+fit, [sponsorship](https://github.com/sponsors/mmethodz) is the most direct
+way to keep the project moving. See [SPONSORS.md](SPONSORS.md) for the tier
+ladder and the current funding goal.

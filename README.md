@@ -46,13 +46,19 @@ The auto-generated technical reference (every tool, every parameter, every schem
 
 DreamGraph is built and maintained by a solo developer on aging hardware. If this tool saves your architecture team time — debugging a multi-repo system, onboarding a new engineer, or just keeping a SaaS backend's data model honest — please consider sponsoring.
 
+[![Sponsor on GitHub](https://img.shields.io/badge/Sponsor-mmethodz-EA4AAA?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/mmethodz)
+
+**Current goal: $300/mo** to fund a 64 GB DDR5 / NVMe dev machine that can run the upcoming multi-engine datastore test matrix (Postgres + MySQL + MSSQL + Mongo + Redis containers in parallel) without thermal-throttling. See the [live progress on the sponsors page](https://github.com/sponsors/mmethodz).
+
 Sponsorship directly funds:
 
-- **CI infrastructure** for the multi-engine datastore tests (Postgres, MySQL, MSSQL, Mongo, Redis containers)
 - **A dev machine that doesn't catch fire** when running 20 DreamGraph instances next to a Postgres container and a WSL kernel
-- **More frequent releases** — fewer hours spent on contract work means more hours on the daemon
+- **CI infrastructure** for the multi-engine datastore tests on the v8.3.0 → v8.9.0 roadmap (SQLite, MySQL, MSSQL, MongoDB, Redis, blob storage, event bus)
+- **More frequent releases** — fewer hours spent on contract work means more hours on the daemon, the cognitive engine, the VS Code Architect, and the documentation
 
-[**:sparkling_heart: Sponsor on GitHub**](https://github.com/sponsors/mmethodz)
+Tier ladder: $5/mo (sponsor badge + name in [`SPONSORS.md`](SPONSORS.md)) · $10/mo (release-notes thanks) · $25/mo (logo in this README) · $100/mo (priority issue triage) · $500/mo (logo + monthly office hour) · $1,000/mo (embedded support in your team chat). One-time tiers cover release-notes mentions, pair programming, consulting, sponsored bugfixes, and contract work.
+
+[**:sparkling_heart: Sponsor on GitHub →**](https://github.com/sponsors/mmethodz)
 
 ## What DreamGraph Includes
 
