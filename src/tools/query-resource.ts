@@ -16,14 +16,25 @@ import { success, error, safeExecute } from "../utils/errors.js";
 import { logger } from "../utils/logger.js";
 import type { ToolResponse } from "../types/index.js";
 
-/** Map resource URIs to their data files */
+/** Map resource URIs to their data files.
+ *
+ * Must stay in sync with the resources registered in
+ * src/resources/register.ts and src/cognitive/register.ts. Any URI exposed
+ * via `server.resource(...)` that is backed by a JSON file in `data/` should
+ * also be queryable through this tool, otherwise the architect (and any
+ * other MCP client using `query_resource`) sees INVALID_URI even though the
+ * raw MCP `resources/read` would succeed.
+ */
 const URI_TO_FILE: Record<string, string> = {
+  // System resources (src/resources/register.ts)
   "system://overview": "system_overview.json",
   "system://features": "features.json",
   "system://workflows": "workflows.json",
   "system://data-model": "data_model.json",
+  "system://datastores": "datastores.json",
   "system://capabilities": "capabilities.json",
   "system://index": "index.json",
+  // Cognitive / dream resources (src/cognitive/register.ts)
   "dream://graph": "dream_graph.json",
   "dream://candidates": "candidate_edges.json",
   "dream://validated": "validated_edges.json",
@@ -31,6 +42,14 @@ const URI_TO_FILE: Record<string, string> = {
   "dream://history": "dream_history.json",
   "dream://adrs": "adr_log.json",
   "dream://ui-registry": "ui_registry.json",
+  "dream://threats": "threat_log.json",
+  "dream://archetypes": "dream_archetypes.json",
+  "dream://metacognition": "meta_log.json",
+  "dream://events": "event_log.json",
+  "dream://story": "system_story.json",
+  "dream://schedules": "schedules.json",
+  "dream://lucid": "lucid_log.json",
+  // Ops resources
   "ops://api-surface": "api_surface.json",
 };
 
