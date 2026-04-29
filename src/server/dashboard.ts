@@ -625,6 +625,7 @@ const DREAM_STRATEGIES: string[] = [
   "causal_replay",
   "pgo_wave",
   "llm_dream",
+  "orphan_bridging",
 ];
 
 async function renderSchedules(toast?: string): Promise<string> {
