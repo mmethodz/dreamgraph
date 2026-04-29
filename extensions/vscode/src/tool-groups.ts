@@ -70,6 +70,11 @@ export const TOOL_GROUPS = {
     'get_cognitive_preamble',
     'get_remediation_plan',
     'query_self_metrics',
+    // ADR query is a pure read that pairs naturally with cognitive
+    // inspection ("why was X decided?", "is there an ADR covering Y?").
+    // Keeping it here means follow-up verification of a freshly-recorded
+    // ADR doesn't depend on primed-tool sibling expansion.
+    'query_architecture_decisions',
   ],
 
   /** Cognitive run / mutate. */
@@ -169,6 +174,17 @@ const EXECUTION_KEYWORDS = [
   'terminal', 'powershell', 'bash', 'cmd', 'ripgrep', 'grep', 'rg ',
   'repo-wide search', 'search the repo', 'find callers', 'run npm',
   'npm run', 'pnpm', 'yarn', 'build', 'test', 'lint', 'commandline', 'execute',
+];
+
+// Read-leaning ADR vocabulary. Distinct from GRAPH_WRITE_KEYWORDS so a
+// prompt like "which ADRs cover the lazy-create rule?" exposes the ADR
+// group without being misclassified as a graph mutation.
+const ADR_READ_KEYWORDS = [
+  'adr', 'adrs', 'architecture decision', 'architecture decisions',
+  'decision log', 'decision record', 'decision records',
+  'guard rail', 'guard rails', 'guardrail', 'guardrails',
+  'query adr', 'list adr', 'list adrs', 'show adr', 'show adrs',
+  'which adr', 'which adrs', 'find adr', 'verify adr', 'check adr',
 ];
 
 const GRAPH_WRITE_KEYWORDS = [
@@ -315,6 +331,10 @@ export function selectToolGroups(args: {
     groups.push('graph_write', 'adr');
     mutating = true;
     reasons.push('keyword[graph_write] → graph_write+adr');
+  }
+  if (_hasAny(prompt, ADR_READ_KEYWORDS)) {
+    groups.push('adr');
+    reasons.push('keyword[adr_read] → adr');
   }
   if (_hasAny(prompt, COGNITIVE_RUN_KEYWORDS)) {
     groups.push('cognitive_read', 'cognitive_run', 'scheduler');

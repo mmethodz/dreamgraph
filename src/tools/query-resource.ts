@@ -128,8 +128,20 @@ export function registerQueryResourceTool(server: McpServer): void {
               );
             }
 
-            // READ-ONLY: Load resource data from cached JSON
-            const data = await loadJsonData<unknown>(filename);
+            let data: unknown;
+            try {
+              // READ-ONLY: Load resource data from cached JSON
+              data = await loadJsonData<unknown>(filename);
+            } catch (err) {
+              if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
+                logger.debug(
+                  `query_resource treating missing backing file as empty resource: uri="${uri}", filename="${filename}"`
+                );
+                data = uri === "system://overview" ? null : [];
+              } else {
+                throw err;
+              }
+            }
 
             // If no filter, return the full dataset
             if (!filter || Object.keys(filter).length === 0) {

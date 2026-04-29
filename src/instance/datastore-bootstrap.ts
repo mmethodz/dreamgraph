@@ -64,7 +64,21 @@ async function isUnconfigured(): Promise<boolean> {
 export async function autoSeedPrimaryDatastore(
   repos: Record<string, string>,
 ): Promise<void> {
+  const path = dataPath(FILENAME);
   const url = process.env.DATABASE_URL;
+
+  if (!existsSync(path)) {
+    try {
+      await atomicWriteFile(path, JSON.stringify([], null, 2));
+      invalidateCache(FILENAME);
+      logger.debug("Initialized datastores.json with [] during instance startup");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn(`Failed to initialize datastores.json: ${msg}`);
+      return;
+    }
+  }
+
   if (!url || url.trim().length === 0) return;
 
   if (!(await isUnconfigured())) return;
@@ -86,7 +100,7 @@ export async function autoSeedPrimaryDatastore(
 
   try {
     await atomicWriteFile(
-      dataPath(FILENAME),
+      path,
       JSON.stringify([record], null, 2),
     );
     invalidateCache(FILENAME);
