@@ -258,6 +258,7 @@ const CSS = `
   th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-dim); padding: 6px 10px; border-bottom: 1px solid var(--border); }
   td { padding: 8px 10px; border-bottom: 1px solid var(--border); font-size: 13px; }
   tr:last-child td { border-bottom: none; }
+  .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   code, .mono { font-family: var(--mono); font-size: 12px; }
   .kv { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid var(--border); }
   .kv:last-child { border-bottom: none; }
@@ -1298,7 +1299,7 @@ async function renderConfig(savedSection?: string): Promise<string> {
       <code>data_model</code> entities will anchor to it as a graph hub.
     </p>`;
   } else {
-    body += `<table class="table">
+    body += `<div class="table-wrap"><table class="table">
       <thead><tr><th>ID</th><th>Kind</th><th>Repos</th><th>Tables</th><th>Last Scanned</th><th>Actions</th></tr></thead>
       <tbody>`;
     for (const d of datastores) {
@@ -1320,10 +1321,10 @@ async function renderConfig(savedSection?: string): Promise<string> {
         <td>${reposStr}</td>
         <td>${tablesCell}</td>
         <td>${lastScanned}</td>
-        <td><button class="btn btn-small" data-scan-id="${escId}">Sync schema</button></td>
+        <td style="white-space:nowrap"><button class="btn btn-secondary" data-scan-id="${escId}">Sync schema</button></td>
       </tr>`;
     }
-    body += `</tbody></table>
+    body += `</tbody></table></div>
     <p class="hint" id="datastore-scan-result" style="margin:8px 0 0 0;color:#888">
       Click <strong>Sync schema</strong> to introspect tables via <code>scan_database</code>.
       Datastore records anchor <code>data_model</code> entities via implicit
