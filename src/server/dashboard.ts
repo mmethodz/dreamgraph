@@ -1009,7 +1009,7 @@ async function renderConfig(savedSection?: string): Promise<string> {
         <div class="form-row">
           <label>Provider</label>
           <select name="provider" id="llm-provider" onchange="window.__dgUpdateProviderUrl()">
-            ${(["ollama", "openai", "anthropic", "sampling", "none"] as const).map(p =>
+            ${(["ollama", "lmstudio", "openai", "anthropic", "sampling", "none"] as const).map(p =>
               `<option value="${p}" ${llmCfg.provider === p ? "selected" : ""}>${p}</option>`
             ).join("")}
           </select>
@@ -1092,6 +1092,7 @@ async function renderConfig(savedSection?: string): Promise<string> {
     (function() {
       var PROVIDER_URLS = {
         ollama:    'http://localhost:11434',
+        lmstudio:  'http://localhost:1234/v1',
         openai:    'https://api.openai.com/v1',
         anthropic: 'https://api.anthropic.com/v1',
         sampling:  '',
@@ -1115,6 +1116,9 @@ async function renderConfig(savedSection?: string): Promise<string> {
           'deepseek-r1:8b', 'deepseek-r1:32b', 'gemma3:12b',
           'phi4:14b', 'codellama:13b',
         ],
+        // LM Studio model ids depend on what the user has loaded;
+        // leave empty so the UI defaults to the custom-name input.
+        lmstudio: [],
         sampling: [],
         none: [],
       };
