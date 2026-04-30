@@ -736,6 +736,7 @@ export async function setArchitectApiKeyCommand(
         { label: "anthropic", description: "Anthropic (Claude)" },
         { label: "openai", description: "OpenAI (GPT)" },
         { label: "ollama", description: "Ollama (local)" },
+        { label: "lmstudio", description: "LM Studio (local OpenAI-compatible server)" },
       ],
       { placeHolder: "Select a provider first" },
     );
@@ -746,10 +747,16 @@ export async function setArchitectApiKeyCommand(
     await svc.architectLlm.loadConfig();
   }
 
-  // Step 2: Ollama doesn't need a key
+  // Step 2: Local providers don't need a real API key
   if (provider === "ollama") {
     vscode.window.showInformationMessage(
       "DreamGraph: Ollama does not require an API key.",
+    );
+    return;
+  }
+  if (provider === "lmstudio") {
+    vscode.window.showInformationMessage(
+      "DreamGraph: LM Studio does not require an API key (a placeholder is sent automatically).",
     );
     return;
   }

@@ -1519,7 +1519,7 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
     const capabilities = this.architectLlm?.getModelCapabilities(provider as ArchitectProvider, model) ?? { textAttachments: false, imageAttachments: false };
     void this.postMessage({
       type: 'updateModels',
-      providers: ['anthropic', 'openai', 'ollama'],
+      providers: ['anthropic', 'openai', 'ollama', 'lmstudio'],
       models,
       current: { provider, model },
       capabilities,
@@ -1537,9 +1537,15 @@ export class ChatPanel implements vscode.WebviewViewProvider, vscode.Disposable 
         : provider === 'openai' ? OPENAI_MODELS
         : [];
       const defaultModel = models[0] ?? '';
-      const apiKey = (provider !== 'ollama')
-        ? (await this.architectLlm.getApiKey(provider) ?? '')
-        : '';
+      // ollama uses no API key; lmstudio uses a fixed literal placeholder
+      // (LM Studio ignores the auth header but the OpenAI-compat code path
+      // sends one regardless).
+      let apiKey = '';
+      if (provider === 'lmstudio') {
+        apiKey = 'lm-studio';
+      } else if (provider !== 'ollama') {
+        apiKey = (await this.architectLlm.getApiKey(provider) ?? '');
+      }
       this.architectLlm.applyConfig({
         provider,
         model: defaultModel,
