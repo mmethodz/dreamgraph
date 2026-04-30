@@ -15,7 +15,7 @@ import {
   usesOpenAIResponsesApi,
 } from "./openai-responses-adapter";
 
-export type ArchitectProvider = "anthropic" | "openai" | "ollama";
+export type ArchitectProvider = "anthropic" | "openai" | "ollama" | "lmstudio";
 export type AnthropicEffort = "low" | "medium" | "high" | "xhigh" | "max";
 
 export interface ArchitectConfig {
@@ -239,6 +239,8 @@ export class ArchitectLlm implements vscode.Disposable {
       }
       case "ollama":
         return { textAttachments: true, imageAttachments: false };
+      case "lmstudio":
+        return { textAttachments: true, imageAttachments: false };
       default:
         return { textAttachments: false, imageAttachments: false };
     }
@@ -323,7 +325,12 @@ export class ArchitectLlm implements vscode.Disposable {
     const baseUrl = cfg.get<string>("baseUrl") || this._defaultBaseUrl(provider);
 
     let apiKey = "";
-    if (provider && provider !== "ollama") {
+    if (provider === "lmstudio") {
+      // LM Studio ignores the auth header but the OpenAI-compat code path
+      // sends `Authorization: Bearer <key>` unconditionally. A literal
+      // placeholder avoids "Bearer " (empty) which some setups reject.
+      apiKey = "lm-studio";
+    } else if (provider && provider !== "ollama") {
       apiKey = (await this._secretStorage.get(`dreamgraph.apiKey.${provider}`)) ?? "";
     }
 
@@ -350,6 +357,7 @@ export class ArchitectLlm implements vscode.Disposable {
       case "anthropic":
         return this._callAnthropic(config, messages, start, signal);
       case "openai":
+      case "lmstudio":
         return this._callOpenAI(config, messages, start, signal);
       case "ollama":
         return this._callOllama(config, messages, start, signal);
@@ -367,6 +375,7 @@ export class ArchitectLlm implements vscode.Disposable {
       case "anthropic":
         return this._streamAnthropic(config, messages, onChunk, start, signal);
       case "openai":
+      case "lmstudio":
         return this._streamOpenAI(config, messages, onChunk, start, signal);
       case "ollama":
         return this._streamOllama(config, messages, onChunk, start, signal);
@@ -389,6 +398,7 @@ export class ArchitectLlm implements vscode.Disposable {
       case "anthropic":
         return this._callAnthropicWithTools(config, messages, tools, start, rawMessages, signal);
       case "openai":
+      case "lmstudio":
         return this._callOpenAIWithTools(config, messages, tools, start, rawMessages, signal);
       case "ollama": {
         const resp = await this._callOllama(config, messages, start, signal);
@@ -1066,6 +1076,8 @@ export class ArchitectLlm implements vscode.Disposable {
         return "https://api.openai.com/v1";
       case "ollama":
         return "http://localhost:11434";
+      case "lmstudio":
+        return "http://localhost:1234/v1";
       default:
         return "";
     }
@@ -1078,7 +1090,7 @@ export class ArchitectLlm implements vscode.Disposable {
     if (!this._config.model) {
       throw new Error('Architect model name not set. Set "dreamgraph.architect.model" in settings.');
     }
-    if (this._config.provider !== "ollama" && !this._config.apiKey) {
+    if (this._config.provider !== "ollama" && this._config.provider !== "lmstudio" && !this._config.apiKey) {
       throw new Error(`No API key stored for ${this._config.provider}. Use "DreamGraph: Set Architect API Key" to store one.`);
     }
   }

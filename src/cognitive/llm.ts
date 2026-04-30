@@ -34,7 +34,7 @@ import { logger } from "../utils/logger.js";
 // Core types
 // ---------------------------------------------------------------------------
 
-export type LlmProviderType = "ollama" | "openai" | "anthropic" | "sampling" | "none";
+export type LlmProviderType = "ollama" | "lmstudio" | "openai" | "anthropic" | "sampling" | "none";
 
 export interface LlmConfig {
   provider: LlmProviderType;
@@ -172,11 +172,39 @@ class OllamaProvider implements LlmProvider {
 }
 
 // ---------------------------------------------------------------------------
-// OpenAI-Compatible Provider — Anthropic, OpenAI, Groq, etc.
+// OpenAI-Compatible Provider — Anthropic, OpenAI, Groq, LM Studio, etc.
 // ---------------------------------------------------------------------------
 
+/**
+ * Process-lifetime cache of (provider, model) pairs known to reject strict
+ * `response_format: json_schema`. When a downgrade has been detected once,
+ * subsequent requests for the same model skip straight to `json_object` mode
+ * to avoid wasting a round trip.
+ *
+ * Provider-agnostic — affects any OpenAI-compatible endpoint, including
+ * LM Studio runtimes that don't implement Structured Outputs and Ollama
+ * behind a compatibility shim.
+ */
+const _jsonSchemaUnsupported = new Set<string>();
+
+/** Heuristic: error body indicates the strict json_schema form is unsupported. */
+function _isJsonSchemaUnsupportedError(status: number, body: string): boolean {
+  if (status < 400 || status >= 500) return false;
+  const lower = body.toLowerCase();
+  if (!lower.includes("response_format") && !lower.includes("json_schema")) {
+    return false;
+  }
+  return (
+    lower.includes("unsupported") ||
+    lower.includes("not supported") ||
+    lower.includes("not support") ||
+    lower.includes("invalid") ||
+    lower.includes("unknown")
+  );
+}
+
 class OpenAiCompatibleProvider implements LlmProvider {
-  readonly name = "openai";
+  readonly name: string;
 
   constructor(
     private baseUrl: string,
@@ -184,7 +212,10 @@ class OpenAiCompatibleProvider implements LlmProvider {
     private apiKey: string,
     private defaultTemperature: number,
     private defaultMaxTokens: number,
-  ) {}
+    name: string = "openai",
+  ) {
+    this.name = name;
+  }
 
   async isAvailable(): Promise<boolean> {
     try {
@@ -207,38 +238,67 @@ class OpenAiCompatibleProvider implements LlmProvider {
     // "max_completion_tokens" instead of the legacy "max_tokens" parameter.
     const useNewTokenParam = /^(o[1-9]|gpt-[4-9]\.[1-9]|gpt-5)/.test(model);
 
-    const body: Record<string, unknown> = {
-      model,
-      messages: messages.map(m => ({ role: m.role, content: m.content })),
-      temperature: temp,
-      ...(useNewTokenParam
-        ? { max_completion_tokens: maxTokens }
-        : { max_tokens: maxTokens }),
+    const downgradeKey = `${this.name}:${model}`;
+    const knownUnsupported = _jsonSchemaUnsupported.has(downgradeKey);
+
+    const buildBody = (useStrictSchema: boolean): Record<string, unknown> => {
+      const body: Record<string, unknown> = {
+        model,
+        messages: messages.map(m => ({ role: m.role, content: m.content })),
+        temperature: temp,
+        ...(useNewTokenParam
+          ? { max_completion_tokens: maxTokens }
+          : { max_tokens: maxTokens }),
+      };
+
+      // Structured Outputs (strict schema) > basic JSON mode > free-form
+      if (options?.jsonSchema && useStrictSchema) {
+        body.response_format = {
+          type: "json_schema",
+          json_schema: {
+            name: options.jsonSchema.name,
+            strict: true,
+            schema: options.jsonSchema.schema,
+          },
+        };
+      } else if (options?.jsonSchema || options?.jsonMode) {
+        // Either jsonMode requested directly, or jsonSchema downgraded.
+        body.response_format = { type: "json_object" };
+      }
+
+      return body;
     };
 
-    // Structured Outputs (strict schema) > basic JSON mode > free-form
-    if (options?.jsonSchema) {
-      body.response_format = {
-        type: "json_schema",
-        json_schema: {
-          name: options.jsonSchema.name,
-          strict: true,
-          schema: options.jsonSchema.schema,
+    const callOnce = (useStrictSchema: boolean): Promise<Response> =>
+      fetch(`${this.baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${this.apiKey}`,
         },
-      };
-    } else if (options?.jsonMode) {
-      body.response_format = { type: "json_object" };
-    }
+        body: JSON.stringify(buildBody(useStrictSchema)),
+        signal: AbortSignal.timeout(120_000),
+      });
 
-    const res = await fetch(`${this.baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(120_000),
-    });
+    // First attempt: use strict schema if requested AND not known-unsupported.
+    let useStrict = !!options?.jsonSchema && !knownUnsupported;
+    let res = await callOnce(useStrict);
+
+    // One-shot downgrade: strict schema rejected → retry once with json_object.
+    if (!res.ok && useStrict) {
+      const errText = await res.text().catch(() => "unknown");
+      if (_isJsonSchemaUnsupportedError(res.status, errText)) {
+        _jsonSchemaUnsupported.add(downgradeKey);
+        logger.warn(
+          `LLM ${this.name}: model "${model}" rejected response_format=json_schema (${res.status}); ` +
+          `falling back to json_object for this process. Body: ${errText.slice(0, 200)}`,
+        );
+        useStrict = false;
+        res = await callOnce(false);
+      } else {
+        throw new Error(`OpenAI-compat ${res.status}: ${errText}`);
+      }
+    }
 
     if (!res.ok) {
       const errText = await res.text().catch(() => "unknown");
@@ -262,6 +322,11 @@ class OpenAiCompatibleProvider implements LlmProvider {
       stopReason: choice?.finish_reason,
     };
   }
+}
+
+/** Test-only: clear the json_schema downgrade cache. */
+export function _resetJsonSchemaDowngradeForTest(): void {
+  _jsonSchemaUnsupported.clear();
 }
 
 // ---------------------------------------------------------------------------
@@ -497,6 +562,14 @@ export function parseLlmConfig(): LlmConfig {
       baseUrl = process.env.DREAMGRAPH_LLM_URL ?? "http://localhost:11434";
       apiKey = "";
       break;
+    case "lmstudio":
+      model = process.env.DREAMGRAPH_LLM_MODEL ?? "";
+      baseUrl = process.env.DREAMGRAPH_LLM_URL ?? "http://localhost:1234/v1";
+      // LM Studio ignores the auth header, but the OpenAI-compat code path
+      // still sends one. A literal placeholder keeps both sides happy and
+      // avoids special-casing the request layer.
+      apiKey = process.env.DREAMGRAPH_LLM_API_KEY ?? "lm-studio";
+      break;
     case "openai":
       model = "gpt-4o-mini";
       baseUrl = process.env.DREAMGRAPH_LLM_URL ?? "https://api.openai.com/v1";
@@ -636,6 +709,9 @@ export function initLlmProvider(cfg?: LlmConfig): LlmProvider {
         logger.warn("LLM: OpenAI provider configured but no API key set (DREAMGRAPH_LLM_API_KEY)");
       }
       _provider = new OpenAiCompatibleProvider(c.baseUrl, c.model, c.apiKey, c.temperature, c.maxTokens);
+      break;
+    case "lmstudio":
+      _provider = new OpenAiCompatibleProvider(c.baseUrl, c.model, c.apiKey, c.temperature, c.maxTokens, "lmstudio");
       break;
     case "anthropic":
       if (!c.apiKey) {

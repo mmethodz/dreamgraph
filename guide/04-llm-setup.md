@@ -39,6 +39,7 @@ After editing: **`dg restart <name>`**. Config is read at startup.
 | `openai` | `https://api.openai.com/v1` | Most common. Needs `DREAMGRAPH_LLM_API_KEY`. |
 | `anthropic` | `https://api.anthropic.com` | Needs `DREAMGRAPH_LLM_API_KEY`. |
 | `ollama` | `http://localhost:11434` | Local. No API key. Default model `qwen3:8b`. |
+| `lmstudio` | `http://localhost:1234/v1` | Local. OpenAI-compatible server inside LM Studio. Load a model in the UI, start its server, set the model id. API key is ignored — the literal `lm-studio` is sent automatically. |
 | `sampling` | — | Uses the MCP client's own sampling capability. No URL/key needed. |
 | `none` | — | Disables LLM features. Structural strategies still work. |
 
@@ -131,6 +132,7 @@ For most users:
 - **OpenAI users:** `gpt-4o-mini` for both roles is a fine starting point. Upgrade Dreamer to `gpt-4o` or `gpt-5.5` if cycles feel shallow.
 - **Anthropic users:** `claude-3-5-haiku` for Normalizer, `claude-3-5-sonnet` for Dreamer.
 - **Local-first / privacy-first:** Ollama with `qwen3:8b` (default) or `qwen3:14b` if your machine can handle it. Cycles will be slower.
+- **LM Studio users:** any GGUF you've loaded in LM Studio works. Copy its model id from the LM Studio UI into `DREAMGRAPH_LLM_MODEL`. Start with the same model for Dreamer and Normalizer; split later if you have a smaller validator model loaded as well.
 
 ---
 

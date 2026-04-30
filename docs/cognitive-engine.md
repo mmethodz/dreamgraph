@@ -157,7 +157,7 @@ LLM settings are configured via environment variables or per-instance `config/en
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DREAMGRAPH_LLM_PROVIDER` | `ollama` | Provider type: `ollama`, `openai`, `anthropic`, `sampling`, `none` |
+| `DREAMGRAPH_LLM_PROVIDER` | `ollama` | Provider type: `ollama`, `lmstudio`, `openai`, `anthropic`, `sampling`, `none` |
 | `DREAMGRAPH_LLM_MODEL` | `qwen3:8b` | Base model name used unless Dreamer/Normalizer overrides are set |
 | `DREAMGRAPH_LLM_URL` | `http://localhost:11434` | API base URL |
 | `DREAMGRAPH_LLM_API_KEY` | — | API key (required for `openai` and `anthropic` providers) |

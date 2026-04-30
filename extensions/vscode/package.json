@@ -212,10 +212,11 @@
           "enum": [
             "openai",
             "anthropic",
-            "ollama"
+            "ollama",
+            "lmstudio"
           ],
           "default": "anthropic",
-          "description": "LLM provider for the Architect model."
+          "description": "LLM provider for the Architect model. Local options: ollama (default :11434), lmstudio (default :1234/v1)."
         },
         "dreamgraph.architect.model": {
           "type": "string",

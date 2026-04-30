@@ -24,7 +24,7 @@ You do **not** need to read the guide top-to-bottom. Jump to whichever page matc
 | 1 | [What is DreamGraph?](01-what-is-dreamgraph.md) | The mental model. Graph + dreams + cognitive engine, in plain language. |
 | 2 | [Installation](02-installation.md) | One-command install, prerequisites, common install gotchas. |
 | 3 | [Your first instance](03-first-instance.md) | `dg init`, attaching a repo, starting the daemon. |
-| 4 | [LLM setup](04-llm-setup.md) | Connecting Ollama, OpenAI, or Anthropic. Choosing a model. |
+| 4 | [LLM setup](04-llm-setup.md) | Connecting Ollama, LM Studio, OpenAI, or Anthropic. Choosing a model. |
 | 5 | [Bootstrapping the graph](05-bootstrapping-the-graph.md) | What `dg scan` actually does. Where your data lives. |
 | 6 | [The VS Code extension](06-vs-code-extension.md) | A tour of the sidebar: Architect chat, dashboard, Explorer, changed files. |
 | 7 | [The Explorer](07-the-explorer.md) | Browsing the graph, inspector, tensions, candidates, search. |

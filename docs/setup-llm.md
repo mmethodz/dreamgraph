@@ -20,6 +20,38 @@ DREAMGRAPH_LLM_URL=https://api.openai.com/v1
 DREAMGRAPH_LLM_API_KEY=your-api-key-here
 ```
 
+### Local providers (Ollama and LM Studio)
+
+DreamGraph supports two local-inference servers as peer options. Pick the one
+you already use — there is no preferred choice.
+
+**Ollama** (default):
+
+```bash
+DREAMGRAPH_LLM_PROVIDER=ollama
+DREAMGRAPH_LLM_URL=http://localhost:11434
+DREAMGRAPH_LLM_MODEL=qwen3:8b
+```
+
+**LM Studio** (OpenAI-compatible server):
+
+```bash
+DREAMGRAPH_LLM_PROVIDER=lmstudio
+DREAMGRAPH_LLM_URL=http://localhost:1234/v1
+DREAMGRAPH_LLM_API_KEY=lm-studio        # ignored by LM Studio; any non-empty value works
+DREAMGRAPH_LLM_MODEL=<model-id-from-LM-Studio-UI>
+```
+
+LM Studio notes:
+
+- Default port `1234` (configurable in LM Studio's *Developer* / *Server* tab).
+- `DREAMGRAPH_LLM_MODEL` must match the loaded-model id shown in LM Studio's
+  UI — often a long file-path-shaped string. Copy it verbatim.
+- The first request after a model load is slow (cold load). If you hit a
+  cycle timeout on the very first dream, raise `DG_DREAM_TIMEOUT_MS`.
+- LM Studio uses the same OpenAI dialect as the `openai` provider, so the
+  Dreamer / Normalizer split below works the same way.
+
 ### Dreamer / Normalizer split configuration
 
 DreamGraph also supports separate settings for the two main cognitive LLM roles:

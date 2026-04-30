@@ -77,6 +77,10 @@ Tier ladder: $5/mo (sponsor badge + name in [`SPONSORS.md`](SPONSORS.md)) · $10
 
 DreamGraph's VS Code Architect supports OpenAI `gpt-5.5` models through the OpenAI Responses API, following OpenAI's [migration guide from Chat Completions to Responses](https://developers.openai.com/api/docs/guides/migrate-to-responses). GPT-5.5 Architect calls use Responses-style input, function-tool definitions, tool-call output replay, reasoning effort, and text verbosity controls. DreamGraph currently uses the Responses API statelessly: DreamGraph's knowledge graph remains the source of memory and context, while prior conversation/tool context is replayed explicitly when needed.
 
+## Local LLMs (Ollama and LM Studio)
+
+DreamGraph runs against local model servers as first-class peers of the hosted APIs. Both the cognitive engine and the VS Code Architect support **Ollama** (default `http://localhost:11434`) and **LM Studio** (default `http://localhost:1234/v1`, OpenAI-compatible). Pick the one you already use — there is no preferred option. See [docs/setup-llm.md](docs/setup-llm.md) and [guide/04-llm-setup.md](guide/04-llm-setup.md) for the env-var blocks and Architect settings.
+
 ## Why DreamGraph
 
 DreamGraph is designed for development environments where architectural memory matters.
